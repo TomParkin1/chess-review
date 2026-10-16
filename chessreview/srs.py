@@ -205,10 +205,15 @@ def streak(conn: sqlite3.Connection, on: date | None = None) -> int:
 
 def record_line(conn: sqlite3.Connection, key: str, result: str, on: date | None = None) -> None:
     """Update (or create) the card for one of my repertoire positions after a drill attempt."""
+    record_key(conn, "line", key, result, on)
+
+
+def record_key(conn: sqlite3.Connection, kind: str, key: str, result: str, on: date | None = None) -> None:
+    """Update (or create) a keyed card: 'line', 'convert' or 'endgame'."""
     on = on or today()
     with conn:
-        conn.execute("INSERT OR IGNORE INTO cards (kind, key) VALUES ('line', ?)", (key,))
-    card = conn.execute("SELECT * FROM cards WHERE kind = 'line' AND key = ?", (key,)).fetchone()
+        conn.execute("INSERT OR IGNORE INTO cards (kind, key) VALUES (?, ?)", (kind, key))
+    card = conn.execute("SELECT * FROM cards WHERE kind = ? AND key = ?", (kind, key)).fetchone()
     box, due_on, mastered_on = schedule(card["box"], result, on)
     with conn:
         conn.execute(

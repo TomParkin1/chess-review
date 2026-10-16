@@ -76,6 +76,13 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   - `progress.py`: last N games vs the N before (`coach.progress_window`, game windows not weeks), metrics at my current
     level (`level.winning_chance` bands for conversion), rolling series, kinds per game, weekly training. `/progress`,
     `/api/progress/report`, summary sentence on Home. (Route fn for `/api/progress` is `analysis_progress`.)
+- v3 Convert (Milestone 3): `convert.py` + `data/endgames.toml` (15 Stockfish-checked endgames, 3 levels; a level
+  unlocks when the one before is solved). Won positions = first position per game at/above `level.winning_cp` (by
+  rating band) held on my next move; lost games first. `state()` decides won/failed per move (checkmate; Stockfish
+  resigns at mate <= 5 or +7 for 3 of my moves; any draw fails a win goal; convert fails below 40% of the bar; draw
+  goals hold for 15 moves). Playouts are stateless: the client sends all moves (`/api/play/move`, `/api/play/hint`),
+  Stockfish = `LiveEngine.analyse` at full strength. Cards: `srs.record_key(kind 'convert'|'endgame', key)`.
+  Page `/convert` (`static/convert.js`, eval hidden until the end); Today gets a "Convert" block.
 - Design rule: nothing is tuned to one rating. Derive from the engine, the current rating's band, or my rolling data.
 - Chessground `events.after` passes (orig, dest, metadata): always wrap handlers as `(o, d) => fn(o, d)`.
 - `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump
@@ -120,6 +127,6 @@ Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--conf
 ## v3 roadmap (plan approved; milestone by milestone, stop after each for testing)
 1. [x] Real-game training: threat check, blind positions + calm mix, puzzle quality, current-level judging
 2. [x] "Today" workout + progress report
-3. [ ] Convert won positions + essential endgames
+3. [x] Convert won positions + essential endgames
 4. [ ] Puzzle library (Lichess DB, every rating, puzzle rating)
 5. [ ] Self-review before the engine in new-games sessions

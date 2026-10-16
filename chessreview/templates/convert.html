@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Convert · Chess Review{% endblock %}
+{% block content %}
+<div class="layout game-layout">
+  <div class="board-col">
+    <div class="board-wrap"><div id="board" class="board"></div></div>
+  </div>
+
+  <div class="side-col">
+    <div class="report-panel">
+      <div class="report-head">
+        <h1>Convert</h1>
+        <p class="muted small" id="convert-intro">Win the positions you once had, against Stockfish at full strength.</p>
+      </div>
+      <div class="report-tabs" id="tabs">
+        <button data-tab="games" class="active">From your games</button>
+        <button data-tab="endgames">Essential endgames</button>
+      </div>
+
+      <div class="report-body" data-panel="games">
+        <p class="muted small" id="games-note"></p>
+        <div class="convert-list" id="games-list"></div>
+      </div>
+
+      <div class="report-body" data-panel="endgames" hidden>
+        <p class="muted small">Textbook positions every player needs. A level unlocks when you have solved the one before.</p>
+        <div id="endgame-list"></div>
+      </div>
+
+      <div class="report-body" data-panel="play" hidden>
+        <div class="review-head"><h2 id="play-title"></h2><span id="play-chip" class="chip"></span></div>
+        <p class="muted small" id="play-sub"></p>
+        <div class="prompt" id="play-prompt"></div>
+        <div class="feedback" id="play-feedback" hidden></div>
+        <div class="hint" id="play-tip" hidden></div>
+        <div class="solution-moves" id="play-moves"></div>
+        <div class="actions" id="play-actions">
+          <button class="btn" id="hint-btn" title="Show Stockfish's move (h)">💡 Hint</button>
+          <button class="btn" id="tip-btn">Technique tip</button>
+          <button class="btn" id="resign-btn">Give up</button>
+        </div>
+        <div id="play-done" hidden>
+          <div id="play-chart"></div>
+          <div class="actions">
+            <button class="btn primary" id="next-btn">Next ▶</button>
+            <button class="btn" id="retry-btn">Retry</button>
+            <button class="btn" id="analyse-btn">Analyse</button>
+            <a class="btn" id="game-btn" href="#" hidden>Open game</a>
+          </div>
+        </div>
+        <div id="analysis" hidden></div>
+        <div class="nav-row"><button class="btn small" id="list-btn">◀ All positions</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='convert.js') }}"></script>{% endblock %}

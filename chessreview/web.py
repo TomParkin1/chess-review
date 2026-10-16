@@ -11,7 +11,7 @@ import threading
 import chess
 from flask import Flask, Response, abort, g, jsonify, render_template, request
 
-from . import chesscom, coach, db, insights, level, progress, report, repertoire, session, srs
+from . import chesscom, coach, convert, db, insights, level, progress, report, repertoire, session, srs
 from .classify import (ADAPTIVE_BANDS, MODE_KEY, Eval, adaptive_enabled, ensure_classified,
                        thresholds_for)
 from .config import Config, effective_workers, load_config
@@ -398,6 +398,91 @@ def create_app(cfg: Config | None = None) -> Flask:
             item["mode"] = mode
             item["done_today"] = (item["game_id"], item["ply"]) in attempted
         return jsonify(items=items, block={k: v for k, v in block.items() if k != "items"})
+
+    # ------------------------------------------------------------ convert + endgames
+
+    @app.get("/convert")
+    def convert_page():
+        return render_template("convert.html")
+
+    @app.get("/api/convert")
+    def convert_overview():
+        c = conn()
+        ensure_classified(c, cfg)
+        rating = level.current_rating(c)
+        return jsonify(positions=convert.convert_overview(c), endgames=convert.endgame_overview(c),
+                       next=convert.next_convert(c), rating=rating, winning_cp=level.winning_cp(rating),
+                       levels=convert.LEVELS)
+
+    @app.get("/api/convert/task")
+    def convert_task():
+        task = convert.task_for(conn(), request.args.get("key", ""))
+        if task is None:
+            return jsonify(error="unknown position"), 404
+        return jsonify(task.as_dict())
+
+    def _replay(task: convert.Task, moves: list[str]) -> chess.Board:
+        """The playout so far; raises ValueError on an illegal move."""
+        board = chess.Board(task.fen)
+        for uci in moves:
+            move = chess.Move.from_uci(uci)
+            if move not in board.legal_moves:
+                raise ValueError(f"illegal move {uci}")
+            board.push(move)
+        return board
+
+    @app.post("/api/play/move")
+    def play_move():
+        """My move in a playout; Stockfish replies. Body: {key, moves (so far), uci, streak}."""
+        data = request.get_json(force=True)
+        c = conn()
+        task = convert.task_for(c, data.get("key", ""))
+        if task is None:
+            return jsonify(error="unknown position"), 404
+        try:
+            board = _replay(task, data.get("moves", []))
+            move = chess.Move.from_uci(data.get("uci", ""))
+            if move not in board.legal_moves:
+                raise ValueError(f"illegal move {data.get('uci')}")
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        me = chess.WHITE if task.color == "white" else chess.BLACK
+        rating = level.current_rating(c)
+        out = {"san": board.san(move), "uci": move.uci()}
+        board.push(move)
+        st = convert.state(task, board, None, int(data.get("streak", 0)), rating)
+        if st.status == "playing":
+            analysis = live.analyse(board)      # Stockfish's best reply; its eval is the position after it
+            reply = analysis.best
+            out |= {"reply_uci": reply.uci(), "reply_san": board.san(reply)}
+            board.push(reply)
+            ev = analysis.for_side(me)
+            out |= {"eval": str(ev), "cp": ev.as_cp()}
+            st = convert.state(task, board, ev, st.streak, rating)
+        out |= {"fen": board.fen(), "status": st.status, "reason": st.reason, "streak": st.streak}
+        return jsonify(out)
+
+    @app.post("/api/play/hint")
+    def play_hint():
+        data = request.get_json(force=True)
+        task = convert.task_for(conn(), data.get("key", ""))
+        if task is None:
+            return jsonify(error="unknown position"), 404
+        try:
+            board = _replay(task, data.get("moves", []))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        best = live.analyse(board).best
+        return jsonify(uci=best.uci() if best else None, san=board.san(best) if best else None)
+
+    @app.post("/api/convert/result")
+    def convert_result():
+        data = request.get_json(force=True)
+        task = convert.task_for(conn(), data.get("key", ""))
+        if task is None or data.get("result") not in REVIEW_RESULTS:
+            return jsonify(error="unknown position or result"), 400
+        srs.record_key(conn(), task.kind, task.card_key, data["result"])
+        return jsonify(ok=True)
 
     @app.get("/progress")
     def progress_page():

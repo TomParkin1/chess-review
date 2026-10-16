@@ -5,7 +5,12 @@ import { createPuzzle } from './puzzle.js';
 import { progressRing } from './widgets.js';
 
 const $ = id => document.getElementById(id);
-const ICONS = { reviews: '🔁', real: '⚔️', focus: '🎯', opening: '📖' };
+const ICONS = { reviews: '🔁', real: '⚔️', focus: '🎯', convert: '🏁', opening: '📖' };
+// Blocks played on another page: [link, label to start, label when done].
+const ELSEWHERE = {
+  opening: b => ['/openings#drill', 'Drill on Openings →', 'Drill again'],
+  convert: b => [`/convert?key=${encodeURIComponent(b.key)}`, 'Play it →', 'Play again'],
+};
 let plan = null;
 let block = null;      // the block being played: { id, title, ... }
 let queue = [];
@@ -69,11 +74,13 @@ async function loadPlan() {
 
 function renderBlock(b) {
   const status = b.done ? '✓' : ICONS[b.id] || '•';
-  const action = b.id === 'opening'
-    ? el('a', { class: `btn ${b.done ? '' : 'primary'}`, href: '/openings#drill' }, b.done ? 'Drill again' : 'Drill on Openings →')
+  const elsewhere = ELSEWHERE[b.id]?.(b);
+  const action = elsewhere
+    ? el('a', { class: `btn ${b.done ? '' : 'primary'}`, href: elsewhere[0] }, b.done ? elsewhere[2] : elsewhere[1])
     : b.done ? el('span', { class: 'chip solved' }, 'Done')
       : el('button', { class: 'btn', onclick: () => startBlock(b) }, b.finished ? 'Continue' : 'Start');
-  const count = b.id === 'opening' ? `${b.lines_due} due` : `${b.finished} / ${b.count}`;
+  const count = b.id === 'opening' ? `${b.lines_due} due` : b.id === 'convert' ? (b.done ? '1 / 1' : '0 / 1')
+    : `${b.finished} / ${b.count}`;
   return el('li', { class: `block-row ${b.done ? 'done' : ''}` },
     el('span', { class: 'block-icon' }, status),
     el('div', { class: 'block-text' }, el('strong', {}, b.title), el('div', { class: 'muted small' }, b.subtitle || '')),
@@ -82,7 +89,7 @@ function renderBlock(b) {
 }
 
 function nextBlock() {
-  return plan.blocks.find(b => !b.done && b.id !== 'opening') || null;
+  return plan.blocks.find(b => !b.done && !ELSEWHERE[b.id]) || null;
 }
 
 // ------------------------------------------------------------ playing a block

@@ -5,6 +5,7 @@ Blocks (sizes in config [coach]):
   real      real-game positions: today's new mistake cards plus calm positions I played well
   focus     puzzles on my #1 weakness (insights.weaknesses over my last 100 games), recomputed
             daily, so the focus moves as I improve
+  convert   one won position from my games to win against Stockfish (played on the Convert page)
   opening   due opening-line drills (played on the Openings page)
 
 The plan is frozen for the day the first time it is built (stored in meta), so finishing
@@ -15,7 +16,7 @@ import json
 import sqlite3
 from datetime import date
 
-from . import db, insights, report, srs
+from . import convert, db, insights, report, srs
 from .config import Config
 
 PLAN_KEY = "today_plan"
@@ -56,11 +57,16 @@ def build_plan(conn: sqlite3.Connection, cfg: Config, on: date) -> dict:
         {"id": "focus", "title": f"Focus: {weakness['title']}" if weakness else "Focus", "items": focus,
          "subtitle": weakness["detail"] if weakness else "", "train": weakness["train"] if weakness else None},
     ]
+    key = convert.next_convert(conn, on)
+    task = convert.task_for(conn, key) if key else None
+    if task:
+        blocks.append({"id": "convert", "title": "Convert a won position", "items": [], "key": key,
+                       "subtitle": f"{task.title} ({task.start_eval}): win it against Stockfish. {task.subtitle}."})
     lines = len(srs.due_lines(conn, "white", on)) + len(srs.due_lines(conn, "black", on))
     if lines:
         blocks.append({"id": "opening", "title": "Opening lines", "items": [], "lines_due": lines,
                        "subtitle": f"{lines} position{'s' if lines != 1 else ''} of your repertoire to drill."})
-    return {"day": on.isoformat(), "blocks": [b for b in blocks if b["items"] or b["id"] == "opening"]}
+    return {"day": on.isoformat(), "blocks": [b for b in blocks if b["items"] or b["id"] in ("opening", "convert")]}
 
 
 def with_progress(conn: sqlite3.Connection, plan: dict, on: date) -> dict:
@@ -69,10 +75,11 @@ def with_progress(conn: sqlite3.Connection, plan: dict, on: date) -> dict:
     attempted = attempted_today(conn, on)
     total = done = 0
     for block in plan["blocks"]:
-        if block["id"] == "opening":
-            drilled = conn.execute("SELECT COUNT(*) FROM cards WHERE kind = 'line' AND last_on = ?",
-                                   (day,)).fetchone()[0]
-            block["done"] = drilled > 0
+        if block["id"] in ("opening", "convert"):
+            kind = "line" if block["id"] == "opening" else "convert"
+            played = conn.execute("SELECT COUNT(*) FROM cards WHERE kind = ? AND last_on = ?",
+                                  (kind, day)).fetchone()[0]
+            block["done"] = played > 0
             block["count"], block["finished"] = 1, int(block["done"])
         else:
             block["count"] = len(block["items"])

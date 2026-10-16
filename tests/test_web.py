@@ -62,7 +62,7 @@ def test_upload_analyse_and_review(client):
     body = r.get_json()
     assert body["judgement"] == m["judgement"] and body["explanation"]  # same verdict as the game
 
-    for page in ("/", "/review", "/games", "/settings", "/insights", "/train", "/session", "/progress", f"/game/{m["game_id"]}"):
+    for page in ("/", "/review", "/games", "/settings", "/insights", "/train", "/session", "/progress", "/convert", f"/game/{m["game_id"]}"):
         assert c.get(page).status_code == 200
 
 
@@ -217,7 +217,7 @@ def test_today_and_progress_api(client):
     plan = today["plan"]
     assert plan["total"] > 0 and all("items" not in b for b in plan["blocks"])
     for b in plan["blocks"]:
-        if b["id"] == "opening":
+        if b["id"] in ("opening", "convert"):    # played on their own pages
             continue
         items = c.get(f"/api/today/{b['id']}").get_json()["items"]
         assert len(items) == b["count"]
@@ -225,3 +225,21 @@ def test_today_and_progress_api(client):
     assert c.get("/api/today/nonsense").status_code == 404
     report = c.get("/api/progress/report").get_json()
     assert report["games"] == 3 and report["summary"] and len(report["headline"]) == 6
+
+
+def test_endgame_playout_api(client):
+    c, _app = client
+    overview = c.get("/api/convert").get_json()
+    assert overview["endgames"] and overview["positions"] == []
+    key = "endgame/kq_k"
+    task = c.get(f"/api/convert/task?key={key}").get_json()
+    assert task["goal"] == "win" and task["color"] == "white"
+    r = c.post("/api/play/move", json={"key": key, "moves": [], "uci": "h1h5", "streak": 0}).get_json()
+    assert r["san"] == "Qh5+" and r["reply_uci"] and r["status"] == "playing"
+    bad = c.post("/api/play/move", json={"key": key, "moves": ["h1h5"], "uci": "h1h5"})
+    assert bad.status_code == 400
+    hint = c.post("/api/play/hint", json={"key": key, "moves": ["h1h5", r["reply_uci"]]}).get_json()
+    assert hint["uci"]
+    assert c.post("/api/convert/result", json={"key": key, "result": "solved"}).status_code == 200
+    statuses = {e["key"]: e["status"] for e in c.get("/api/convert").get_json()["endgames"]}
+    assert statuses[key] == "solved"

@@ -491,3 +491,18 @@ a.chip { text-decoration: none; }
 .stat .delta { font-size: 13px; font-weight: 700; color: var(--muted); margin-top: 4px; }
 .stat .delta.good, td.good { color: var(--green); }
 .stat .delta.bad, td.bad { color: var(--miss); }
+
+/* Convert: won positions and endgames */
+.convert-list, .endgame-level { display: grid; gap: 6px; }
+.endgame-level { margin-bottom: 14px; }
+.convert-row { display: grid; grid-template-columns: 92px 1fr auto auto; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: var(--panel-2); color: var(--text); border: 0; border-radius: 8px; padding: 10px 12px; font: inherit; cursor: pointer; }
+.convert-row:hover:not(:disabled) { background: var(--panel-3); }
+.convert-row.locked { opacity: .5; cursor: not-allowed; }
+.convert-row .chip { justify-self: start; }
+.chip.new { background: var(--panel-3); }
+.chip.mastered { background: var(--green); color: #fff; }
+.convert-what { font-weight: 700; }
+.result-loss { color: var(--miss); }
+.result-win { color: var(--green); }
+#play-chart { margin: 10px 0; }
