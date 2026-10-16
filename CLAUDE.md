@@ -8,7 +8,7 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 ## Running
 - Python 3.15 venv in `.venv` (Homebrew Python, not Anaconda): use `.venv/bin/python`.
 - Stockfish: `/opt/homebrew/bin/stockfish` (configurable in `config.toml`).
-- CLI: `.venv/bin/python -m chessreview import <files|dirs>`, `summary`,
+- CLI: `.venv/bin/python -m chessreview sync [--since all|3m|1m]`, `import <files|dirs>`, `summary`,
   `analyse [--limit N]`, `reclassify`, `mistakes [--limit N]`, `serve [--port 8000]`, `reset [--yes]`.
   Port 5000 is taken by macOS AirPlay Receiver, hence 8000.
 - Tests: `.venv/bin/pytest`.
@@ -16,11 +16,16 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 ## Layout
 - `config.toml`: all tunables (engine time/workers, classification thresholds, phase rules, DB path).
 - `chessreview/config.py`: loads config into dataclasses.
-- `chessreview/db.py`: SQLite schema (`games`, `positions`, `mistakes`, `meta`) and helpers. DB lives in `data/` (gitignored).
+- `chessreview/db.py`: SQLite schema + numbered `MIGRATIONS` (PRAGMA user_version; add a function, never edit
+  old ones). Tables: `games`, `positions`, `mistakes` (every move, both sides; `is_mine`, `mark`, `accuracy`),
+  `review_results`, `imports` (batches), `meta`. DB lives in `data/` (gitignored).
+- `chessreview/chesscom.py`: sync via the public API (archives -> months >= last synced month), one batch per sync.
+  Dedupe across sources = `link` OR `content_hash` (players|date|moves). API games carry clocks (`games.clocks_ms`).
+- `chessreview/report.py`: chess.com-style move marks (documented approximations), Lichess accuracy, time spent.
 - `chessreview/pgn_import.py`: PGN parsing, my colour/result, time class, dedupe (Link header, else sha1 of players+date+moves).
 - `chessreview/openings.py` + `chessreview/data/openings.tsv`: names openings from the moves using the Lichess chess-openings DB (CC0), matched by position. My chess.com exports have no ECO/ECOUrl/Link headers.
-- `chessreview/engine.py`: Stockfish analysis, worker pool, progress, caching. Checkmated positions store score_cp = ±10000 (MATED_CP), no engine call.
-- `chessreview/classify.py`: Lichess win-chance judgement per my move -> `mistakes` table. `ensure_classified()` rebuilds
+- `chessreview/engine.py`: Stockfish analysis (MultiPV 2, `ANALYSIS_VERSION`; older games re-analysed), worker pool, progress, caching. Checkmated positions store score_cp = ±10000 (MATED_CP), no engine call.
+- `chessreview/classify.py`: Lichess win-chance judgement per move (both sides) -> `mistakes` table, plus marks and game accuracy. My-mistake queries must filter `is_mine = 1`. `ensure_classified()` rebuilds
   automatically when config thresholds or `explain.VERSION` change (fingerprint in `meta`). Forced moves and the engine's
   own best move are always "good".
 - `chessreview/explain.py`: ordered list of rule functions (`RULES`), first match wins. Bump `VERSION` when changing output.
@@ -59,3 +64,11 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - [x] Stage 3: classification and explanations
 - [x] Stage 4: web UI (upload, game view, mistake review)
 - [x] Interactive review: live judging + hints + play-out, eval bar, analysis board
+
+## v2 roadmap (plan approved; build milestone by milestone, stop after each for testing)
+1. [x] Data foundation: migrations, chess.com sync, batches, clocks, MultiPV 2, both-side marks, accuracy
+2. [ ] New shell (chess.com-dark sidebar, icons, sounds, promotion, settings) + Game Report page
+3. [ ] Training: puzzle.js component, SRS cards + daily Train, New-games session + summary, Practice
+4. [ ] Home dashboard + Insights (trends, clock analysis, openings, top-3 weaknesses -> Train this)
+5. [ ] Openings: repertoire explorer + line drills (SRS)
+Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--config <copy config>`; never the real DB.

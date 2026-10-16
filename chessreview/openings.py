@@ -29,6 +29,23 @@ def _positions() -> dict[str, tuple[str, str]]:
     return index
 
 
+@lru_cache(maxsize=1)
+def book_positions() -> frozenset[str]:
+    """EPD of every position along every named line (for 'book move' marks)."""
+    seen = set()
+    with open(OPENINGS_TSV, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f, delimiter="\t"):
+            board = chess.Board()
+            for move in chess.pgn.read_game(io.StringIO(row["pgn"])).mainline_moves():
+                board.push(move)
+                seen.add(board.epd())
+    return frozenset(seen)
+
+
+def is_book(board_after_move: chess.Board) -> bool:
+    return board_after_move.epd() in book_positions()
+
+
 def family_of(name: str) -> str:
     """'Sicilian Defense: Najdorf Variation' -> 'Sicilian Defense'."""
     return name.split(":", 1)[0].strip()

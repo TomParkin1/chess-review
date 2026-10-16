@@ -17,13 +17,13 @@ from dataclasses import asdict, dataclass
 
 import chess
 
-from . import db, explain, phases
+from . import db, explain, openings, phases, report
 from .config import Config
 
 CP_CAP = 1000          # Lichess caps evals at +-10 pawns for win chances
 MATE_CP = 1000         # a forced mate counts as the cap
 SETTINGS_KEY = "classification_settings"
-CLASSIFY_VERSION = 2   # bump when judge() logic changes so stored judgements are rebuilt
+CLASSIFY_VERSION = 4   # bump when judge() logic changes so stored judgements are rebuilt
 
 JUDGEMENTS = ("good", "inaccuracy", "mistake", "blunder")
 
@@ -92,23 +92,51 @@ def judge(before: Eval, after: Eval, cfg: Config) -> tuple[str, float, int]:
 
 
 def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config) -> int:
-    """(Re)build the mistakes rows for one analysed game. Returns rows written."""
+    """(Re)build the mistakes rows for one analysed game: every move, both sides.
+
+    My moves get explanations (they become review puzzles); opponent moves get a
+    judgement, report mark and kind (used for accuracy, "miss" and the coach).
+    Also stores both players' accuracy on the game row. Returns rows written.
+    """
     game = conn.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
     positions = conn.execute(
         "SELECT * FROM positions WHERE game_id = ? ORDER BY ply", (game_id,)).fetchall()
     me = chess.WHITE if game["my_color"] == "white" else chess.BLACK
 
     rows = []
+    white_pcts = [report.win_pct(Eval.from_row(p, chess.WHITE).win_chance()) for p in positions]
+    accuracies = []
+    previous_judgement = None
+    previous_move = previous_board = None
+    first_turn = chess.Board(positions[0]["fen"]).turn if positions else chess.WHITE
     for before_row, after_row in zip(positions, positions[1:]):
+        if before_row["move_uci"] is None:
+            break
         board = chess.Board(before_row["fen"])
-        if board.turn != me or before_row["move_uci"] is None:
-            continue
-        before = Eval.from_row(before_row, me)
-        after = Eval.from_row(after_row, me)
+        mover = board.turn
+        before = Eval.from_row(before_row, mover)
+        after = Eval.from_row(after_row, mover)
         judgement, drop, cp_loss = judge(before, after, cfg)
         move = chess.Move.from_uci(before_row["move_uci"])
-        if board.legal_moves.count() == 1 or move.uci() == before_row["best_uci"]:
+        forced = board.legal_moves.count() == 1
+        is_best = move.uci() == before_row["best_uci"]
+        if forced or is_best:
             judgement = "good"  # forced move, or exactly the engine's choice
+
+        before_pct, after_pct = report.win_pct(before.win_chance()), report.win_pct(after.win_chance())
+        accuracy = report.move_accuracy(before_pct, after_pct)
+        accuracies.append(accuracy)
+        board_after = board.copy(stack=False)
+        board_after.push(move)
+        mark = report.mark_move(report.MarkInput(
+            judgement=judgement, drop_pct=max(0.0, before_pct - after_pct),
+            before_pct=before_pct, after_pct=after_pct, is_best=is_best, forced=forced,
+            book=before_row["ply"] < report.BOOK_MAX_PLY and openings.is_book(board_after),
+            second_gap_pct=_second_gap(before_row, mover, before_pct),
+            prev_opponent_judgement=previous_judgement,
+            sacrifice=report.is_sacrifice(board, move),
+            is_recapture=_is_recapture(board, move, previous_move, previous_board),
+        ))
 
         kind = text = None
         if judgement != "good":
@@ -120,16 +148,41 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config) -> int:
                 before=before, after=after,
             )
             kind, text = explain.explain(ctx)
-
+            if mover != me:
+                text = None  # explanations are worded for my moves; the coach words opponent moves
         rows.append((game_id, before_row["ply"], judgement, before.win_chance(), after.win_chance(),
-                     drop, cp_loss, phases.phase(board, before_row["ply"], cfg), kind, text))
+                     drop, cp_loss, phases.phase(board, before_row["ply"], cfg), kind, text,
+                     int(mover == me), mark, round(accuracy, 1)))
+        previous_judgement = judgement
+        previous_move, previous_board = move, board
 
+    acc_white, acc_black = report.game_accuracy(white_pcts[:len(accuracies) + 1], accuracies,
+                                                white_to_move_first=first_turn == chess.WHITE)
     with conn:
         conn.execute("DELETE FROM mistakes WHERE game_id = ?", (game_id,))
         conn.executemany(
             """INSERT INTO mistakes (game_id, ply, judgement, win_before, win_after, win_drop,
-                   cp_loss, phase, kind, explanation) VALUES (?,?,?,?,?,?,?,?,?,?)""", rows)
+                   cp_loss, phase, kind, explanation, is_mine, mark, accuracy)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", rows)
+        conn.execute("UPDATE games SET accuracy_white = ?, accuracy_black = ? WHERE id = ?",
+                     (acc_white, acc_black, game_id))
     return len(rows)
+
+
+def _is_recapture(board: chess.Board, move: chess.Move, previous_move: chess.Move | None,
+                  previous_board: chess.Board | None) -> bool:
+    """Taking back on the square where the opponent just captured."""
+    return (previous_move is not None and previous_board is not None
+            and previous_board.is_capture(previous_move)
+            and board.is_capture(move) and move.to_square == previous_move.to_square)
+
+
+def _second_gap(row: sqlite3.Row, mover: chess.Color, best_pct: float) -> float | None:
+    """How much worse (win% points, mover's view) the second-best move is than the best."""
+    if row["second_cp"] is None and row["second_mate"] is None:
+        return None
+    second = Eval.from_row({"score_cp": row["second_cp"], "score_mate": row["second_mate"]}, mover)
+    return best_pct - report.win_pct(second.win_chance())
 
 
 def settings_fingerprint(cfg: Config) -> str:

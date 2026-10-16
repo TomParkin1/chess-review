@@ -1,5 +1,6 @@
 """Command line interface.
 
+    python -m chessreview sync [--since all|3m|1m]
     python -m chessreview import FILE_OR_DIR [...]
     python -m chessreview summary
     python -m chessreview analyse [--limit N]
@@ -18,8 +19,23 @@ from pathlib import Path
 from . import db
 from .classify import ensure_classified
 from .config import load_config
-from .engine import AnalysisJob
+from .engine import AnalysisJob, count_pending
 from .pgn_import import import_paths
+
+
+def cmd_sync(conn: sqlite3.Connection, cfg, args) -> None:
+    from . import chesscom
+    last = db.get_meta(conn, chesscom.LAST_MONTH_KEY)
+    print(f"Syncing chess.com games of {cfg.player.username} "
+          f"({'since ' + last if last else 'first sync: ' + args.since})...")
+    result = chesscom.sync(conn, cfg, since=args.since,
+                           progress=lambda i, n, month: print(f"  {month} ({i + 1}/{n})"))
+    s = result.stats
+    print(f"Games seen: {s.games_seen}, new: {s.imported}, duplicates: {s.duplicates}")
+    for reason, n in sorted(s.skipped.items()):
+        print(f"Skipped:    {n} ({reason})")
+    if s.imported:
+        print("Run 'analyse' (or open the web app) to analyse them.")
 
 
 def cmd_import(conn: sqlite3.Connection, cfg, args) -> None:
@@ -78,10 +94,10 @@ def _mistake_summary(conn: sqlite3.Connection, cfg) -> None:
         SELECT m.phase AS k, COUNT(*) AS n,
                SUM(judgement = 'inaccuracy') AS i, SUM(judgement = 'mistake') AS m,
                SUM(judgement = 'blunder') AS b, COUNT(DISTINCT game_id) AS g
-        FROM mistakes m GROUP BY m.phase
+        FROM mistakes m WHERE is_mine = 1 GROUP BY m.phase
         UNION ALL
         SELECT 'all', COUNT(*), SUM(judgement = 'inaccuracy'), SUM(judgement = 'mistake'),
-               SUM(judgement = 'blunder'), COUNT(DISTINCT game_id) FROM mistakes
+               SUM(judgement = 'blunder'), COUNT(DISTINCT game_id) FROM mistakes WHERE is_mine = 1
     """).fetchall()
     order = {"opening": 0, "middlegame": 1, "endgame": 2, "all": 3}
     for r in sorted(rows, key=lambda r: order.get(r["k"], 9)):
@@ -90,7 +106,7 @@ def _mistake_summary(conn: sqlite3.Connection, cfg) -> None:
     print("(per game = mistakes + blunders per analysed game)")
 
     kinds = conn.execute("""SELECT kind, COUNT(*) AS n FROM mistakes
-                            WHERE judgement IN ('mistake', 'blunder')
+                            WHERE is_mine = 1 AND judgement IN ('mistake', 'blunder')
                             GROUP BY kind ORDER BY n DESC""").fetchall()
     print("\nWhat went wrong (mistakes + blunders)")
     for r in kinds:
@@ -105,7 +121,7 @@ def _print_mistakes(conn: sqlite3.Connection, limit: int) -> None:
         FROM mistakes m
         JOIN positions p ON p.game_id = m.game_id AND p.ply = m.ply
         JOIN games g ON g.id = m.game_id
-        WHERE m.judgement != 'good'
+        WHERE m.is_mine = 1 AND m.judgement != 'good'
         ORDER BY m.win_drop DESC LIMIT ?""", (limit,)).fetchall()
     for r in rows:
         opponent = r["black"] if r["my_color"] == "white" else r["white"]
@@ -125,9 +141,9 @@ def _format_eta(seconds: float | None) -> str:
 
 
 def cmd_analyse(conn: sqlite3.Connection, cfg, args) -> None:
-    pending = conn.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NULL").fetchone()[0]
-    done = conn.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NOT NULL").fetchone()[0]
-    print(f"{done} games already analysed (cached), {pending} to analyse.")
+    pending = count_pending(conn)
+    total = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+    print(f"{total - pending} games analysed and up to date (cached), {pending} to analyse.")
     if not pending:
         ensure_classified(conn, cfg)
         return
@@ -200,6 +216,11 @@ def main() -> None:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=None, help="path to config.toml")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("sync", help="fetch new games from chess.com")
+    p.add_argument("--since", choices=["all", "3m", "1m"], default="all",
+                   help="how far back the first sync goes (later syncs continue from the last one)")
+    p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("import", help="import PGN files or directories of PGN files")
     p.add_argument("paths", nargs="+")

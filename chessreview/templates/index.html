@@ -1,5 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
+<section class="card sync-card">
+  <div class="sync-row">
+    <button class="btn primary" id="sync-btn">⟳ Sync from chess.com</button>
+    <label class="muted small" id="since-label" hidden>First sync:
+      <select id="since">
+        <option value="all">All history</option>
+        <option value="3m">Last 3 months</option>
+        <option value="1m">This month</option>
+      </select>
+    </label>
+    <span id="sync-result" class="muted"></span>
+  </div>
+</section>
+
 <section class="card" id="upload-card">
   <div id="dropzone" class="dropzone">
     <p><strong>Drop PGN files here</strong> or <label class="link">choose files<input type="file" id="file-input" multiple accept=".pgn,text/plain" hidden></label></p>

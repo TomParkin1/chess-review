@@ -6,14 +6,15 @@ drawn by the scripts in static/.
 
 import json
 import sqlite3
+import threading
 
 import chess
 from flask import Flask, Response, abort, g, jsonify, render_template, request
 
-from . import db
+from . import chesscom, db
 from .classify import Eval, ensure_classified
 from .config import Config, load_config
-from .engine import AnalysisJob
+from .engine import AnalysisJob, count_pending
 from .explain import ATTACKING_KINDS, hint, san_line
 from .live import LiveEngine, PositionAnalysis
 from .pgn_import import ImportStats, import_pgn_text
@@ -39,6 +40,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     app.config["TEMPLATES_AUTO_RELOAD"] = True  # edited pages show up without a server restart
 
     state = {"job": AnalysisJob(cfg)}
+    sync_lock = threading.Lock()
     live = LiveEngine(cfg)
     app.extensions["live"] = live  # closed by the `serve` command on shutdown
 
@@ -75,9 +77,12 @@ def create_app(cfg: Config | None = None) -> Flask:
         if not files:
             return jsonify(error="No files received"), 400
         total = ImportStats()
+        batch_id = db.create_batch(conn(), "upload", f"Upload of {len(files)} file(s)")
         for f in files:
             text = f.read().decode("utf-8", errors="replace")
-            total.merge(import_pgn_text(conn(), text, cfg, source=f.filename or "upload"))
+            total.merge(import_pgn_text(conn(), text, cfg, source=f.filename or "upload",
+                                        batch_id=batch_id))
+        db.finish_batch(conn(), batch_id)
         _start_job()
         return jsonify(files=total.files, games_seen=total.games_seen, imported=total.imported,
                        duplicates=total.duplicates, skipped=total.skipped)
@@ -87,6 +92,30 @@ def create_app(cfg: Config | None = None) -> Flask:
         if not job.is_running():
             state["job"] = job = AnalysisJob(cfg)
             job.start()
+
+    @app.get("/api/sync")
+    def sync_status():
+        c = conn()
+        return jsonify(username=cfg.player.username,
+                       last_month=db.get_meta(c, chesscom.LAST_MONTH_KEY),
+                       running=sync_lock.locked())
+
+    @app.post("/api/sync")
+    def sync_now():
+        """Fetch new games from chess.com (body: {since: all|3m|1m} for the first sync)."""
+        since = (request.get_json(silent=True) or {}).get("since")
+        if not sync_lock.acquire(blocking=False):
+            return jsonify(error="A sync is already running"), 409
+        try:
+            result = chesscom.sync(conn(), cfg, since=since)
+        except LookupError as exc:
+            return jsonify(error=str(exc)), 404
+        except OSError as exc:  # network problems (URLError, timeouts)
+            return jsonify(error=f"Could not reach chess.com: {exc}"), 502
+        finally:
+            sync_lock.release()
+        _start_job()
+        return jsonify(result.as_dict())
 
     @app.post("/api/analysis/start")
     def analysis_start():
@@ -102,7 +131,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     def progress():
         c = conn()
         p = state["job"].progress.as_dict()
-        p["pending"] = c.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NULL").fetchone()[0]
+        p["pending"] = count_pending(c)
         return jsonify(p)
 
     # ------------------------------------------------------------ games
@@ -118,8 +147,8 @@ def create_app(cfg: Config | None = None) -> Flask:
                    SUM(m.judgement = 'inaccuracy') AS inaccuracies,
                    SUM(m.judgement = 'mistake') AS mistakes,
                    SUM(m.judgement = 'blunder') AS blunders
-            FROM games g LEFT JOIN mistakes m ON m.game_id = g.id
-            GROUP BY g.id ORDER BY g.date DESC, g.id DESC
+            FROM games g LEFT JOIN mistakes m ON m.game_id = g.id AND m.is_mine = 1
+            GROUP BY g.id ORDER BY g.end_time DESC, g.id DESC
         """).fetchall()
         return jsonify([dict(r) for r in rows])
 
@@ -158,7 +187,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         c = conn()
         ensure_classified(c, cfg)
         args = request.args
-        where, params = ["1 = 1"], []
+        where, params = ["m.is_mine = 1"], []
         judgements = [j for j in args.get("judgement", "mistake,blunder").split(",")
                       if j in JUDGEMENT_ORDER]
         where.append(f"m.judgement IN ({','.join('?' * len(judgements))})")
@@ -174,12 +203,12 @@ def create_app(cfg: Config | None = None) -> Flask:
         last = args.get("last", type=int)
         if last and last > 0:
             # Only my most recent N games (newest by date, then by import order).
-            where.append("g.id IN (SELECT id FROM games ORDER BY date DESC, id DESC LIMIT ?)")
+            where.append("g.id IN (SELECT id FROM games ORDER BY end_time DESC, id DESC LIMIT ?)")
             params.append(last)
         order = {
             "worst": "m.win_drop DESC",
-            "newest": "g.date DESC, g.id DESC, m.ply",
-            "oldest": "g.date, g.id, m.ply",
+            "newest": "g.end_time DESC, g.id DESC, m.ply",
+            "oldest": "g.end_time, g.id, m.ply",
         }.get(args.get("sort", "worst"), "m.win_drop DESC")
 
         rows = c.execute(f"""
@@ -282,6 +311,9 @@ def _position_json(p: sqlite3.Row, mistake: dict | None) -> dict:
         out["judgement"] = mistake["judgement"]
         out["explanation"] = mistake["explanation"]
         out["kind"] = mistake["kind"]
+        out["is_mine"] = bool(mistake["is_mine"])
+        out["mark"] = mistake["mark"]
+        out["accuracy"] = mistake["accuracy"]
     return out
 
 
@@ -339,12 +371,12 @@ def _filter_options(c: sqlite3.Connection) -> dict:
         return [r[0] for r in c.execute(sql) if r[0]]
     return {
         "opening": distinct("""SELECT g.opening_family FROM games g JOIN mistakes m ON m.game_id = g.id
-                               WHERE m.judgement != 'good'
+                               WHERE m.is_mine = 1 AND m.judgement != 'good'
                                GROUP BY g.opening_family ORDER BY COUNT(*) DESC"""),
         "phase": ["opening", "middlegame", "endgame"],
         "result": ["win", "draw", "loss"],
         "time_class": distinct("SELECT DISTINCT time_class FROM games ORDER BY time_class"),
-        "kind": distinct("""SELECT kind FROM mistakes WHERE kind IS NOT NULL
+        "kind": distinct("""SELECT kind FROM mistakes WHERE is_mine = 1 AND kind IS NOT NULL
                             GROUP BY kind ORDER BY COUNT(*) DESC"""),
         "color": ["white", "black"],
         "status": ["unsolved", "new", "failed", "solved"],

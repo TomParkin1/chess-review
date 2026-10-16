@@ -1,13 +1,19 @@
 """SQLite schema and small query helpers.
 
 Tables:
-  games      one row per imported game (headers, my colour/result, opening, moves)
+  games      one row per imported game (headers, my colour/result, opening, moves, clocks)
   positions  engine analysis of every position in a game (filled by engine.py)
-  mistakes   classification + explanation of each of my moves (filled by classify.py)
+  mistakes   judgement, report mark and explanation of every move, both sides
+             (filled by classify.py; `is_mine` = 1 for my moves). Named for its first use.
   review_results  my attempts at each mistake in review mode (history; latest = status)
+  imports    one row per upload / chess.com sync ("batch"); games.batch_id points here
   meta       key/value store (e.g. hash of the classification settings)
+
+SCHEMA is the original (version 0) layout; MIGRATIONS upgrade any database to the
+current version, tracked with PRAGMA user_version.
 """
 
+import hashlib
 import sqlite3
 from pathlib import Path
 
@@ -88,15 +94,90 @@ CREATE INDEX IF NOT EXISTS idx_review_results ON review_results(game_id, ply, id
 """
 
 
+def content_hash(white: str, black: str, date: str, moves_uci: str) -> str:
+    """Identity of a game independent of where it came from (upload or chess.com API)."""
+    basis = "|".join([white or "", black or "", date or "", moves_uci])
+    return hashlib.sha1(basis.encode()).hexdigest()
+
+
+def _migrate_1(conn: sqlite3.Connection) -> None:
+    """v2 data: sources/batches, clocks, multi-PV analysis, both-side marks, accuracy."""
+    for column in ("content_hash TEXT", "end_time TEXT", "uuid TEXT", "rated INTEGER",
+                   "source TEXT", "batch_id INTEGER", "clocks_ms TEXT",
+                   "analysis_version INTEGER", "accuracy_white REAL", "accuracy_black REAL"):
+        conn.execute(f"ALTER TABLE games ADD COLUMN {column}")
+    for column in ("second_cp INTEGER", "second_mate INTEGER", "second_uci TEXT"):
+        conn.execute(f"ALTER TABLE positions ADD COLUMN {column}")
+    for column in ("is_mine INTEGER NOT NULL DEFAULT 1", "mark TEXT", "accuracy REAL"):
+        conn.execute(f"ALTER TABLE mistakes ADD COLUMN {column}")
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS imports (
+            id              INTEGER PRIMARY KEY,
+            at              TEXT DEFAULT CURRENT_TIMESTAMP,
+            source          TEXT NOT NULL,      -- 'upload' | 'chess.com'
+            label           TEXT,
+            games_added     INTEGER NOT NULL DEFAULT 0,
+            session_done_at TEXT                -- set when the "new games" session is finished
+        );
+        CREATE INDEX IF NOT EXISTS idx_games_content_hash ON games(content_hash);
+        CREATE INDEX IF NOT EXISTS idx_games_link ON games(link);
+        CREATE INDEX IF NOT EXISTS idx_games_end_time ON games(end_time);
+        CREATE INDEX IF NOT EXISTS idx_mistakes_mine ON mistakes(is_mine, judgement);
+    """)
+    # Backfill existing games: identity hash, sort time, source; mark old analysis as v1.
+    rows = conn.execute("SELECT id, white, black, date, moves_uci, analysed_at FROM games").fetchall()
+    for r in rows:
+        conn.execute(
+            """UPDATE games SET content_hash = ?, end_time = ?, source = 'upload',
+                   analysis_version = CASE WHEN analysed_at IS NULL THEN NULL ELSE 1 END
+               WHERE id = ?""",
+            (content_hash(r["white"], r["black"], r["date"], r["moves_uci"]),
+             f"{r['date']} 00:00:00", r["id"]))
+    # Every existing game becomes part of one "earlier games" batch, already reviewed.
+    if rows:
+        cur = conn.execute("""INSERT INTO imports (source, label, games_added, session_done_at)
+                              VALUES ('upload', 'Earlier games', ?, CURRENT_TIMESTAMP)""", (len(rows),))
+        conn.execute("UPDATE games SET batch_id = ?", (cur.lastrowid,))
+
+
+MIGRATIONS = [_migrate_1]   # index i upgrades user_version i -> i + 1
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    for i, step in enumerate(MIGRATIONS[version:], start=version):
+        with conn:
+            step(conn)
+            conn.execute(f"PRAGMA user_version = {i + 1}")
+
+
 def connect(db_path: Path | str) -> sqlite3.Connection:
-    """Open the database (creating it if needed) with sensible settings."""
+    """Open the database (creating it if needed), upgraded to the current schema."""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
+    migrate(conn)
     return conn
+
+
+def create_batch(conn: sqlite3.Connection, source: str, label: str) -> int:
+    with conn:
+        return conn.execute("INSERT INTO imports (source, label) VALUES (?, ?)",
+                            (source, label)).lastrowid
+
+
+def finish_batch(conn: sqlite3.Connection, batch_id: int) -> int:
+    """Record how many games a batch added; drop it if it added none."""
+    n = conn.execute("SELECT COUNT(*) FROM games WHERE batch_id = ?", (batch_id,)).fetchone()[0]
+    with conn:
+        if n:
+            conn.execute("UPDATE imports SET games_added = ? WHERE id = ?", (n, batch_id))
+        else:
+            conn.execute("DELETE FROM imports WHERE id = ?", (batch_id,))
+    return n
 
 
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
@@ -120,4 +201,5 @@ def delete_all_games(conn: sqlite3.Connection) -> int:
         conn.execute("DELETE FROM mistakes")
         conn.execute("DELETE FROM positions")
         conn.execute("DELETE FROM games")
+        conn.execute("DELETE FROM imports")
     return n

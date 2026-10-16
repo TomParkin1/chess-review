@@ -260,3 +260,6 @@ table.games tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, tr
 .analysis-line .line-moves { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .analysis-var-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.sync-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.sync-row label { display: inline-flex; align-items: center; gap: 6px; }

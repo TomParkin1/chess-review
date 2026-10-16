@@ -1,7 +1,10 @@
 """Parse PGN files, work out my colour/result/opening, and store new games.
 
 Openings are named from the moves (openings.py), falling back to chess.com's
-ECO/ECOUrl headers. Duplicates are detected by the chess.com Link header, or by a hash of the
+ECO/ECOUrl headers. Clock times ([%clk] comments, present in chess.com API games) are
+kept per ply. A game is a duplicate if its Link or its content hash (players, date,
+moves) is already known, so uploads and chess.com syncs never double up. Duplicates were
+originally detected by the chess.com Link header, or by a hash of the
 players, date and moves when there is no Link.
 """
 
@@ -15,7 +18,7 @@ from pathlib import Path
 import chess
 import chess.pgn
 
-from . import openings
+from . import db, openings
 from .config import Config
 
 # Words that end the "family" part of an opening name,
@@ -91,8 +94,25 @@ def dedupe_key(game: chess.pgn.Game, moves_uci: str) -> str:
     if link:
         return link
     h = game.headers
-    basis = "|".join([h.get("White", ""), h.get("Black", ""), h.get("Date", ""), moves_uci])
-    return "sha1:" + hashlib.sha1(basis.encode()).hexdigest()
+    return "sha1:" + db.content_hash(h.get("White", ""), h.get("Black", ""), h.get("Date", ""), moves_uci)
+
+
+def end_time(headers: chess.pgn.Headers) -> str:
+    """Sortable 'YYYY-MM-DD HH:MM:SS' for when the game finished (time may be unknown)."""
+    date = (headers.get("EndDate") or headers.get("UTCDate") or headers.get("Date") or "").replace(".", "-")
+    clock = (headers.get("EndTime") or headers.get("UTCTime") or "")[:8]
+    if not re.fullmatch(r"\d\d:\d\d:\d\d", clock):
+        clock = "00:00:00"
+    return f"{date} {clock}"
+
+
+def clocks_ms(game: chess.pgn.Game) -> str | None:
+    """Remaining clock after each ply, space-separated milliseconds ('-' if missing)."""
+    values = []
+    for node in game.mainline():
+        seconds = node.clock()
+        values.append("-" if seconds is None else str(round(seconds * 1000)))
+    return " ".join(values) if any(v != "-" for v in values) else None
 
 
 def my_result(result: str, my_color: str) -> str | None:
@@ -106,7 +126,13 @@ def my_result(result: str, my_color: str) -> str | None:
 
 
 def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
-                source: str, stats: ImportStats) -> None:
+                source: str, stats: ImportStats, batch_id: int | None = None,
+                origin: str = "upload", extra: dict | None = None) -> None:
+    """Store one game if it is mine, standard chess, finished and new.
+
+    `origin` is 'upload' or 'chess.com'; `extra` may carry API-only fields (uuid, rated).
+    """
+    extra = extra or {}
     h = game.headers
     stats.games_seen += 1
 
@@ -140,7 +166,13 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
 
     moves_uci = " ".join(moves)
     key = dedupe_key(game, moves_uci)
-    if conn.execute("SELECT 1 FROM games WHERE dedupe_key = ?", (key,)).fetchone():
+    chash = db.content_hash(h.get("White", ""), h.get("Black", ""),
+                            h.get("Date", "").replace(".", "-"), moves_uci)
+    link = h.get("Link") or None
+    known_game = conn.execute(
+        "SELECT 1 FROM games WHERE dedupe_key = ? OR content_hash = ? OR (link IS NOT NULL AND link = ?)",
+        (key, chash, link)).fetchone()
+    if known_game:
         stats.duplicates += 1
         return
 
@@ -154,23 +186,27 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
     conn.execute(
         """INSERT INTO games (dedupe_key, link, white, black, white_elo, black_elo,
                my_color, my_result, result, termination, date, time_control, time_class,
-               eco, opening, opening_family, start_fen, moves_uci, num_plies, pgn, source_file)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               eco, opening, opening_family, start_fen, moves_uci, num_plies, pgn, source_file,
+               content_hash, end_time, uuid, rated, source, batch_id, clocks_ms)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
-            key, h.get("Link"), h.get("White"), h.get("Black"),
+            key, link, h.get("White"), h.get("Black"),
             _int(h.get("WhiteElo")), _int(h.get("BlackElo")),
             color, res, result, h.get("Termination"),
             h.get("Date", "").replace(".", "-"),
             h.get("TimeControl"), time_class(h.get("TimeControl", "")),
             eco, opening, family, start_fen,
             moves_uci, len(moves), str(game), source,
+            chash, end_time(h), extra.get("uuid"),
+            None if extra.get("rated") is None else int(bool(extra["rated"])),
+            origin, batch_id, clocks_ms(game),
         ),
     )
     stats.imported += 1
 
 
 def import_pgn_text(conn: sqlite3.Connection, text: str, cfg: Config,
-                    source: str = "") -> ImportStats:
+                    source: str = "", batch_id: int | None = None) -> ImportStats:
     """Import every game in a PGN string. Commits once at the end."""
     stats = ImportStats(files=1)
     stream = io.StringIO(text)
@@ -182,19 +218,21 @@ def import_pgn_text(conn: sqlite3.Connection, text: str, cfg: Config,
             break
         if game is None:
             break
-        import_game(conn, game, cfg, source, stats)
+        import_game(conn, game, cfg, source, stats, batch_id=batch_id)
     conn.commit()
     return stats
 
 
 def import_paths(conn: sqlite3.Connection, paths: list[Path], cfg: Config) -> ImportStats:
-    """Import PGN files, or every *.pgn file inside given directories."""
+    """Import PGN files, or every *.pgn file inside given directories, as one batch."""
     total = ImportStats()
+    batch_id = db.create_batch(conn, "upload", f"Upload of {len(paths)} path(s)")
     for path in paths:
         files = sorted(path.glob("*.pgn")) if path.is_dir() else [path]
         for f in files:
             text = f.read_text(encoding="utf-8", errors="replace")
-            total.merge(import_pgn_text(conn, text, cfg, source=f.name))
+            total.merge(import_pgn_text(conn, text, cfg, source=f.name, batch_id=batch_id))
+    db.finish_batch(conn, batch_id)
     return total
 
 

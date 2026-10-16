@@ -42,6 +42,38 @@ async function upload(files) {
   fileInput.value = '';
 }
 
+// ------------------------------------------------------------ chess.com sync
+
+const syncBtn = document.getElementById('sync-btn');
+const syncResult = document.getElementById('sync-result');
+
+async function loadSyncStatus() {
+  const status = await api('/api/sync');
+  document.getElementById('since-label').hidden = Boolean(status.last_month);
+  syncResult.textContent = status.last_month
+    ? `Synced up to ${status.last_month}. New games since then will be fetched.`
+    : `Fetches ${status.username}'s games directly; no download needed.`;
+}
+
+syncBtn.addEventListener('click', async () => {
+  syncBtn.disabled = true;
+  syncResult.textContent = 'Fetching games from chess.com…';
+  try {
+    const r = await api('/api/sync', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ since: document.getElementById('since').value }),
+    });
+    syncResult.textContent = `${r.imported} new game(s), ${r.duplicates} already here` +
+      (r.months.length ? ` (${r.months[0]} to ${r.months[r.months.length - 1]})` : '') + '.';
+    document.getElementById('since-label').hidden = true;
+    loadGames();
+    pollProgress();
+  } catch (err) {
+    syncResult.textContent = `Sync failed: ${err.message}`;
+  }
+  syncBtn.disabled = false;
+});
+
 // ------------------------------------------------------------ progress
 
 let polling = false;
@@ -161,4 +193,5 @@ document.getElementById('reset-btn')?.addEventListener('click', async () => {
 });
 
 loadGames();
+loadSyncStatus();
 pollProgress();

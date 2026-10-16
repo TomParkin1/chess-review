@@ -34,7 +34,7 @@ function goTo(index) {
   });
   const shapes = [];
   const explanation = document.getElementById('explanation');
-  if (prev?.judgement && prev.judgement !== 'good') {
+  if (prev?.is_mine && prev.judgement && prev.judgement !== 'good') {
     // Just played one of my bad moves: show it in red and what I should have played in green.
     shapes.push(arrow(prev.move_uci, 'red'), arrow(prev.best_uci, 'green'));
     explanation.hidden = false;

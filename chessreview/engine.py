@@ -24,6 +24,10 @@ from .config import Config
 # Stored instead of a mate score when the side to move is already checkmated.
 MATED_CP = 10_000
 
+# Bump when the stored analysis gains information; older games are re-analysed in the
+# background. v2: second-best line (MultiPV 2), needed for "Great"/"Brilliant" marks.
+ANALYSIS_VERSION = 2
+
 
 @dataclass
 class PositionResult:
@@ -36,6 +40,22 @@ class PositionResult:
     best_uci: str | None
     pv_uci: str
     depth: int | None
+    second_cp: int | None = None
+    second_mate: int | None = None
+    second_uci: str | None = None
+
+
+@dataclass
+class PositionEval:
+    """Engine view of one position, White's point of view."""
+    score_cp: int | None
+    score_mate: int | None
+    best_uci: str | None
+    pv_uci: str
+    depth: int | None
+    second_cp: int | None = None      # the second-best move's score (None if only one move)
+    second_mate: int | None = None
+    second_uci: str | None = None
 
 
 def open_engine(cfg: Config) -> chess.engine.SimpleEngine:
@@ -45,24 +65,29 @@ def open_engine(cfg: Config) -> chess.engine.SimpleEngine:
 
 
 def analyse_position(engine: chess.engine.SimpleEngine, board: chess.Board,
-                     cfg: Config) -> tuple[int | None, int | None, str | None, str, int | None]:
-    """Return (score_cp, score_mate, best_uci, pv_uci, depth), White's point of view."""
+                     cfg: Config) -> PositionEval:
+    """Analyse one position with the two best lines (MultiPV 2)."""
     if board.is_checkmate():
         cp = -MATED_CP if board.turn == chess.WHITE else MATED_CP
-        return cp, None, None, "", None
+        return PositionEval(cp, None, None, "", None)
     if board.is_game_over(claim_draw=False):  # stalemate, insufficient material, ...
-        return 0, None, None, "", None
+        return PositionEval(0, None, None, "", None)
 
-    info = engine.analyse(board, chess.engine.Limit(time=cfg.engine.time_per_position))
-    score = info["score"].white()
-    pv = info.get("pv", [])[: cfg.engine.pv_length]
-    return (
-        score.score(),
-        score.mate(),
+    infos = engine.analyse(board, chess.engine.Limit(time=cfg.engine.time_per_position), multipv=2)
+    first = infos[0]
+    score = first["score"].white()
+    pv = first.get("pv", [])[: cfg.engine.pv_length]
+    result = PositionEval(
+        score.score(), score.mate(),
         pv[0].uci() if pv else None,
         " ".join(m.uci() for m in pv),
-        info.get("depth"),
+        first.get("depth"),
     )
+    if len(infos) > 1 and infos[1].get("pv"):
+        second = infos[1]["score"].white()
+        result.second_cp, result.second_mate = second.score(), second.mate()
+        result.second_uci = infos[1]["pv"][0].uci()
+    return result
 
 
 def analyse_game(engine: chess.engine.SimpleEngine, game: sqlite3.Row, cfg: Config,
@@ -75,12 +100,13 @@ def analyse_game(engine: chess.engine.SimpleEngine, game: sqlite3.Row, cfg: Conf
         if stop is not None and stop.is_set():
             return None
         move = moves[ply] if ply < len(moves) else None
-        cp, mate, best, pv, depth = analyse_position(engine, board, cfg)
+        e = analyse_position(engine, board, cfg)
         results.append(PositionResult(
             ply=ply, fen=board.fen(),
             move_uci=move.uci() if move else None,
             move_san=board.san(move) if move else None,
-            score_cp=cp, score_mate=mate, best_uci=best, pv_uci=pv, depth=depth,
+            score_cp=e.score_cp, score_mate=e.score_mate, best_uci=e.best_uci, pv_uci=e.pv_uci,
+            depth=e.depth, second_cp=e.second_cp, second_mate=e.second_mate, second_uci=e.second_uci,
         ))
         if on_position:
             on_position()
@@ -95,18 +121,32 @@ def save_game_analysis(conn: sqlite3.Connection, game_id: int,
         conn.execute("DELETE FROM positions WHERE game_id = ?", (game_id,))
         conn.executemany(
             """INSERT INTO positions (game_id, ply, fen, move_uci, move_san, score_cp,
-                   score_mate, best_uci, pv_uci, depth) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                   score_mate, best_uci, pv_uci, depth, second_cp, second_mate, second_uci)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             [(game_id, r.ply, r.fen, r.move_uci, r.move_san, r.score_cp, r.score_mate,
-              r.best_uci, r.pv_uci, r.depth) for r in results],
+              r.best_uci, r.pv_uci, r.depth, r.second_cp, r.second_mate, r.second_uci)
+             for r in results],
         )
-        conn.execute("UPDATE games SET analysed_at = CURRENT_TIMESTAMP WHERE id = ?", (game_id,))
+        # New evals invalidate the classification; ensure_classified() rebuilds it.
+        conn.execute("DELETE FROM mistakes WHERE game_id = ?", (game_id,))
+        conn.execute("UPDATE games SET analysed_at = CURRENT_TIMESTAMP, analysis_version = ? WHERE id = ?",
+                     (ANALYSIS_VERSION, game_id))
 
 
 def pending_games(conn: sqlite3.Connection, limit: int | None = None) -> list[sqlite3.Row]:
-    sql = "SELECT * FROM games WHERE analysed_at IS NULL ORDER BY date DESC, id DESC"
+    """Games never analysed (newest first), then games analysed by an older version."""
+    sql = f"""SELECT * FROM games
+              WHERE analysed_at IS NULL OR COALESCE(analysis_version, 1) < {ANALYSIS_VERSION}
+              ORDER BY analysed_at IS NOT NULL, end_time DESC, id DESC"""
     if limit:
         sql += f" LIMIT {int(limit)}"
     return conn.execute(sql).fetchall()
+
+
+def count_pending(conn: sqlite3.Connection) -> int:
+    """Games waiting for (re-)analysis."""
+    return conn.execute(f"""SELECT COUNT(*) FROM games WHERE analysed_at IS NULL
+                            OR COALESCE(analysis_version, 1) < {ANALYSIS_VERSION}""").fetchone()[0]
 
 
 @dataclass
