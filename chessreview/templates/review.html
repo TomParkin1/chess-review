@@ -2,6 +2,7 @@
 {% block title %}Practice · Chess Review{% endblock %}
 {% block content %}
 <div class="card filter-bar">
+  {% include "_practice_switch.html" %}
   <span class="filter-summary" id="filter-summary"></span>
   <span class="table-actions">
     <label class="mode-toggle" title="Hide that a mistake was made and ask for the opponent's threat first">

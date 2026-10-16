@@ -4,7 +4,8 @@ Blocks (sizes in config [coach]):
   reviews   due spaced-repetition cards, at most `due_cap` (the rest roll over to tomorrow)
   real      real-game positions: today's new mistake cards plus calm positions I played well
   focus     puzzles on my #1 weakness (insights.weaknesses over my last 100 games), recomputed
-            daily, so the focus moves as I improve
+            daily, so the focus moves as I improve: half my own mistakes of that kind, half
+            themed puzzles from the library near my puzzle rating (when the library is loaded)
   convert   one won position from my games to win against Stockfish (played on the Convert page)
   opening   due opening-line drills (played on the Openings page)
 
@@ -16,7 +17,7 @@ import json
 import sqlite3
 from datetime import date
 
-from . import convert, db, insights, report, srs
+from . import convert, db, insights, library, report, srs
 from .config import Config
 
 PLAN_KEY = "today_plan"
@@ -40,6 +41,10 @@ def build_plan(conn: sqlite3.Connection, cfg: Config, on: date) -> dict:
     c = cfg.coach
     q = srs.queue(conn, cfg, on)
     reviews = [[g, p, "due"] for g, p in q["due"][: c.due_cap]]
+    due_library = conn.execute("""SELECT key FROM cards WHERE kind = 'library' AND mastered_on IS NULL
+                                  AND due_on IS NOT NULL AND due_on <= ? ORDER BY due_on, box""",
+                               (on.isoformat(),)).fetchall()
+    reviews += [["lib", r["key"], "due"] for r in due_library][: max(0, c.due_cap - len(reviews))]
 
     n_calm = round(c.real_game * min(max(c.calm_ratio, 0.0), 0.8))
     new = [[g, p, "new"] for g, p in q["new"][: max(0, c.real_game - n_calm)]]
@@ -47,7 +52,7 @@ def build_plan(conn: sqlite3.Connection, cfg: Config, on: date) -> dict:
     real = srs.spread(new, calm)
 
     taken = {(g, p) for g, p, _ in reviews + real}
-    weakness, focus = _focus_items(conn, cfg, c.focus, taken)
+    weakness, focus = _focus_items(conn, cfg, c.focus, taken, on)
 
     blocks = [
         {"id": "reviews", "title": "Review", "items": reviews,
@@ -92,9 +97,13 @@ def with_progress(conn: sqlite3.Connection, plan: dict, on: date) -> dict:
     return plan
 
 
-def attempted_today(conn: sqlite3.Connection, on: date) -> set[tuple[int, int]]:
-    return {(r["game_id"], r["ply"]) for r in conn.execute(
-        "SELECT game_id, ply FROM review_results WHERE date(at, 'localtime') = ?", (on.isoformat(),))}
+def attempted_today(conn: sqlite3.Connection, on: date) -> set[tuple]:
+    """(game_id, ply) of my positions and ("lib", puzzle_id) of library puzzles tried today."""
+    day = on.isoformat()
+    mine = {(r["game_id"], r["ply"]) for r in conn.execute(
+        "SELECT game_id, ply FROM review_results WHERE date(at, 'localtime') = ?", (day,))}
+    return mine | {("lib", r["puzzle_id"]) for r in conn.execute(
+        "SELECT puzzle_id FROM puzzle_attempts WHERE date(at, 'localtime') = ?", (day,))}
 
 
 def block_items(plan: dict, block_id: str) -> list[tuple[tuple[int, int], str]]:
@@ -105,13 +114,22 @@ def block_items(plan: dict, block_id: str) -> list[tuple[tuple[int, int], str]]:
 
 # ------------------------------------------------------------ focus block
 
-def _focus_items(conn: sqlite3.Connection, cfg: Config, size: int,
-                 taken: set[tuple[int, int]]) -> tuple[dict | None, list[list]]:
-    """My #1 weakness that has puzzles, and up to `size` of them (unsolved first, best lessons first)."""
+def _focus_items(conn: sqlite3.Connection, cfg: Config, size: int, taken: set[tuple],
+                 on: date) -> tuple[dict | None, list[list]]:
+    """My #1 weakness that has puzzles, and up to `size` of them: my own mistakes of that kind
+    (unsolved first, best lessons first) and, with the library loaded, themed library puzzles."""
+    has_library = library.count(conn) > 0
     for weakness in insights.compute(conn, last=100)["weaknesses"]:
-        keys = _matching_mistakes(conn, weakness.get("train") or {}, taken)
-        if keys:
-            return weakness, [[g, p, "focus"] for g, p in keys[:size]]
+        train = weakness.get("train") or {}
+        own = _matching_mistakes(conn, train, taken)
+        themes = library.themes_for(train) if has_library else []
+        if not own and not themes:
+            continue
+        own_n = min(len(own), (size + 1) // 2 if themes else size)
+        lib = library.pick(conn, size - own_n, themes, seed=on.isoformat()) if themes else []
+        items = [[g, p, "focus"] for g, p in own[:own_n]] + [["lib", i, "focus"] for i in lib]
+        if items:
+            return weakness, srs.spread(items[:own_n], items[own_n:])
     return None, []
 
 

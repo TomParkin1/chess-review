@@ -1,0 +1,5 @@
+{# Switch between Practice's two sources: my own mistakes and the puzzle library. #}
+<div class="segmented practice-switch">
+  <a href="/review" class="{{ 'active' if request.path == '/review' }}">Your mistakes</a>
+  <a href="/puzzles" class="{{ 'active' if request.path == '/puzzles' }}">Puzzle library</a>
+</div>

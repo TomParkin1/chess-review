@@ -9,6 +9,10 @@
 // arrow) and some items are calm positions where I played well. If the position has threat data,
 // a threat step comes first: play the opponent's threat (as if I passed) or press "No real threat".
 //
+// Library mode (item.mode === 'library'): a Lichess puzzle. The opponent's first move is played
+// on the board, moves are checked locally against the solution (any mate also counts), and the
+// result goes to /api/library/result, which updates my puzzle rating.
+//
 // The host page includes templates/_puzzle.html and calls createPuzzle({...}).show(item).
 // Callbacks: onResult(item, result) once per puzzle, onNext(), onPrev() (optional).
 import { Chess } from 'chess.js';
@@ -66,24 +70,28 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
 
   function show(m) {
     const blind = m.mode === 'blind';
+    const lib = m.mode === 'library';
     puzzle = {
       item: m, fen: m.fen, last: lastMove(m.prev_move_uci), step: 0,
       attempts: 0, hints: 0, hintLevel: 0, phase: blind && m.threat ? 'threat' : 'solving', recorded: false,
       onLine: true,     // all moves so far followed the engine's best line
-      blind, threatResult: null, threatShapes: [],
+      blind, lib, threatResult: null, threatShapes: [],
     };
-    $('badge').hidden = blind;
+    $('badge').hidden = blind || lib;
     $('badge').textContent = m.judgement;
     $('badge').className = `badge ${m.judgement}`;
-    $('move-title').textContent = blind ? `Move ${Math.floor(m.ply / 2) + 1}` : `${m.move_label}${SYMBOLS[m.judgement]}`;
-    $('status-chip').hidden = blind || !m.status;
+    $('move-title').textContent = lib ? `Puzzle · rated ${m.rating}`
+      : blind ? `Move ${Math.floor(m.ply / 2) + 1}` : `${m.move_label}${SYMBOLS[m.judgement]}`;
+    $('status-chip').hidden = blind || lib || !m.status;
     $('status-chip').textContent = STATUS_CHIPS[m.status] || '';
     $('status-chip').className = `chip ${m.status || ''}`;
     const result = { win: 'won', loss: 'lost', draw: 'drawn' }[m.my_result];
-    $('context').textContent = blind
-      ? `vs ${m.opponent} · ${m.date} · ${m.opening}`
-      : `vs ${m.opponent} · ${m.date} · ${m.opening} · ${m.phase} · game ${result}`;
-    $('game-link').href = `/game/${m.game_id}#${m.ply}`;
+    $('context').textContent = lib ? 'From the Lichess puzzle database'
+      : blind ? `vs ${m.opponent} · ${m.date} · ${m.opening}`
+        : `vs ${m.opponent} · ${m.date} · ${m.opening} · ${m.phase} · game ${result}`;
+    $('game-link').href = lib ? m.game_url : `/game/${m.game_id}#${m.ply}`;
+    $('game-link').textContent = lib ? 'Lichess game' : 'Open game';
+    $('game-link').target = lib ? '_blank' : '';
 
     if (puzzle.phase === 'threat') {
       rich($('prompt'), 'First: what is ', ['strong', colorName(other(m.my_color))],
@@ -102,15 +110,22 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     badge.clear();
     board.cancelPremove();
     board.set({ orientation: m.my_color });
-    evalBar.set(m.eval_before_white, m.my_color);
+    evalBar.set(m.eval_before_white ?? null, m.my_color);
     evalBar.hide(true);  // no peeking while solving
     if (puzzle.phase === 'threat') setThreatBoard();
-    else setSolvingBoard();
+    else if (lib) {
+      // Show the opponent's move being played, then hand over the board.
+      const p = puzzle;
+      board.set({ fen: m.start_fen, lastMove: undefined, check: false, movable: { color: m.my_color, dests: new Map() } });
+      setTimeout(() => { if (puzzle === p) { sound.move(); setSolvingBoard(); } }, 450);
+    } else setSolvingBoard();
   }
 
   function solvingPrompt(m) {
     const goal = m.playout_moves > 1 ? ` It takes ${m.playout_moves} good moves in a row.` : '';
-    if (m.mode === 'blind') {
+    if (m.mode === 'library') {
+      rich($('prompt'), 'Find the best move for ', ['strong', colorName(m.my_color)], '.');
+    } else if (m.mode === 'blind') {
       rich($('prompt'), 'Your move as ', ['strong', colorName(m.my_color)], '. Play what you would play in a game.');
     } else {
       rich($('prompt'), 'You played ', ['strong', `${m.move_san}${SYMBOLS[m.judgement]}`],
@@ -223,6 +238,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     const uci = orig + dest + promotion;
 
     const m = p.item;
+    if (p.lib) return judgeLocally(p, uci);
     if (p.step === 0 && uci === m.move_uci && m.judgement !== 'good') {
       return wrong(p, { uci, san: m.move_san, judgement: m.judgement, after: m.eval_after,
                         explanation: "That's the move you played in the game." });
@@ -244,12 +260,29 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     else wrong(p, r);
   }
 
+  // Library puzzles: the solution is known, so no engine is needed. Any checkmate also counts.
+  function judgeLocally(p, uci) {
+    const m = p.item;
+    const chess = new Chess(p.fen);
+    const mv = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
+    if (uci !== m.solution[2 * p.step] && !chess.isCheckmate()) {
+      return wrong(p, { uci, san: mv.san });
+    }
+    const reply = m.solution[2 * p.step + 1];
+    let replySan = null;
+    const fenAfter = chess.fen();
+    if (reply) replySan = chess.move({ from: reply.slice(0, 2), to: reply.slice(2, 4), promotion: reply[4] }).san;
+    right(p, { uci, san: mv.san, judgement: 'good', is_best: true, fen_after: fenAfter, reply_uci: reply || null,
+               reply_san: replySan, fen_after_reply: chess.fen(), game_over: !reply || chess.isGameOver() }, uci);
+  }
+
   function wrong(p, r) {
     p.attempts += 1;
     sound.wrong();
-    badge.show(r.uci?.slice(2, 4) || null, r.judgement);
-    showFeedback('bad', `✗ ${r.san} is ${article(r.judgement)} ${r.judgement} (${r.after}).`,
-                 r.explanation || '', ' Try again.');
+    badge.show(r.uci?.slice(2, 4) || null, r.judgement || 'mistake');
+    if (p.lib) showFeedback('bad', `✗ ${r.san} isn't it.`, 'Try again.');
+    else showFeedback('bad', `✗ ${r.san} is ${article(r.judgement)} ${r.judgement} (${r.after}).`,
+                      r.explanation || '', ' Try again.');
     setTimeout(() => {
       if (puzzle !== p) return;
       p.phase = 'solving';
@@ -360,9 +393,11 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     $('solve-actions').hidden = true;
     $('done-actions').hidden = false;
 
-    $('eval-before').textContent = m.eval_before;
-    $('eval-after').textContent = m.eval_after;
-    $('reveal').hidden = !p.blind;
+    $('eval-before').textContent = m.eval_before ?? '';
+    $('eval-after').textContent = m.eval_after ?? '';
+    $('answer').querySelector('.evals').hidden = p.lib;
+    $('reveal').hidden = !p.blind && !p.lib;
+    if (p.lib) rich($('reveal'), 'Themes: ', ['strong', m.themes.join(', ') || '–'], '. Rating: updating…');
     if (p.blind) {
       $('badge').hidden = false;
       $('move-title').textContent = `${m.move_label}${SYMBOLS[m.judgement] || ''}`;
@@ -374,11 +409,11 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
              ` here: ${article(m.judgement)} ${m.judgement}.`);
       }
     }
-    $('explanation').hidden = calm;
-    $('answer').querySelector('.legend').hidden = calm;
+    $('explanation').hidden = calm || p.lib;
+    $('answer').querySelector('.legend').hidden = calm || p.lib;
     rich($('explanation'), ['strong', `Why ${m.move_san} was ${article(m.judgement)} ${m.judgement}: `],
          m.explanation || '');
-    $('best-explanation').hidden = !m.best_explanation;
+    $('best-explanation').hidden = !m.best_explanation || p.lib;
     rich($('best-explanation'), ['strong', `Why ${m.best_san} is better: `], m.best_explanation || '');
     $('explanation').className = `explanation ${m.judgement}`;
     setTimeout(() => {
@@ -394,6 +429,18 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     p.recorded = true;
     p.item.status = result;
     onResult(p.item, result);
+    if (p.lib) {
+      api('/api/library/result', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ puzzle_id: p.item.puzzle_id, result }),
+      }).then(r => {
+        if (puzzle !== p) return;
+        const diff = r.rating_after - r.rating_before;
+        rich($('reveal'), 'Themes: ', ['strong', p.item.themes.join(', ') || '–'], '. Your puzzle rating: ',
+             ['strong', `${r.rating_after}`], r.rated ? ` (${diff >= 0 ? '+' : ''}${diff}).` : ' (only the first try counts).');
+      }).catch(() => { /* not critical */ });
+      return;
+    }
     api('/api/review/result', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ game_id: p.item.game_id, ply: p.item.ply, result,
@@ -433,8 +480,8 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     const m = puzzle.item;
     board.set({ fen: s.fen, turnColor: sideToMove(s.fen), lastMove: s.last, check: checkOf(s.fen),
                 movable: { color: undefined } });
-    evalBar.hide(false);
-    evalBar.set(solIndex === 0 ? m.eval_before_white : null, m.my_color);  // only the game position has a stored eval
+    evalBar.hide(Boolean(puzzle.lib));   // library puzzles have no stored eval
+    evalBar.set(solIndex === 0 ? m.eval_before_white ?? null : null, m.my_color);  // only the game position has a stored eval
     const gameMove = m.judgement === 'good' ? null : arrow(m.move_uci, 'red');   // calm: the game move was fine
     board.setAutoShapes(solIndex === 0 ? [gameMove, arrow(m.best_uci, 'green')].filter(Boolean) : []);
     document.querySelectorAll('#solution-moves .sm').forEach(c =>

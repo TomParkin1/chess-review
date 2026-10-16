@@ -7,12 +7,14 @@
     python -m chessreview reclassify
     python -m chessreview mistakes [--limit N]
     python -m chessreview serve [--port 8000]
+    python -m chessreview puzzles
     python -m chessreview reset [--yes]
 """
 
 import argparse
 import sqlite3
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -211,6 +213,21 @@ def cmd_reset(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"Deleted {db.delete_all_games(conn)} games.")
 
 
+def cmd_puzzles(conn: sqlite3.Connection, cfg, args) -> None:
+    """Download (or refresh) the puzzle library from the Lichess puzzle database."""
+    from . import library
+    progress = library.FetchProgress()
+    job = threading.Thread(target=library.fetch, args=(conn, progress), daemon=True)
+    print(f"Downloading {library.URL} (about 300 MB, streamed; only a sample is kept)...")
+    job.start()
+    while job.is_alive():
+        job.join(1)
+        if progress.bytes_total:
+            pct = 100 * progress.bytes_read / progress.bytes_total
+            print(f"\r{pct:5.1f}%  {progress.rows:,} puzzles read", end="", flush=True)
+    print(f"\nKept {library.count(conn):,} puzzles. Your puzzle rating: {library.rating(conn)}.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="chessreview", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -244,6 +261,9 @@ def main() -> None:
     p = sub.add_parser("serve", help="run the web app")
     p.add_argument("--port", type=int, default=8000)
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("puzzles", help="download the puzzle library (Lichess puzzle database sample)")
+    p.set_defaults(func=cmd_puzzles)
 
     p = sub.add_parser("reset", help="delete all games and analysis to start afresh")
     p.add_argument("--yes", action="store_true", help="don't ask for confirmation")

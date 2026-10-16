@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Puzzles · Chess Review{% endblock %}
+{% block content %}
+<div class="card filter-bar">
+  {% include "_practice_switch.html" %}
+  <span class="filter-summary" id="rating-line"></span>
+  <span class="table-actions">
+    <label class="muted small">Theme
+      <select id="theme">
+        <option value="">All themes</option>
+        {% for key, label in themes.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+  </span>
+</div>
+
+<section class="card summary-card" id="library-empty" hidden>
+  <div class="celebrate">🧩</div>
+  <h1>Puzzle library</h1>
+  <p class="muted">Thousands of tactics from the Lichess puzzle database, for every rating from 400 to 3000,
+    picked around your own puzzle rating. A one-time download of about 300 MB, of which about 5 MB is kept.</p>
+  <div class="actions"><button class="btn primary big" id="fetch-btn">Download the puzzle library</button></div>
+  <div class="progress-block" id="fetch-progress" hidden>
+    <div class="progress"><div id="fetch-bar"></div></div>
+    <p class="muted small" id="fetch-label"></p>
+  </div>
+</section>
+
+{% set puzzle_hidden = True %}
+{% include "_puzzle.html" %}
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='puzzles.js') }}"></script>{% endblock %}

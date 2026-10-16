@@ -62,7 +62,7 @@ def test_upload_analyse_and_review(client):
     body = r.get_json()
     assert body["judgement"] == m["judgement"] and body["explanation"]  # same verdict as the game
 
-    for page in ("/", "/review", "/games", "/settings", "/insights", "/train", "/session", "/progress", "/convert", f"/game/{m["game_id"]}"):
+    for page in ("/", "/review", "/games", "/settings", "/insights", "/train", "/session", "/progress", "/convert", "/puzzles", f"/game/{m["game_id"]}"):
         assert c.get(page).status_code == 200
 
 
@@ -243,3 +243,11 @@ def test_endgame_playout_api(client):
     assert c.post("/api/convert/result", json={"key": key, "result": "solved"}).status_code == 200
     statuses = {e["key"]: e["status"] for e in c.get("/api/convert").get_json()["endgames"]}
     assert statuses[key] == "solved"
+
+
+def test_library_api_without_a_library(client):
+    c, _app = client
+    s = c.get("/api/library/status").get_json()
+    assert s["count"] == 0 and s["progress"]["state"] == "idle" and s["rating"] == 1500   # no games: default
+    assert c.get("/api/library/next").get_json()["items"] == []
+    assert c.post("/api/library/result", json={"puzzle_id": "nope", "result": "solved"}).status_code == 404

@@ -191,7 +191,34 @@ def _migrate_5(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE cards ADD COLUMN last_on TEXT")
 
 
-MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5]   # index i upgrades user_version i -> i + 1
+def _migrate_6(conn: sqlite3.Connection) -> None:
+    """Puzzle library (sampled Lichess puzzles, library.py) and my attempts at them."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS puzzles (
+            id          TEXT PRIMARY KEY,       -- Lichess puzzle id
+            fen         TEXT NOT NULL,          -- before the opponent's first move
+            moves       TEXT NOT NULL,          -- opponent's move, then the solution (uci)
+            rating      INTEGER NOT NULL,
+            deviation   INTEGER,
+            popularity  INTEGER,
+            plays       INTEGER,
+            themes      TEXT NOT NULL,          -- ' fork middlegame short ' (padded for LIKE '% t %')
+            game_url    TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_puzzles_rating ON puzzles(rating);
+        CREATE TABLE IF NOT EXISTS puzzle_attempts (
+            id            INTEGER PRIMARY KEY,
+            puzzle_id     TEXT NOT NULL,
+            at            TEXT DEFAULT CURRENT_TIMESTAMP,
+            result        TEXT NOT NULL,        -- solved | solved_with_help | failed | skipped
+            rating_before INTEGER,
+            rating_after  INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_puzzle_attempts ON puzzle_attempts(puzzle_id);
+    """)
+
+
+MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5, _migrate_6]   # index i upgrades user_version i -> i + 1
 
 
 def migrate(conn: sqlite3.Connection) -> None:

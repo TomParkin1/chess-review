@@ -11,7 +11,7 @@ import threading
 import chess
 from flask import Flask, Response, abort, g, jsonify, render_template, request
 
-from . import chesscom, coach, convert, db, insights, level, progress, report, repertoire, session, srs
+from . import chesscom, coach, convert, db, insights, level, library, progress, report, repertoire, session, srs
 from .classify import (ADAPTIVE_BANDS, MODE_KEY, Eval, adaptive_enabled, ensure_classified,
                        thresholds_for)
 from .config import Config, effective_workers, load_config
@@ -42,7 +42,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB of PGN is plenty
     app.config["TEMPLATES_AUTO_RELOAD"] = True  # edited pages show up without a server restart
 
-    state = {"job": AnalysisJob(cfg)}
+    state = {"job": AnalysisJob(cfg), "library": library.FetchProgress(), "library_thread": None}
     sync_lock = threading.Lock()
     live = LiveEngine(cfg)
     app.extensions["live"] = live  # closed by the `serve` command on shutdown
@@ -395,6 +395,9 @@ def create_app(cfg: Config | None = None) -> Flask:
         mode = {"reviews": "blind" if blind else None, "real": "blind"}.get(block_id)
         items = _items_for(c, coach.block_items(plan, block_id))
         for item in items:
+            if item.get("mode") == "library":
+                item["done_today"] = ("lib", item["puzzle_id"]) in attempted
+                continue
             item["mode"] = mode
             item["done_today"] = (item["game_id"], item["ply"]) in attempted
         return jsonify(items=items, block={k: v for k, v in block.items() if k != "items"})
@@ -494,19 +497,80 @@ def create_app(cfg: Config | None = None) -> Flask:
         ensure_classified(c, cfg)
         return jsonify(progress.report(c, cfg))
 
-    def _items_for(c, keyed: list[tuple[tuple[int, int], str]]) -> list[dict]:
-        """Puzzle items for ((game_id, ply), tag) pairs, in the given order, tagged due/new/calm."""
-        if not keyed:
-            return []
-        pairs = " OR ".join("(m.game_id = ? AND m.ply = ?)" for _ in keyed)
-        flat = [v for k, _ in keyed for v in k]
-        by_key = {(i["game_id"], i["ply"]): i
-                  for i in _query_mistakes(c, cfg, ["m.is_mine = 1", f"({pairs})"], flat, "m.game_id")}
+    def _items_for(c, keyed: list[tuple[tuple, str]]) -> list[dict]:
+        """Puzzle items for ((game_id, ply) | ("lib", puzzle_id), tag) pairs, in the given order,
+        tagged due/new/calm/focus."""
+        mine = [k for k, _ in keyed if k[0] != "lib"]
+        by_key: dict = {}
+        if mine:
+            pairs = " OR ".join("(m.game_id = ? AND m.ply = ?)" for _ in mine)
+            flat = [v for k in mine for v in k]
+            by_key = {(i["game_id"], i["ply"]): i
+                      for i in _query_mistakes(c, cfg, ["m.is_mine = 1", f"({pairs})"], flat, "m.game_id")}
+        lib_ids = [k[1] for k, _ in keyed if k[0] == "lib"]
+        if lib_ids:
+            rows = c.execute(f"SELECT * FROM puzzles WHERE id IN ({','.join('?' * len(lib_ids))})", lib_ids)
+            by_key |= {("lib", r["id"]): library.puzzle_json(r) for r in rows}
         out = []
         for k, tag in keyed:
             if k in by_key:
-                out.append({**by_key[k], "queue": tag, "calm": tag == "calm" or by_key[k]["judgement"] == "good"})
+                item = by_key[k]
+                out.append({**item, "queue": tag,
+                            "calm": item.get("mode") != "library" and (tag == "calm" or item["judgement"] == "good")})
         return out
+
+    # ------------------------------------------------------------ puzzle library
+
+    @app.get("/puzzles")
+    def puzzles_page():
+        return render_template("puzzles.html", themes=library.THEMES)
+
+    @app.get("/api/library/status")
+    def library_status():
+        c = conn()
+        return jsonify(count=library.count(c), fetched_on=db.get_meta(c, library.FETCHED_KEY),
+                       rating=library.rating(c), played=int(db.get_meta(c, library.COUNT_KEY) or 0),
+                       progress=state["library"].as_dict())
+
+    @app.post("/api/library/fetch")
+    def library_fetch():
+        """Download the Lichess puzzle database in the background (about 300 MB, streamed)."""
+        thread = state["library_thread"]
+        if thread is not None and thread.is_alive():
+            return jsonify(error="already downloading"), 409
+        progress = state["library"] = library.FetchProgress(state="running")
+
+        def run():
+            c = db.connect(cfg.db_path)
+            try:
+                library.fetch(c, progress)
+            except Exception as exc:    # network or format problems: shown in Settings
+                progress.state, progress.error = "error", str(exc)
+            finally:
+                c.close()
+        state["library_thread"] = threading.Thread(target=run, daemon=True, name="puzzle-library")
+        state["library_thread"].start()
+        return jsonify(progress.as_dict())
+
+    @app.get("/api/library/next")
+    def library_next():
+        """New puzzles near my puzzle rating; ?theme=<Lichess theme> (optional), ?n=10."""
+        c = conn()
+        theme = request.args.get("theme")
+        themes = [theme] if theme in library.THEMES else None
+        ids = library.pick(c, request.args.get("n", 10, type=int), themes)
+        return jsonify(items=_items_for(c, [(("lib", i), "library") for i in ids]),
+                       rating=library.rating(c), count=library.count(c))
+
+    @app.post("/api/library/result")
+    def library_result():
+        data = request.get_json(force=True)
+        if data.get("result") not in REVIEW_RESULTS:
+            return jsonify(error="unknown result"), 400
+        try:
+            return jsonify(library.record(conn(), str(data.get("puzzle_id")), data["result"]))
+        except LookupError:
+            return jsonify(error="unknown puzzle"), 404
 
     @app.get("/api/session")
     def session_info():

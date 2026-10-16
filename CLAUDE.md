@@ -9,7 +9,7 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - Python 3.15 venv in `.venv` (Homebrew Python, not Anaconda): use `.venv/bin/python`.
 - Stockfish: `/opt/homebrew/bin/stockfish` (configurable in `config.toml`).
 - CLI: `.venv/bin/python -m chessreview sync [--since all|3m|1m]`, `import <files|dirs>`, `summary`,
-  `analyse [--limit N]`, `reclassify`, `mistakes [--limit N]`, `serve [--port 8000]`, `reset [--yes]`.
+  `analyse [--limit N]`, `reclassify`, `mistakes [--limit N]`, `serve [--port 8000]`, `puzzles`, `reset [--yes]`.
   Port 5000 is taken by macOS AirPlay Receiver, hence 8000.
 - Tests: `.venv/bin/pytest`.
 
@@ -83,6 +83,14 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   goals hold for 15 moves). Playouts are stateless: the client sends all moves (`/api/play/move`, `/api/play/hint`),
   Stockfish = `LiveEngine.analyse` at full strength. Cards: `srs.record_key(kind 'convert'|'endgame', key)`.
   Page `/convert` (`static/convert.js`, eval hidden until the end); Today gets a "Convert" block.
+- v3 puzzle library (Milestone 4): `library.py` streams the Lichess puzzle DB (`lichess_db_puzzle.csv.zst`, ~300 MB,
+  stdlib `compression.zstd`) and keeps a reservoir sample per (100-point bucket, theme in `THEMES`), 400-3100, well-tested
+  only (~19k puzzles) in `puzzles`; attempts in `puzzle_attempts`. Puzzle rating (meta) starts at my chess.com rating,
+  Elo update with K 40 -> 16, first try only; `pick()` chooses unseen puzzles around it. Failed puzzles become
+  `cards.kind='library'` (due ones join Today's Review). `KIND_THEMES` maps my mistake kinds to themes; Today's Focus
+  = half my mistakes, half themed library puzzles. puzzle.js `mode: 'library'` judges locally against the solution
+  (any mate counts). UI: `/puzzles` (Practice switch), Settings card, CLI `puzzles`. Block items for the library are
+  `["lib", puzzle_id, tag]` in the Today plan.
 - Design rule: nothing is tuned to one rating. Derive from the engine, the current rating's band, or my rolling data.
 - Chessground `events.after` passes (orig, dest, metadata): always wrap handlers as `(o, d) => fn(o, d)`.
 - `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump
@@ -128,5 +136,5 @@ Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--conf
 1. [x] Real-game training: threat check, blind positions + calm mix, puzzle quality, current-level judging
 2. [x] "Today" workout + progress report
 3. [x] Convert won positions + essential endgames
-4. [ ] Puzzle library (Lichess DB, every rating, puzzle rating)
+4. [x] Puzzle library (Lichess DB, every rating, puzzle rating)
 5. [ ] Self-review before the engine in new-games sessions

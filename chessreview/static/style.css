@@ -506,3 +506,8 @@ a.chip { text-decoration: none; }
 .result-loss { color: var(--miss); }
 .result-win { color: var(--green); }
 #play-chart { margin: 10px 0; }
+
+/* Practice: mistakes / puzzle library switch */
+.segmented a { color: var(--muted); font-weight: 700; padding: 6px 12px; border-radius: 6px; text-decoration: none; }
+.segmented a.active { background: var(--panel-3); color: var(--text); }
+.filter-bar .practice-switch { margin-right: 12px; }
