@@ -1,0 +1,35 @@
+# Chess review configuration. Edit freely; restart the app after changes.
+
+[player]
+username = "sampleplayer"
+
+[import]
+min_plies = 10            # skip games shorter than this (aborted / instant resignations)
+skip_variants = true      # skip Chess960 and other non-standard games
+
+[engine]
+path = "/opt/homebrew/bin/stockfish"
+time_per_position = 0.3   # seconds of engine time per position
+workers = 4               # Stockfish processes run in parallel
+threads = 2               # threads per Stockfish process
+hash_mb = 128             # hash table per Stockfish process
+pv_length = 8             # moves of the principal variation to store
+
+[classification]
+# "winchance" (Lichess style) or "cp" (raw centipawn loss)
+mode = "winchance"
+# Drops in win chance on Lichess' -1..1 scale (0.1 = 5 percentage points).
+inaccuracy = 0.1
+mistake = 0.2
+blunder = 0.3
+# Used when mode = "cp"
+cp_inaccuracy = 50
+cp_mistake = 100
+cp_blunder = 300
+
+[phases]
+opening_plies = 20        # first N half-moves count as the opening
+endgame_material = 13     # endgame when non-pawn material (both sides, N/B=3 R=5 Q=9) <= this
+
+[database]
+path = "data/chess.db"
