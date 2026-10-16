@@ -11,7 +11,7 @@ import threading
 import chess
 from flask import Flask, Response, abort, g, jsonify, render_template, request
 
-from . import chesscom, db, report
+from . import chesscom, db, report, session, srs
 from .classify import Eval, ensure_classified
 from .config import Config, load_config
 from .engine import AnalysisJob, count_pending
@@ -228,24 +228,69 @@ def create_app(cfg: Config | None = None) -> Flask:
             "oldest": "g.end_time, g.id, m.ply",
         }.get(args.get("sort", "worst"), "m.win_drop DESC")
 
-        rows = c.execute(f"""
-            SELECT m.*, p.fen, p.move_uci, p.move_san, p.best_uci, p.pv_uci,
-                   p.score_cp AS before_cp, p.score_mate AS before_mate,
-                   p2.score_cp AS after_cp, p2.score_mate AS after_mate,
-                   p0.move_uci AS prev_move_uci,
-                   g.my_color, g.white, g.black, g.date, g.opening, g.opening_family,
-                   g.my_result, g.time_class, {STATUS_SQL} AS status
-            FROM mistakes m
-            JOIN positions p ON p.game_id = m.game_id AND p.ply = m.ply
-            JOIN positions p2 ON p2.game_id = m.game_id AND p2.ply = m.ply + 1
-            LEFT JOIN positions p0 ON p0.game_id = m.game_id AND p0.ply = m.ply - 1
-            JOIN games g ON g.id = m.game_id
-            WHERE {' AND '.join(where)}
-            ORDER BY {order}
-        """, params).fetchall()
-
-        items = [_mistake_json(r, cfg) for r in rows]
+        items = _query_mistakes(c, cfg, where, params, order)
         return jsonify(items=items, options=_filter_options(c))
+
+    # ------------------------------------------------------------ training (SRS) + new-games session
+
+    @app.get("/train")
+    def train_page():
+        return render_template("train.html")
+
+    @app.get("/session")
+    def session_page():
+        return render_template("session.html")
+
+    @app.get("/api/train/stats")
+    def train_stats():
+        c = conn()
+        ensure_classified(c, cfg)
+        out = srs.stats(c, cfg)
+        out["session"] = session.status(c, cfg)
+        return jsonify(out)
+
+    @app.get("/api/train/queue")
+    def train_queue():
+        c = conn()
+        ensure_classified(c, cfg)
+        q = srs.queue(c, cfg)
+        items = _items_for(c, q["due"], "due") + _items_for(c, q["new"], "new")
+        return jsonify(items=items, stats=srs.stats(c, cfg))
+
+    def _items_for(c, keys: list[tuple[int, int]], tag: str) -> list[dict]:
+        """Mistake items for (game_id, ply) keys, in the given order, tagged due/new."""
+        if not keys:
+            return []
+        pairs = " OR ".join("(m.game_id = ? AND m.ply = ?)" for _ in keys)
+        flat = [v for k in keys for v in k]
+        by_key = {(i["game_id"], i["ply"]): i
+                  for i in _query_mistakes(c, cfg, ["m.is_mine = 1", f"({pairs})"], flat, "m.game_id")}
+        out = []
+        for k in keys:
+            if k in by_key:
+                by_key[k]["queue"] = tag
+                out.append(by_key[k])
+        return out
+
+    @app.get("/api/session")
+    def session_info():
+        c = conn()
+        ensure_classified(c, cfg)
+        st = session.status(c, cfg)
+        if not st["open"]:
+            return jsonify(st)
+        where, params = session.puzzle_where(cfg, st["batch_ids"])
+        st["items"] = _query_mistakes(c, cfg, ["m.is_mine = 1", where], params,
+                                      "g.end_time, g.id, m.ply")
+        return jsonify(st)
+
+    @app.post("/api/session/done")
+    def session_done():
+        c = conn()
+        batch_ids = [int(i) for i in (request.get_json(force=True) or {}).get("batch_ids", [])]
+        summary = session.summary(c, cfg, batch_ids)
+        session.mark_done(c, batch_ids)
+        return jsonify(summary)
 
     @app.post("/api/judge")
     def judge_move():
@@ -281,6 +326,7 @@ def create_app(cfg: Config | None = None) -> Flask:
                          VALUES (?, ?, ?, ?, ?)""",
                       (data["game_id"], data["ply"], data["result"],
                        int(data.get("attempts", 0)), int(data.get("hints_used", 0))))
+        srs.record(c, int(data["game_id"]), int(data["ply"]), data["result"])
         return jsonify(ok=True)
 
     @app.get("/api/analyse/stream")
@@ -300,6 +346,29 @@ def create_app(cfg: Config | None = None) -> Flask:
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     return app
+
+
+def _query_mistakes(c: sqlite3.Connection, cfg: Config, where: list[str], params: list,
+                    order: str) -> list[dict]:
+    """My mistakes as puzzle items (shared by Practice, Train and the new-games session)."""
+    rows = c.execute(f"""
+        SELECT m.*, p.fen, p.move_uci, p.move_san, p.best_uci, p.pv_uci,
+               p.score_cp AS before_cp, p.score_mate AS before_mate,
+               p2.score_cp AS after_cp, p2.score_mate AS after_mate,
+               p0.move_uci AS prev_move_uci,
+               g.my_color, g.white, g.black, g.date, g.opening, g.opening_family,
+               g.my_result, g.time_class, {STATUS_SQL} AS status,
+               c.box AS card_box, c.due_on AS card_due
+        FROM mistakes m
+        JOIN positions p ON p.game_id = m.game_id AND p.ply = m.ply
+        JOIN positions p2 ON p2.game_id = m.game_id AND p2.ply = m.ply + 1
+        LEFT JOIN positions p0 ON p0.game_id = m.game_id AND p0.ply = m.ply - 1
+        LEFT JOIN cards c ON c.game_id = m.game_id AND c.ply = m.ply
+        JOIN games g ON g.id = m.game_id
+        WHERE {' AND '.join(where)}
+        ORDER BY {order}
+    """, params).fetchall()
+    return [_mistake_json(r, cfg) for r in rows]
 
 
 def _stored_analysis(pos: sqlite3.Row) -> PositionAnalysis:
@@ -380,6 +449,7 @@ def _mistake_json(r: sqlite3.Row, cfg: Config) -> dict:
         "my_result": r["my_result"], "time_class": r["time_class"],
         "prev_move_uci": r["prev_move_uci"], "status": r["status"],
         "hint": hint(r["kind"]), "playout_moves": _playout_moves(r["kind"], before, cfg),
+        "card_box": r["card_box"], "card_due": r["card_due"],
     }
 
 

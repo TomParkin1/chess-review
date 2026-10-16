@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}New games · Chess Review{% endblock %}
+{% block content %}
+<section class="card train-hero" id="session-start">
+  <div class="ring-wrap"><div class="big-emoji">♟️</div></div>
+  <div class="train-copy">
+    <h1 id="session-title">New games</h1>
+    <p class="muted" id="session-sub">Loading…</p>
+    <div class="actions">
+      <button class="btn primary big" id="start-btn" hidden>Start session</button>
+      <button class="btn big" id="skip-session" hidden>Skip to summary</button>
+      <a class="btn big" id="home-link" href="/" hidden>Back home</a>
+    </div>
+  </div>
+</section>
+
+<section class="card summary-card" id="session-done" hidden></section>
+
+{% set puzzle_hidden = True %}
+{% include "_puzzle.html" %}
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='session.js') }}"></script>{% endblock %}

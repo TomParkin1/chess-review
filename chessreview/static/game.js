@@ -96,7 +96,7 @@ function goTo(index, { sound = false } = {}) {
   const prev = positions[current - 1];
 
   board.set({ fen: pos.fen, turnColor: sideToMove(pos.fen), lastMove: lastMove(prev?.move_uci),
-              check: /[+#]$/.test(prev?.move_san || '') });
+              check: /[+#]$/.test(prev?.move_san || '') ? sideToMove(pos.fen) : false });
   if (sound && step === 1) moveSound(prev?.move_san);
   badge.show(prev?.move_uci?.slice(2, 4), prev?.mark);
 

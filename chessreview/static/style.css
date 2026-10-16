@@ -372,3 +372,43 @@ dl.config dt { color: var(--muted); }
 dl.config dd { margin: 0; font-variant-numeric: tabular-nums; }
 .option .preview.cg-wrap { position: relative; background: #3c3a37; }
 .option .preview piece { position: absolute; inset: 10%; width: 80%; height: 80%; background-size: cover; }
+
+/* ------------------------------------------------------------ training (Chessly-style) */
+
+.cta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 0; }
+.cta { display: flex; align-items: center; gap: 16px; text-decoration: none; color: var(--text); transition: transform .12s; }
+.cta:hover { transform: translateY(-2px); background: #2c2b28; }
+.cta > div:nth-child(2) { flex: 1; }
+.cta p { margin: 2px 0 0; }
+.cta-emoji, .big-emoji { font-size: 40px; width: 64px; height: 64px; display: grid; place-items: center; background: var(--panel-2); border-radius: 16px; flex: none; }
+.big-emoji { width: 132px; height: 132px; font-size: 64px; border-radius: 50%; }
+
+.train-hero { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; padding: 26px; }
+.train-copy { flex: 1; min-width: 260px; }
+.train-copy h1 { font-size: 32px; }
+.train-copy p { margin: 6px 0 10px; font-size: 16px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+.chips .chip { font-size: 13px; padding: 4px 11px; }
+.ring { position: relative; width: 132px; height: 132px; }
+.ring svg circle { transition: stroke-dashoffset .8s ease; }
+.ring-label { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.ring-big { font-size: 34px; font-weight: 900; line-height: 1; }
+.ring-small { font-size: 12px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.streak { text-align: center; min-width: 90px; }
+.streak .flame { font-size: 34px; }
+.streak .streak-n { font-size: 30px; font-weight: 900; line-height: 1; }
+
+.session-progress { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
+.session-progress > div { height: 100%; width: 0; background: var(--green); transition: width .4s; }
+
+.summary-card { text-align: center; padding: 30px 26px; }
+.summary-card h1 { font-size: 30px; margin-top: 4px; }
+.summary-card .chips, .summary-card .actions { justify-content: center; }
+.celebrate { font-size: 64px; animation: pop .6s cubic-bezier(.2, 1.6, .4, 1); }
+@keyframes pop { from { transform: scale(.2) rotate(-20deg); opacity: 0; } to { transform: none; opacity: 1; } }
+.lessons { max-width: 640px; margin: 12px auto; text-align: left; background: var(--panel-2); border-radius: var(--radius); padding: 6px 16px; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; text-align: left; max-width: 820px; margin: 10px auto; }
+.count-bar { display: grid; grid-template-columns: 150px 1fr 30px; align-items: center; gap: 10px; margin: 5px 0; font-size: 14px; }
+.cb-track { height: 10px; background: var(--panel-2); border-radius: 5px; overflow: hidden; }
+.cb-fill { display: block; height: 100%; border-radius: 5px; }
+.cb-n { font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }

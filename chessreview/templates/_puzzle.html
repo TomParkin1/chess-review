@@ -1,0 +1,64 @@
+{# The puzzle board + side panel used by Practice, Train and the new-games session (static/puzzle.js). #}
+<div class="layout review-layout" id="review" {{ 'hidden' if puzzle_hidden }}>
+  <div class="board-col">
+    <div class="board-wrap"><div id="board" class="board"></div></div>
+  </div>
+
+  <div class="side-col">
+    <div class="session-bar">
+      <span id="counter"></span>
+      <span id="session-score" class="muted"></span>
+    </div>
+    <div class="session-progress" id="session-progress" hidden><div></div></div>
+
+    <div class="review-head">
+      <span id="badge" class="badge"></span>
+      <h2 id="move-title"></h2>
+      <span id="status-chip" class="chip" hidden></span>
+    </div>
+    <p id="context" class="muted small"></p>
+
+    <div id="prompt" class="prompt"></div>
+    <div id="feedback" class="feedback" hidden></div>
+    <div id="hint" class="hint" hidden></div>
+
+    <div class="actions" id="solve-actions">
+      <button class="btn" id="hint-btn" title="Hint (h)">💡 Hint</button>
+      <button class="btn" id="solution-btn">View solution</button>
+      <button class="btn" id="skip-btn" title="Skip (s)">Skip</button>
+    </div>
+
+    <div id="answer" hidden>
+      <div class="evals">
+        <div><span class="muted">Before</span> <span id="eval-before" class="eval"></span></div>
+        <div><span class="muted">After your move</span> <span id="eval-after" class="eval"></span></div>
+      </div>
+      <div id="explanation" class="explanation"></div>
+      <p class="legend"><span class="swatch red"></span> your move <span class="swatch green"></span> best move</p>
+      <div class="solution">
+        <div class="solution-head">
+          <span class="muted small">Best line</span>
+          <span class="solution-nav">
+            <button class="btn small" id="sol-prev" title="Back (←)">◀</button>
+            <button class="btn small" id="sol-next" title="Forward (→)">▶</button>
+          </span>
+        </div>
+        <div id="solution-moves" class="solution-moves"></div>
+      </div>
+    </div>
+
+    <div class="actions" id="done-actions" hidden>
+      <button class="btn primary" id="next-btn" title="Next (Enter)">Next ▶</button>
+      <button class="btn" id="retry-btn">Retry</button>
+      <button class="btn" id="analyse-btn" title="Explore this position with live Stockfish (a)">Analyse</button>
+      <a class="btn" id="game-link" href="#">Open game</a>
+    </div>
+
+    <div id="analysis" hidden></div>
+
+    <div class="nav-row">
+      <button class="btn small" id="prev-btn" title="Previous">◀ Previous</button>
+      <span class="muted small">Keys: h hint · s skip · Enter next · ←/→ best line · a analyse</span>
+    </div>
+  </div>
+</div>

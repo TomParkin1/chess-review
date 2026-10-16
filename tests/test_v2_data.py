@@ -101,6 +101,8 @@ def test_sync_imports_with_clocks_links_and_batch(conn, cfg):
     clocks = rows[0]["clocks_ms"].split()
     assert len(clocks) == rows[0]["num_plies"] and clocks[0] == "599900"  # 0:09:59.9
     assert db.get_meta(conn, chesscom.LAST_MONTH_KEY) == "2026/10"
+    batch = conn.execute("SELECT * FROM imports WHERE id = ?", (result.batch_id,)).fetchone()
+    assert batch["session_done_at"]   # first sync = history import: no new-games session
 
 
 def test_next_sync_only_fetches_from_last_month(conn, cfg):
@@ -194,3 +196,13 @@ def test_game_accuracy_perfect_and_blunder():
     accs[10] = 5.0                                      # one white blunder
     white, black = report.game_accuracy(pcts, accs)
     assert white < black == 100.0
+
+
+def test_later_sync_with_new_games_opens_a_session(conn, cfg):
+    first_two = {"games": MONTH["games"][:2]}
+    chesscom.sync(conn, cfg, fetch=lambda u: fake_fetch(u) if u.endswith("archives") else
+                  (first_two if u.endswith("/2026/10") else {"games": []}))
+    later = chesscom.sync(conn, cfg, fetch=fake_fetch)       # the third game is new
+    assert later.games_added == 1
+    batch = conn.execute("SELECT * FROM imports WHERE id = ?", (later.batch_id,)).fetchone()
+    assert batch["session_done_at"] is None

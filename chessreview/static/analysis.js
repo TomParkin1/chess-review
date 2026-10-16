@@ -82,7 +82,7 @@ export function createAnalysis({ board, panel, evalBar }) {
     const chess = new Chess(fen);
     const last = cursor === 0 ? root.last : lastMove(moves[cursor - 1].uci);
     board.set({
-      fen, lastMove: last, turnColor: sideToMove(fen), check: chess.inCheck(),
+      fen, lastMove: last, turnColor: sideToMove(fen), check: chess.inCheck() ? sideToMove(fen) : false,
       movable: { free: false, color: 'both', dests: legalDests(chess), showDests: true,
                  events: { after: onMove } },
     });

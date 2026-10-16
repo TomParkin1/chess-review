@@ -108,4 +108,10 @@ def sync(conn: sqlite3.Connection, cfg: Config, since: str | None = None,
     result.games_added = db.finish_batch(conn, result.batch_id)
     if not result.games_added:
         result.batch_id = None
+    elif last_month is None:
+        # The first sync brings in history, not "games I just played": no new-games session;
+        # its mistakes go straight to daily training instead.
+        with conn:
+            conn.execute("""UPDATE imports SET session_done_at = CURRENT_TIMESTAMP,
+                                label = 'chess.com history import' WHERE id = ?""", (result.batch_id,))
     return result

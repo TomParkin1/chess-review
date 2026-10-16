@@ -67,6 +67,7 @@ syncBtn.addEventListener('click', async () => {
       (r.months.length ? ` (${r.months[0]} to ${r.months[r.months.length - 1]})` : '') + '.';
     document.getElementById('since-label').hidden = true;
     loadGames();
+    loadTraining();
     pollProgress();
   } catch (err) {
     syncResult.textContent = `Sync failed: ${err.message}`;
@@ -88,7 +89,7 @@ async function pollProgress() {
     const running = p.state === 'running' || p.state === 'stopping';
     renderProgress(p, running);
     if (!running) {
-      if (wasRunning) loadGames();
+      if (wasRunning) { loadGames(); loadTraining(); }
       break;
     }
     if (wasRunning && p.games_done !== renderProgress.lastDone) loadGames();
@@ -169,6 +170,27 @@ function renderGames(games) {
   document.getElementById('games-body').replaceChildren(...games.slice(0, 8).map(gameRow));
 }
 
+async function loadTraining() {
+  const s = await api('/api/train/stats');
+  const todo = s.due + s.new;
+  document.getElementById('train-cta-title').textContent = todo ? `${todo} puzzles today` : 'Training done for today';
+  document.getElementById('train-cta-sub').textContent =
+    `🔥 ${s.streak}-day streak · ${s.mastered} mastered · ${s.learning} learning`;
+  document.getElementById('train-cta-btn').className = todo ? 'btn primary' : 'btn';
+  const session = s.session;
+  const card = document.getElementById('session-card');
+  card.hidden = !session.open;
+  if (session.open) {
+    document.getElementById('session-cta-title').textContent =
+      `${session.games} new game${session.games === 1 ? '' : 's'}`;
+    const waiting = session.games - session.analysed;
+    document.getElementById('session-cta-sub').textContent = waiting
+      ? `${session.puzzles} mistakes ready · ${waiting} still analysing`
+      : `${session.puzzles} mistakes to learn from`;
+  }
+}
+
 loadGames();
 loadSyncStatus();
+loadTraining();
 pollProgress();

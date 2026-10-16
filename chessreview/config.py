@@ -60,6 +60,12 @@ class AnalysisConfig:
 
 
 @dataclass(frozen=True)
+class TrainingConfig:
+    new_per_day: int = 10            # new mistakes introduced into daily training per day
+    include_inaccuracies: bool = False
+
+
+@dataclass(frozen=True)
 class Config:
     player: PlayerConfig
     imports: ImportConfig
@@ -69,6 +75,7 @@ class Config:
     db_path: Path
     review: ReviewConfig = ReviewConfig()
     analysis: AnalysisConfig = AnalysisConfig()
+    training: TrainingConfig = TrainingConfig()
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
@@ -88,4 +95,5 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
         db_path=db_path,
         review=ReviewConfig(**raw.get("review", {})),
         analysis=AnalysisConfig(**raw.get("analysis", {})),
+        training=TrainingConfig(**raw.get("training", {})),
     )

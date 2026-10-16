@@ -7,6 +7,7 @@ Tables:
              (filled by classify.py; `is_mine` = 1 for my moves). Named for its first use.
   review_results  my attempts at each mistake in review mode (history; latest = status)
   imports    one row per upload / chess.com sync ("batch"); games.batch_id points here
+  cards      spaced-repetition state per mistake to learn (srs.py)
   meta       key/value store (e.g. hash of the classification settings)
 
 SCHEMA is the original (version 0) layout; MIGRATIONS upgrade any database to the
@@ -140,7 +141,39 @@ def _migrate_1(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE games SET batch_id = ?", (cur.lastrowid,))
 
 
-MIGRATIONS = [_migrate_1]   # index i upgrades user_version i -> i + 1
+def _migrate_2(conn: sqlite3.Connection) -> None:
+    """Spaced-repetition cards: one per mistake I should learn (later also opening lines)."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS cards (
+            id            INTEGER PRIMARY KEY,
+            kind          TEXT NOT NULL DEFAULT 'mistake',   -- 'mistake' | 'line'
+            game_id       INTEGER REFERENCES games(id) ON DELETE CASCADE,
+            ply           INTEGER,
+            key           TEXT,                  -- for opening-line cards (position key)
+            box           INTEGER NOT NULL DEFAULT 0,   -- Leitner box: 0 = new / relearning
+            due_on        TEXT,                  -- 'YYYY-MM-DD'; NULL = never studied (new)
+            introduced_on TEXT,                  -- day it was first studied
+            reps          INTEGER NOT NULL DEFAULT 0,
+            lapses        INTEGER NOT NULL DEFAULT 0,
+            last_result   TEXT,
+            mastered_on   TEXT,                  -- retired after passing the longest interval
+            UNIQUE (game_id, ply),
+            UNIQUE (kind, key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cards_due ON cards(mastered_on, due_on);
+    """)
+
+
+def _migrate_3(conn: sqlite3.Connection) -> None:
+    """A first chess.com sync is a history import, not a "new games" session."""
+    first = conn.execute("""SELECT id FROM imports WHERE source = 'chess.com'
+                            ORDER BY id LIMIT 1""").fetchone()
+    if first:
+        conn.execute("""UPDATE imports SET session_done_at = COALESCE(session_done_at, CURRENT_TIMESTAMP),
+                            label = 'chess.com history import' WHERE id = ?""", (first["id"],))
+
+
+MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3]   # index i upgrades user_version i -> i + 1
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -197,6 +230,7 @@ def delete_all_games(conn: sqlite3.Connection) -> int:
     """Delete every game with its analysis and classification. Returns games deleted."""
     with conn:
         n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+        conn.execute("DELETE FROM cards")
         conn.execute("DELETE FROM review_results")
         conn.execute("DELETE FROM mistakes")
         conn.execute("DELETE FROM positions")

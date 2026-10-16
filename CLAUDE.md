@@ -21,6 +21,11 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   `review_results`, `imports` (batches), `meta`. DB lives in `data/` (gitignored).
 - `chessreview/chesscom.py`: sync via the public API (archives -> months >= last synced month), one batch per sync.
   Dedupe across sources = `link` OR `content_hash` (players|date|moves). API games carry clocks (`games.clocks_ms`).
+- `chessreview/srs.py`: Leitner spaced repetition over `cards` (one per my mistake/blunder); every attempt
+  (`/api/review/result`) updates the card. Daily queue = due + `training.new_per_day` new (not from open sessions).
+- `chessreview/session.py`: "new games" session = open import batches (session_done_at NULL). The first chess.com
+  sync is a history import (marked done). Summary: results, accuracy, mistake kinds, clock left at blunders.
+- `static/puzzle.js` + `templates/_puzzle.html`: the shared puzzle used by Practice (`/review`), Train, Session.
 - `chessreview/report.py`: chess.com-style move marks (documented approximations), Lichess accuracy, time spent.
 - `chessreview/pgn_import.py`: PGN parsing, my colour/result, time class, dedupe (Link header, else sha1 of players+date+moves).
 - `chessreview/openings.py` + `chessreview/data/openings.tsv`: names openings from the moves using the Lichess chess-openings DB (CC0), matched by position. My chess.com exports have no ECO/ECOUrl/Link headers.
@@ -71,7 +76,7 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 ## v2 roadmap (plan approved; build milestone by milestone, stop after each for testing)
 1. [x] Data foundation: migrations, chess.com sync, batches, clocks, MultiPV 2, both-side marks, accuracy
 2. [x] New shell (chess.com-dark sidebar, icons, sounds, promotion, settings) + Game Report page
-3. [ ] Training: puzzle.js component, SRS cards + daily Train, New-games session + summary, Practice
+3. [x] Training: puzzle.js component, SRS cards + daily Train, New-games session + summary, Practice
 4. [ ] Home dashboard + Insights (trends, clock analysis, openings, top-3 weaknesses -> Train this)
 5. [ ] Openings: repertoire explorer + line drills (SRS)
 Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--config <copy config>`; never the real DB.
