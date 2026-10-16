@@ -177,3 +177,30 @@ def test_threshold_mode_switch_reclassifies(client):
     ada = c.post("/api/settings/thresholds", json={"adaptive": True}).get_json()
     # Sample players are rated ~1200 (or unrated): adaptive can only be as strict or more lenient.
     assert ada["mistakes"] + ada["blunders"] <= std["mistakes"] + std["blunders"]
+
+
+def test_threat_check_and_real_game_queue(client):
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    items = c.get("/api/mistakes?judgement=inaccuracy,mistake,blunder&status=").get_json()["items"]
+    with_threat = [m for m in items if m["threat"]]
+    assert with_threat, "analysis stores the null-move threat of my positions"
+    m = with_threat[0]
+    t = m["threat"]
+    none = c.post("/api/threat/check", json={"game_id": m["game_id"], "ply": m["ply"], "uci": None}).get_json()
+    assert none["correct"] is (not t["real"])
+    if t["uci"]:
+        exact = c.post("/api/threat/check", json={"game_id": m["game_id"], "ply": m["ply"], "uci": t["uci"]}).get_json()
+        assert exact["correct"] is t["real"] and exact["san"] == t["san"]
+
+    st = c.get("/api/session").get_json()          # new games wait for their session first
+    c.post("/api/session/done", json={"batch_ids": st["batch_ids"]})
+    q = c.get("/api/train/queue?blind=1").get_json()
+    assert q["blind"] and q["items"] and all(i["mode"] == "blind" for i in q["items"])
+    first = q["items"][0]
+    r = c.post("/api/review/result", json={"game_id": first["game_id"], "ply": first["ply"], "result": "solved",
+                                           "mode": "blind", "calm": first["calm"], "threat_result": "correct"})
+    assert r.status_code == 200
+    assert c.get("/api/train/queue?blind=0").get_json()["blind"] is False

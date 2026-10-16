@@ -7,7 +7,8 @@ Tables:
              (filled by classify.py; `is_mine` = 1 for my moves). Named for its first use.
   review_results  my attempts at each mistake in review mode (history; latest = status)
   imports    one row per upload / chess.com sync ("batch"); games.batch_id points here
-  cards      spaced-repetition state per mistake to learn (srs.py)
+  cards      spaced-repetition state per position to learn (srs.py): mistakes, calm positions
+             I failed in real-game mode, opening lines
   meta       key/value store (e.g. hash of the classification settings)
 
 SCHEMA is the original (version 0) layout; MIGRATIONS upgrade any database to the
@@ -173,7 +174,19 @@ def _migrate_3(conn: sqlite3.Connection) -> None:
                             label = 'chess.com history import' WHERE id = ?""", (first["id"],))
 
 
-MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3]   # index i upgrades user_version i -> i + 1
+def _migrate_4(conn: sqlite3.Connection) -> None:
+    """v3 real-game training: threats (null-move search), puzzle quality, attempt modes."""
+    # positions.threat_*: what the opponent would play if I passed (my positions only), White's POV.
+    for column in ("threat_cp INTEGER", "threat_mate INTEGER", "threat_uci TEXT", "threat_pv TEXT"):
+        conn.execute(f"ALTER TABLE positions ADD COLUMN {column}")
+    conn.execute("ALTER TABLE games ADD COLUMN threat_version INTEGER")
+    for column in ("sharpness REAL", "decided INTEGER NOT NULL DEFAULT 0"):
+        conn.execute(f"ALTER TABLE mistakes ADD COLUMN {column}")
+    for column in ("mode TEXT", "threat_result TEXT"):
+        conn.execute(f"ALTER TABLE review_results ADD COLUMN {column}")
+
+
+MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4]   # index i upgrades user_version i -> i + 1
 
 
 def migrate(conn: sqlite3.Connection) -> None:

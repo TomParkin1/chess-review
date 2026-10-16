@@ -11,17 +11,19 @@ import threading
 import chess
 from flask import Flask, Response, abort, g, jsonify, render_template, request
 
-from . import chesscom, db, insights, report, repertoire, session, srs
+from . import chesscom, db, insights, level, report, repertoire, session, srs
 from .classify import (ADAPTIVE_BANDS, MODE_KEY, Eval, adaptive_enabled, ensure_classified,
                        thresholds_for)
 from .config import Config, effective_workers, load_config
 from .engine import AnalysisJob, count_pending
 from .explain import ATTACKING_KINDS, MoveContext, explain_best, hint, san_line
 from .live import LiveEngine, PositionAnalysis
+from .threats import gain_of_move, threat_of, training_threat
 from .pgn_import import ImportStats, import_pgn_text
 
 JUDGEMENT_ORDER = ["good", "inaccuracy", "mistake", "blunder"]
 REVIEW_RESULTS = {"solved", "solved_with_help", "failed", "skipped"}
+THREAT_RESULTS = {"correct", "wrong", "skipped"}
 
 # Latest review result for a mistake row `m` (NULL if never attempted).
 STATUS_SQL = """(SELECT r.result FROM review_results r
@@ -259,9 +261,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/settings/thresholds")
     def thresholds_info():
         c = conn()
-        latest = c.execute("""SELECT CASE my_color WHEN 'white' THEN white_elo ELSE black_elo END AS elo
-                              FROM games WHERE white_elo IS NOT NULL ORDER BY end_time DESC LIMIT 1""").fetchone()
-        rating = latest["elo"] if latest else None
+        rating = level.current_rating(c)
         adaptive = adaptive_enabled(c, cfg)
         th = thresholds_for(rating, cfg, True)
         std = thresholds_for(None, cfg, False)
@@ -356,25 +356,32 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     @app.get("/api/train/queue")
     def train_queue():
+        """Today's queue. Real-game mode (?blind=1, default from config) mixes in calm positions
+        and asks the puzzle to hide every clue that a mistake was made."""
         c = conn()
         ensure_classified(c, cfg)
-        q = srs.queue(c, cfg)
-        items = _items_for(c, q["due"], "due") + _items_for(c, q["new"], "new")
-        return jsonify(items=items, stats=srs.stats(c, cfg))
+        blind = request.args.get("blind", "1" if cfg.training.blind else "0") == "1"
+        if blind:
+            items = _items_for(c, srs.real_game_deck(c, cfg))
+            for item in items:
+                item["mode"] = "blind"
+        else:
+            q = srs.queue(c, cfg)
+            items = _items_for(c, [(k, "due") for k in q["due"]] + [(k, "new") for k in q["new"]])
+        return jsonify(items=items, stats=srs.stats(c, cfg), blind=blind)
 
-    def _items_for(c, keys: list[tuple[int, int]], tag: str) -> list[dict]:
-        """Mistake items for (game_id, ply) keys, in the given order, tagged due/new."""
-        if not keys:
+    def _items_for(c, keyed: list[tuple[tuple[int, int], str]]) -> list[dict]:
+        """Puzzle items for ((game_id, ply), tag) pairs, in the given order, tagged due/new/calm."""
+        if not keyed:
             return []
-        pairs = " OR ".join("(m.game_id = ? AND m.ply = ?)" for _ in keys)
-        flat = [v for k in keys for v in k]
+        pairs = " OR ".join("(m.game_id = ? AND m.ply = ?)" for _ in keyed)
+        flat = [v for k, _ in keyed for v in k]
         by_key = {(i["game_id"], i["ply"]): i
                   for i in _query_mistakes(c, cfg, ["m.is_mine = 1", f"({pairs})"], flat, "m.game_id")}
         out = []
-        for k in keys:
+        for k, tag in keyed:
             if k in by_key:
-                by_key[k]["queue"] = tag
-                out.append(by_key[k])
+                out.append({**by_key[k], "queue": tag, "calm": tag == "calm" or by_key[k]["judgement"] == "good"})
         return out
 
     @app.get("/api/session")
@@ -408,13 +415,10 @@ def create_app(cfg: Config | None = None) -> Flask:
         fen, uci = data.get("fen"), data.get("uci")
         if not fen or not uci:
             return jsonify(error="fen and uci are required"), 400
-        before = thresholds = None
+        before = None
+        c = conn()
+        thresholds = level.current_thresholds(c, cfg)   # tries are judged at my level *now*
         if data.get("game_id") is not None:
-            c = conn()
-            g = c.execute("SELECT white_elo, black_elo, my_color FROM games WHERE id = ?", (data["game_id"],)).fetchone()
-            if g is not None:   # judge my tries at my level in that game, like the game itself
-                rating = g["white_elo"] if g["my_color"] == "white" else g["black_elo"]
-                thresholds = thresholds_for(rating, cfg, adaptive_enabled(c, cfg))
             if data.get("step", 0) == 0:
                 pos = c.execute("SELECT * FROM positions WHERE game_id = ? AND ply = ?",
                                 (data["game_id"], data.get("ply"))).fetchone()
@@ -431,14 +435,58 @@ def create_app(cfg: Config | None = None) -> Flask:
         data = request.get_json(force=True)
         if data.get("result") not in REVIEW_RESULTS:
             return jsonify(error="unknown result"), 400
+        threat_result = data.get("threat_result")
+        if threat_result is not None and threat_result not in THREAT_RESULTS:
+            return jsonify(error="unknown threat_result"), 400
         c = conn()
         with c:
-            c.execute("""INSERT INTO review_results (game_id, ply, result, attempts, hints_used)
-                         VALUES (?, ?, ?, ?, ?)""",
+            c.execute("""INSERT INTO review_results (game_id, ply, result, attempts, hints_used, mode, threat_result)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)""",
                       (data["game_id"], data["ply"], data["result"],
-                       int(data.get("attempts", 0)), int(data.get("hints_used", 0))))
-        srs.record(c, int(data["game_id"]), int(data["ply"]), data["result"])
+                       int(data.get("attempts", 0)), int(data.get("hints_used", 0)),
+                       "blind" if data.get("mode") == "blind" else "labelled", threat_result))
+        srs.record(c, int(data["game_id"]), int(data["ply"]), data["result"],
+                   kind="position" if data.get("calm") else "mistake")
         return jsonify(ok=True)
+
+    @app.post("/api/threat/check")
+    def threat_check():
+        """Did I spot the opponent's threat? Body: {game_id, ply, uci} (the opponent move I think
+        they threaten, played as if I passed) or uci = null for "no real threat"."""
+        data = request.get_json(force=True)
+        c = conn()
+        row = c.execute("""SELECT p.*, g.my_color FROM positions p JOIN games g ON g.id = p.game_id
+                           WHERE p.game_id = ? AND p.ply = ?""", (data.get("game_id"), data.get("ply"))).fetchone()
+        if row is None:
+            return jsonify(error="unknown position"), 404
+        me = chess.WHITE if row["my_color"] == "white" else chess.BLACK
+        th = level.current_thresholds(c, cfg)
+        threat = threat_of(row, me, th)
+        if threat is None:
+            return jsonify(error="no threat data for this position"), 404
+        out = {"threat": threat.as_dict(row["fen"]), "threshold": th.mistake}
+        uci = data.get("uci")
+        if not uci:
+            out["correct"] = not threat.real
+            return jsonify(out)
+        passed = chess.Board(row["fen"])
+        passed.push(chess.Move.null())
+        move = chess.Move.from_uci(uci)
+        if move not in passed.legal_moves:
+            return jsonify(error=f"illegal move {uci}"), 400
+        out["san"] = passed.san(move)
+        if uci == threat.uci:
+            out["your_gain"], out["correct"] = round(threat.gain, 3), threat.real
+            return jsonify(out)
+        # Any other move that would hurt me as much counts too (several threats at once).
+        after_board = passed.copy(stack=False)
+        after_board.push(move)
+        before = Eval.from_row(row, me)
+        after = live.analyse(after_board).for_side(me)
+        gain = gain_of_move(before, after)
+        out["your_gain"] = round(gain, 3)
+        out["correct"] = threat.real and gain >= th.mistake
+        return jsonify(out)
 
     @app.get("/api/analyse/stream")
     def analyse_stream():
@@ -465,8 +513,9 @@ def _query_mistakes(c: sqlite3.Connection, cfg: Config, where: list[str], params
     rows = c.execute(f"""
         SELECT m.*, p.fen, p.move_uci, p.move_san, p.best_uci, p.pv_uci,
                p.score_cp AS before_cp, p.score_mate AS before_mate,
+               p.score_cp, p.score_mate, p.threat_cp, p.threat_mate, p.threat_uci, p.threat_pv,
                p2.score_cp AS after_cp, p2.score_mate AS after_mate, p2.pv_uci AS after_pv,
-               p0.move_uci AS prev_move_uci,
+               p0.move_uci AS prev_move_uci, p0.fen AS prev_fen,
                g.my_color, g.white, g.black, g.date, g.opening, g.opening_family,
                g.my_result, g.time_class, {STATUS_SQL} AS status,
                c.box AS card_box, c.due_on AS card_due
@@ -479,7 +528,8 @@ def _query_mistakes(c: sqlite3.Connection, cfg: Config, where: list[str], params
         WHERE {' AND '.join(where)}
         ORDER BY {order}
     """, params).fetchall()
-    return [_mistake_json(r, cfg) for r in rows]
+    th = level.current_thresholds(c, cfg)
+    return [_mistake_json(r, cfg, th) for r in rows]
 
 
 def _stored_analysis(pos: sqlite3.Row) -> PositionAnalysis:
@@ -535,7 +585,7 @@ def _playout_moves(kind: str | None, before: Eval, cfg: Config) -> int:
     return cfg.review.playout_other
 
 
-def _mistake_json(r: sqlite3.Row, cfg: Config) -> dict:
+def _mistake_json(r: sqlite3.Row, cfg: Config, th) -> dict:
     me = chess.WHITE if r["my_color"] == "white" else chess.BLACK
     board = chess.Board(r["fen"])
     best = chess.Move.from_uci(r["best_uci"]) if r["best_uci"] else None
@@ -544,9 +594,11 @@ def _mistake_json(r: sqlite3.Row, cfg: Config) -> dict:
     after = Eval.from_row({"score_cp": r["after_cp"], "score_mate": r["after_mate"]}, me)
     ply = r["ply"]
     reply = [chess.Move.from_uci(u) for u in (r["after_pv"] or "").split()]
+    good = r["judgement"] == "good"    # a calm position: I played well in the game
     best_explanation = explain_best(MoveContext(
         board=board, move=chess.Move.from_uci(r["move_uci"]), best=best, best_line=line,
-        reply_line=reply, before=before, after=after), r["kind"]) if best else ""
+        reply_line=reply, before=before, after=after), r["kind"]) if best and not good else ""
+    threat = training_threat(r, me, th)
     return {
         "game_id": r["game_id"], "ply": ply,
         "move_label": f"{ply // 2 + 1}{'.' if ply % 2 == 0 else '...'}{r['move_san']}",
@@ -564,9 +616,17 @@ def _mistake_json(r: sqlite3.Row, cfg: Config) -> dict:
         "date": r["date"], "opening": r["opening"], "opening_family": r["opening_family"],
         "my_result": r["my_result"], "time_class": r["time_class"],
         "prev_move_uci": r["prev_move_uci"], "status": r["status"],
-        "hint": hint(r["kind"]), "playout_moves": _playout_moves(r["kind"], before, cfg),
+        "hint": _calm_hint(threat) if good else hint(r["kind"]), "playout_moves": _playout_moves(r["kind"], before, cfg),
         "card_box": r["card_box"], "card_due": r["card_due"],
+        "mark": r["mark"], "threat": threat.as_dict(r["fen"]) if threat else None,
     }
+
+
+def _calm_hint(threat) -> str:
+    """Hint for a position I handled well in the game (no mistake kind to hint at)."""
+    if threat is not None and threat.real:
+        return "Your opponent is threatening something. Find it and deal with it first."
+    return "No tricks here: look for a solid, useful move that keeps everything protected."
 
 
 def _filter_options(c: sqlite3.Connection) -> dict:

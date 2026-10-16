@@ -43,7 +43,7 @@ function showCurrent() {
   updateBar();
   puzzle.show(item);
   const tag = item.again ? 'Again' : item.queue === 'new' ? 'New' : 'Review';
-  $('status-chip').hidden = false;
+  $('status-chip').hidden = item.mode === 'blind' && !item.again;   // "New"/"Review" would give calm positions away
   $('status-chip').textContent = tag;
   $('status-chip').className = `chip ${item.again ? 'failed' : item.queue === 'new' ? '' : 'solved'}`;
 }
@@ -70,8 +70,20 @@ async function finish() {
   );
 }
 
+// Real-game mode (default from config.toml, remembered per browser once changed).
+const BLIND_KEY = 'train-blind';
+function blindPref() {
+  try { return localStorage.getItem(BLIND_KEY); } catch { return null; }
+}
+$('blind-toggle').addEventListener('change', () => {
+  try { localStorage.setItem(BLIND_KEY, $('blind-toggle').checked ? '1' : '0'); } catch { /* unavailable */ }
+  load();
+});
+
 async function load() {
-  const data = await api('/api/train/queue');
+  const pref = blindPref();
+  const data = await api(`/api/train/queue${pref === null ? '' : `?blind=${pref}`}`);
+  $('blind-toggle').checked = data.blind;
   const s = data.stats;
   queue = data.items;
   const doneToday = s.done_today;
@@ -86,7 +98,9 @@ async function load() {
     s.lines_due ? el('a', { class: 'chip failed', href: '/openings' }, `📖 ${s.lines_due} opening positions due →`) : '',
   );
   if (queue.length) {
-    $('train-sub').textContent = 'Solve the positions you got wrong. Ones you miss come back sooner; ones you know drift away.';
+    $('train-sub').textContent = data.blind
+      ? 'Positions from your games, as you met them: spot the threat, then play your move. Some are mistakes you made, some you got right.'
+      : 'Solve the positions you got wrong. Ones you miss come back sooner; ones you know drift away.';
     $('start-btn').hidden = false;
   } else {
     $('train-sub').textContent = s.session?.open

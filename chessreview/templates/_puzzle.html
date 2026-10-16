@@ -22,6 +22,11 @@
     <div id="feedback" class="feedback" hidden></div>
     <div id="hint" class="hint" hidden></div>
 
+    <div class="actions" id="threat-actions" hidden>
+      <button class="btn" id="no-threat-btn" title="No real threat (n)">No real threat</button>
+      <button class="btn" id="threat-skip-btn">Skip this step</button>
+    </div>
+
     <div class="actions" id="solve-actions">
       <button class="btn" id="hint-btn" title="Hint (h)">💡 Hint</button>
       <button class="btn" id="solution-btn">View solution</button>
@@ -29,6 +34,7 @@
     </div>
 
     <div id="answer" hidden>
+      <div id="reveal" class="reveal" hidden></div>
       <div class="evals">
         <div><span class="muted">Before</span> <span id="eval-before" class="eval"></span></div>
         <div><span class="muted">After your move</span> <span id="eval-after" class="eval"></span></div>
@@ -59,7 +65,7 @@
 
     <div class="nav-row">
       <button class="btn small" id="prev-btn" title="Previous">◀ Previous</button>
-      <span class="muted small">Keys: h hint · s skip · Enter next · ←/→ best line · a analyse</span>
+      <span class="muted small">Keys: h hint · s skip · n no threat · Enter next · ←/→ best line · a analyse</span>
     </div>
   </div>
 </div>

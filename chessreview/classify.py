@@ -23,7 +23,7 @@ from .config import Config
 CP_CAP = 1000          # Lichess caps evals at +-10 pawns for win chances
 MATE_CP = 1000         # a forced mate counts as the cap
 SETTINGS_KEY = "classification_settings"
-CLASSIFY_VERSION = 4   # bump when judge() logic changes so stored judgements are rebuilt
+CLASSIFY_VERSION = 5   # bump when judge() logic changes so stored judgements are rebuilt
 
 JUDGEMENTS = ("good", "inaccuracy", "mistake", "blunder")
 
@@ -92,6 +92,12 @@ class Thresholds:
     mistake: float
     blunder: float
     band: str = "standard"
+
+    @property
+    def decided(self) -> float:
+        """Win chance beyond which a game counts as decided for this level: stronger players
+        are expected to win (and to lose) from smaller edges. 0.87 at 2000+, 0.95 below 1200."""
+        return min(0.95, 0.6 + self.blunder)
 
     @property
     def cp_factor(self) -> float:
@@ -179,15 +185,22 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config, adaptive:
         accuracies.append(accuracy)
         board_after = board.copy(stack=False)
         board_after.push(move)
+        gap = _second_gap(before_row, mover, before_pct)
         mark = report.mark_move(report.MarkInput(
             judgement=judgement, drop_pct=max(0.0, before_pct - after_pct),
             before_pct=before_pct, after_pct=after_pct, is_best=is_best, forced=forced,
             book=before_row["ply"] < report.BOOK_MAX_PLY and openings.is_book(board_after),
-            second_gap_pct=_second_gap(before_row, mover, before_pct),
+            second_gap_pct=gap,
             prev_opponent_judgement=previous_judgement,
             sacrifice=report.is_sacrifice(board, move),
             is_recapture=_is_recapture(board, move, previous_move, previous_board),
         ))
+
+        th = side_thresholds[mover]
+        # Hopeless before the move, or still crushing after it: little to learn from
+        # (except a missed forced mate, which is always worth finding).
+        had_mate = before.mate is not None and before.mate > 0
+        decided = int(not had_mate and (before.win_chance() <= -th.decided or after.win_chance() >= th.decided))
 
         kind = text = None
         if judgement != "good":
@@ -203,7 +216,8 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config, adaptive:
                 text = None  # explanations are worded for my moves; the coach words opponent moves
         rows.append((game_id, before_row["ply"], judgement, before.win_chance(), after.win_chance(),
                      drop, cp_loss, phases.phase(board, before_row["ply"], cfg), kind, text,
-                     int(mover == me), mark, round(accuracy, 1)))
+                     int(mover == me), mark, round(accuracy, 1),
+                     None if gap is None else round(gap / 50, 3), decided))
         previous_judgement = judgement
         previous_move, previous_board = move, board
 
@@ -213,8 +227,8 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config, adaptive:
         conn.execute("DELETE FROM mistakes WHERE game_id = ?", (game_id,))
         conn.executemany(
             """INSERT INTO mistakes (game_id, ply, judgement, win_before, win_after, win_drop,
-                   cp_loss, phase, kind, explanation, is_mine, mark, accuracy)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", rows)
+                   cp_loss, phase, kind, explanation, is_mine, mark, accuracy, sharpness, decided)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", rows)
         conn.execute("UPDATE games SET accuracy_white = ?, accuracy_black = ? WHERE id = ?",
                      (acc_white, acc_black, game_id))
     return len(rows)

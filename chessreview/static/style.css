@@ -470,3 +470,9 @@ a.chip { text-decoration: none; }
 .filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
 .filter-summary { color: var(--text-2); font-size: 14px; }
 .explanation.best { border-left-color: var(--green); }
+
+/* Real-game mode: what happened in the game, revealed after solving */
+.badge.good { color: var(--green); }
+.reveal { background: var(--panel-2); border-left: 4px solid var(--panel-3); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; color: var(--text-2); }
+.reveal strong { color: var(--text); }
+.mode-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 14px; cursor: pointer; }

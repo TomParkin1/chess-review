@@ -47,6 +47,11 @@ multipv = 3               # number of engine lines shown
 [training]
 new_per_day = 10          # new mistakes added to the daily Train queue each day
 include_inaccuracies = false
+blind = true              # Train shows positions as in a real game: no "you blundered here" clue
+
+[coach]
+calm_ratio = 0.3          # share of real-game positions where you played well (so there isn't always a trick)
+recent_games = 100        # those calm positions come from your last N games
 
 [database]
 path = "data/chess.db"

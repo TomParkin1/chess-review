@@ -113,10 +113,19 @@ $('reset-filters').addEventListener('click', () => {
 
 // ------------------------------------------------------------ puzzles
 
+// Real-game mode: no "you blundered here" clues, threat step first (remembered in this browser).
+const BLIND_KEY = 'practice-blind';
+const blindToggle = $('blind-toggle');
+try { blindToggle.checked = localStorage.getItem(BLIND_KEY) === '1'; } catch { /* unavailable */ }
+blindToggle.addEventListener('change', () => {
+  try { localStorage.setItem(BLIND_KEY, blindToggle.checked ? '1' : '0'); } catch { /* unavailable */ }
+  if (items.length) show(index);
+});
+
 function show(i) {
   index = (i + items.length) % items.length;
-  $('counter').textContent = `Mistake ${index + 1} of ${items.length}`;
-  puzzle.show(items[index]);
+  $('counter').textContent = `${blindToggle.checked ? 'Position' : 'Mistake'} ${index + 1} of ${items.length}`;
+  puzzle.show({ ...items[index], mode: blindToggle.checked ? 'blind' : undefined });
 }
 
 const puzzle = createPuzzle({

@@ -73,6 +73,13 @@ class AnalysisConfig:
 class TrainingConfig:
     new_per_day: int = 10            # new mistakes introduced into daily training per day
     include_inaccuracies: bool = False
+    blind: bool = True               # Train shows positions "as in a real game" (no badge, no arrow)
+
+
+@dataclass(frozen=True)
+class CoachConfig:
+    calm_ratio: float = 0.3          # share of the real-game deck that is positions I handled well
+    recent_games: int = 100          # calm positions come from my last N games
 
 
 @dataclass(frozen=True)
@@ -86,6 +93,7 @@ class Config:
     review: ReviewConfig = ReviewConfig()
     analysis: AnalysisConfig = AnalysisConfig()
     training: TrainingConfig = TrainingConfig()
+    coach: CoachConfig = CoachConfig()
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
@@ -106,4 +114,5 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
         review=ReviewConfig(**raw.get("review", {})),
         analysis=AnalysisConfig(**raw.get("analysis", {})),
         training=TrainingConfig(**raw.get("training", {})),
+        coach=CoachConfig(**raw.get("coach", {})),
     )

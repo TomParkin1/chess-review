@@ -56,6 +56,19 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - `explain.explain_best()`: why the engine's move is better (shown after a puzzle as `best_explanation`).
 - Analysis speed: `effective_workers()` (~2/3 of cores) single-thread engines + `max_depth` cap (benchmarked 2x
   faster than 4x2 threads, same depth on hard positions). Live judging uses 4 threads.
+- v3 real-game training (Milestone 1):
+  - `engine.py` also runs a null-move search on my positions ("what if I passed?") -> `positions.threat_*`
+    (cp/mate/uci/pv, White's POV), `games.threat_version` / `THREAT_VERSION`; older games get a threat-only pass.
+  - `threats.py`: `threat_of()` = win-chance drop if I passed; "real" when >= the *mistake* threshold at my current
+    level AND the line mates / wins material / starts with a forcing move (otherwise it is my lost chance, e.g. they castle
+    out of my tactic). `training_threat()` skips positions where a recapture is pending.
+  - `level.py`: `current_rating()` / `current_thresholds()`. `/api/judge`, threats and calm positions use my level *now*.
+  - `mistakes.sharpness` (best vs second-best gap) and `decided` (band-scaled, `Thresholds.decided`); new cards are
+    ordered by `srs.PUZZLE_VALUE`, decided ones skipped. Missed mates are never "decided".
+  - Real-game mode (`item.mode = 'blind'`, Train default `training.blind`, Practice checkbox): no badge/arrow; threat step
+    first (`/api/threat/check`); `srs.real_game_deck()` mixes in calm positions (`coach.calm_ratio`; good moves, half with
+    a real threat). Failed calm positions become `cards.kind='position'`. `review_results.mode/threat_result` record it.
+- Design rule: nothing is tuned to one rating. Derive from the engine, the current rating's band, or my rolling data.
 - Chessground `events.after` passes (orig, dest, metadata): always wrap handlers as `(o, d) => fn(o, d)`.
 - `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump
   `CLASSIFY_VERSION` when judge logic changes.
@@ -95,3 +108,10 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 4. [x] Home dashboard + Insights (trends, clock analysis, openings, top-3 weaknesses -> Train this)
 5. [x] Openings: repertoire explorer + line drills (SRS)
 Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--config <copy config>`; never the real DB.
+
+## v3 roadmap (plan approved; milestone by milestone, stop after each for testing)
+1. [x] Real-game training: threat check, blind positions + calm mix, puzzle quality, current-level judging
+2. [ ] "Today" workout + progress report
+3. [ ] Convert won positions + essential endgames
+4. [ ] Puzzle library (Lichess DB, every rating, puzzle rating)
+5. [ ] Self-review before the engine in new-games sessions

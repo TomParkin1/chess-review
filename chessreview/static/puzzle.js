@@ -5,6 +5,10 @@
 //                                                    until playout_moves are found -> done
 // "View solution" ends as failed; "Skip" records a skip and asks the host for the next one.
 //
+// Real-game mode (item.mode === 'blind'): nothing says a mistake was made (no badge, no game-move
+// arrow) and some items are calm positions where I played well. If the position has threat data,
+// a threat step comes first: play the opponent's threat (as if I passed) or press "No real threat".
+//
 // The host page includes templates/_puzzle.html and calls createPuzzle({...}).show(item).
 // Callbacks: onResult(item, result) once per puzzle, onNext(), onPrev() (optional).
 import { Chess } from 'chess.js';
@@ -34,6 +38,14 @@ const colorName = c => (c === 'white' ? 'White' : 'Black');
 // Chessground's `check: true` uses its idea of whose turn it is, which may be stale: name the colour.
 const checkOf = fen => (new Chess(fen).inCheck() ? sideToMove(fen) : false);
 const article = w => (/^[aeiou]/.test(w) ? 'an' : 'a');
+const other = c => (c === 'white' ? 'black' : 'white');
+// The same position with the opponent to move: "what if I passed?" (only used when I'm not in check).
+function passedFen(fen) {
+  const parts = fen.split(' ');
+  parts[1] = parts[1] === 'w' ? 'b' : 'w';
+  parts[3] = '-';
+  return parts.join(' ');
+}
 
 export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = null } = {}) {
   const $ = id => document.getElementById(id);
@@ -53,27 +65,36 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
   // ------------------------------------------------------------ showing a mistake
 
   function show(m) {
+    const blind = m.mode === 'blind';
     puzzle = {
       item: m, fen: m.fen, last: lastMove(m.prev_move_uci), step: 0,
-      attempts: 0, hints: 0, hintLevel: 0, phase: 'solving', recorded: false,
+      attempts: 0, hints: 0, hintLevel: 0, phase: blind && m.threat ? 'threat' : 'solving', recorded: false,
       onLine: true,     // all moves so far followed the engine's best line
+      blind, threatResult: null, threatShapes: [],
     };
+    $('badge').hidden = blind;
     $('badge').textContent = m.judgement;
     $('badge').className = `badge ${m.judgement}`;
-    $('move-title').textContent = `${m.move_label}${SYMBOLS[m.judgement]}`;
-    $('status-chip').hidden = !m.status;
+    $('move-title').textContent = blind ? `Move ${Math.floor(m.ply / 2) + 1}` : `${m.move_label}${SYMBOLS[m.judgement]}`;
+    $('status-chip').hidden = blind || !m.status;
     $('status-chip').textContent = STATUS_CHIPS[m.status] || '';
     $('status-chip').className = `chip ${m.status || ''}`;
     const result = { win: 'won', loss: 'lost', draw: 'drawn' }[m.my_result];
-    $('context').textContent = `vs ${m.opponent} · ${m.date} · ${m.opening} · ${m.phase} · game ${result}`;
+    $('context').textContent = blind
+      ? `vs ${m.opponent} · ${m.date} · ${m.opening}`
+      : `vs ${m.opponent} · ${m.date} · ${m.opening} · ${m.phase} · game ${result}`;
     $('game-link').href = `/game/${m.game_id}#${m.ply}`;
 
-    const goal = m.playout_moves > 1 ? ` It takes ${m.playout_moves} good moves in a row.` : '';
-    rich($('prompt'), 'You played ', ['strong', `${m.move_san}${SYMBOLS[m.judgement]}`],
-         ` here (red arrow). Find a better move for ${colorName(m.my_color)}.${goal}`);
+    if (puzzle.phase === 'threat') {
+      rich($('prompt'), 'First: what is ', ['strong', colorName(other(m.my_color))],
+           ' threatening? Play their most dangerous move, or press “No real threat”.');
+    } else {
+      solvingPrompt(m);
+    }
     $('feedback').hidden = true;
     resetHint();
-    $('solve-actions').hidden = false;
+    $('threat-actions').hidden = puzzle.phase !== 'threat';
+    $('solve-actions').hidden = puzzle.phase === 'threat';
     $('done-actions').hidden = true;
     $('answer').hidden = true;
 
@@ -83,7 +104,92 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     board.set({ orientation: m.my_color });
     evalBar.set(m.eval_before_white, m.my_color);
     evalBar.hide(true);  // no peeking while solving
-    setSolvingBoard();
+    if (puzzle.phase === 'threat') setThreatBoard();
+    else setSolvingBoard();
+  }
+
+  function solvingPrompt(m) {
+    const goal = m.playout_moves > 1 ? ` It takes ${m.playout_moves} good moves in a row.` : '';
+    if (m.mode === 'blind') {
+      rich($('prompt'), 'Your move as ', ['strong', colorName(m.my_color)], '. Play what you would play in a game.');
+    } else {
+      rich($('prompt'), 'You played ', ['strong', `${m.move_san}${SYMBOLS[m.judgement]}`],
+           ` here (red arrow). Find a better move for ${colorName(m.my_color)}.${goal}`);
+    }
+  }
+
+  // ------------------------------------------------------------ threat step (real-game mode)
+
+  function setThreatBoard() {
+    const p = puzzle;
+    const opp = other(p.item.my_color);
+    const fen = passedFen(p.fen);
+    badge.clear();
+    board.set({
+      fen, turnColor: opp, lastMove: p.last, check: false,
+      movable: { free: false, color: opp, dests: legalDests(new Chess(fen)), showDests: true,
+                 events: { after: (orig, dest) => onThreatMove(orig, dest) } },
+    });
+    board.setAutoShapes([]);
+  }
+
+  async function onThreatMove(orig, dest) {
+    const p = puzzle;
+    if (p.phase !== 'threat') return;
+    const opp = other(p.item.my_color);
+    const piece = new Chess(passedFen(p.fen)).get(orig);
+    p.phase = 'threat-checking';
+    lockBoard();
+    const promotion = isPromotion(piece, dest) ? await choosePromotion($('board'), opp, dest, p.item.my_color) : '';
+    checkThreat(p, orig + dest + promotion);
+  }
+
+  async function checkThreat(p, uci) {
+    if (p.phase !== 'threat' && p.phase !== 'threat-checking') return;
+    p.phase = 'threat-checking';
+    lockBoard();
+    showFeedback('', 'Checking…');
+    let r;
+    try {
+      r = await api('/api/threat/check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game_id: p.item.game_id, ply: p.item.ply, uci }),
+      });
+    } catch (err) {
+      p.threatResult = 'skipped';
+      showFeedback('bad', `Couldn't check that (${err.message}).`);
+      return startSolving(p, 0);
+    }
+    if (puzzle !== p) return;
+    const t = r.threat;
+    const opp = colorName(other(p.item.my_color));
+    const cost = t.real ? ` (it would cost you ${Math.round(t.gain * 50)}% winning chances)` : '';
+    p.threatResult = r.correct ? 'correct' : 'wrong';
+    if (r.correct) sound.correct(); else sound.wrong();
+    if (t.real) p.threatShapes = [arrow(t.uci, 'yellow')].filter(Boolean);
+    if (r.correct && t.real) {
+      showFeedback('ok', `✓ Right: ${r.san} is a real threat${cost}.`,
+                   r.san !== t.san ? `${t.san} is the strongest one.` : '', ' Now find your move.');
+    } else if (r.correct) {
+      showFeedback('ok', '✓ Right: nothing serious is threatened.', 'Now find a good move.');
+    } else if (t.real) {
+      showFeedback('bad', uci ? `✗ ${r.san} isn't the danger.` : '✗ There is a threat.',
+                   `${opp} threatens ${t.san}${cost} (yellow arrow). Now find your move.`);
+    } else {
+      showFeedback('bad', `✗ ${r.san} doesn't threaten much.`, 'Nothing serious is threatened here. Now find a good move.');
+    }
+    startSolving(p, r.correct ? 350 : 900);
+  }
+
+  function startSolving(p, delay) {
+    setTimeout(() => {
+      if (puzzle !== p) return;
+      p.phase = 'solving';
+      solvingPrompt(p.item);
+      $('threat-actions').hidden = true;
+      $('solve-actions').hidden = false;
+      setSolvingBoard();
+    }, delay);
   }
 
   function setSolvingBoard() {
@@ -117,7 +223,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     const uci = orig + dest + promotion;
 
     const m = p.item;
-    if (p.step === 0 && uci === m.move_uci) {
+    if (p.step === 0 && uci === m.move_uci && m.judgement !== 'good') {
       return wrong(p, { uci, san: m.move_san, judgement: m.judgement, after: m.eval_after,
                         explanation: "That's the move you played in the game." });
     }
@@ -207,8 +313,10 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
   function hintShapes() {
     const p = puzzle;
     if (!p) return [];
-    // Show where I went in the real game (only in the puzzle's starting position).
-    const shapes = p.step === 0 ? [arrow(p.item.move_uci, 'paleRed')].filter(Boolean) : [];
+    // Show where I went in the real game (only in the puzzle's starting position, never in
+    // real-game mode), and the threat once the threat step has revealed it.
+    const shapes = [...(p.step === 0 ? p.threatShapes : []),
+                    ...(p.step === 0 && !p.blind ? [arrow(p.item.move_uci, 'paleRed')].filter(Boolean) : [])];
     if (p.hintLevel < 2) return shapes;
     const best = hintMove();
     return best ? [...shapes, { orig: best.slice(0, 2), brush: 'green' }] : shapes;
@@ -240,10 +348,11 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     lockBoard();
     record(p, result);
     const m = p.item;
+    const calm = m.judgement === 'good';
     const messages = {
       solved: ['ok', '✓ Solved!', ' Well found.'],
       solved_with_help: ['ok', '✓ Solved', ` with ${p.hints ? 'hints' : 'some retries'}.`],
-      failed: ['bad', 'Solution', `: ${m.best_san} was the move.`],
+      failed: ['bad', 'Solution', calm ? `: ${m.best_san} is a good move here.` : `: ${m.best_san} was the move.`],
     };
     const [cls, head, tail] = messages[result];
     rich($('prompt'), [`strong.${cls}`, head], tail);
@@ -253,8 +362,22 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
 
     $('eval-before').textContent = m.eval_before;
     $('eval-after').textContent = m.eval_after;
+    $('reveal').hidden = !p.blind;
+    if (p.blind) {
+      $('badge').hidden = false;
+      $('move-title').textContent = `${m.move_label}${SYMBOLS[m.judgement] || ''}`;
+      if (calm) {
+        rich($('reveal'), 'In the game you played ', ['strong', m.move_san], ' here: a good move.',
+             m.threat?.real ? ' You dealt with the threat then too.' : '');
+      } else {
+        rich($('reveal'), 'In the game you played ', ['strong', `${m.move_san}${SYMBOLS[m.judgement]}`],
+             ` here: ${article(m.judgement)} ${m.judgement}.`);
+      }
+    }
+    $('explanation').hidden = calm;
+    $('answer').querySelector('.legend').hidden = calm;
     rich($('explanation'), ['strong', `Why ${m.move_san} was ${article(m.judgement)} ${m.judgement}: `],
-         m.explanation);
+         m.explanation || '');
     $('best-explanation').hidden = !m.best_explanation;
     rich($('best-explanation'), ['strong', `Why ${m.best_san} is better: `], m.best_explanation || '');
     $('explanation').className = `explanation ${m.judgement}`;
@@ -274,7 +397,8 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     api('/api/review/result', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ game_id: p.item.game_id, ply: p.item.ply, result,
-                             attempts: p.attempts, hints_used: p.hints }),
+                             attempts: p.attempts, hints_used: p.hints, mode: p.blind ? 'blind' : 'labelled',
+                             calm: p.item.judgement === 'good', threat_result: p.threatResult }),
     }).catch(() => { /* not critical */ });
   }
 
@@ -311,9 +435,8 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
                 movable: { color: undefined } });
     evalBar.hide(false);
     evalBar.set(solIndex === 0 ? m.eval_before_white : null, m.my_color);  // only the game position has a stored eval
-    board.setAutoShapes(solIndex === 0
-      ? [arrow(m.move_uci, 'red'), arrow(m.best_uci, 'green')].filter(Boolean)
-      : []);
+    const gameMove = m.judgement === 'good' ? null : arrow(m.move_uci, 'red');   // calm: the game move was fine
+    board.setAutoShapes(solIndex === 0 ? [gameMove, arrow(m.best_uci, 'green')].filter(Boolean) : []);
     document.querySelectorAll('#solution-moves .sm').forEach(c =>
       c.classList.toggle('current', +c.dataset.index === solIndex));
   }
@@ -342,6 +465,13 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
   });
   $('hint-btn').addEventListener('click', giveHint);
   $('solution-btn').addEventListener('click', () => { if (puzzle?.phase === 'solving') finish(puzzle, 'failed'); });
+  $('no-threat-btn').addEventListener('click', () => { if (puzzle?.phase === 'threat') checkThreat(puzzle, null); });
+  $('threat-skip-btn').addEventListener('click', () => {
+    if (puzzle?.phase !== 'threat') return;
+    puzzle.threatResult = 'skipped';
+    $('feedback').hidden = true;
+    startSolving(puzzle, 0);
+  });
   $('skip-btn').addEventListener('click', () => {
     if (!puzzle || puzzle.phase === 'done') return;
     record(puzzle, 'skipped');
@@ -368,6 +498,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     else if (e.key === 'Enter' && done) { e.preventDefault(); onNext(); }
     else if (e.key === 'ArrowLeft' && done) { e.preventDefault(); showSolutionStep(solIndex - 1); }
     else if (e.key === 'ArrowRight' && done) { e.preventDefault(); showSolutionStep(solIndex + 1); }
+    else if (e.key === 'n' && puzzle.phase === 'threat') checkThreat(puzzle, null);
     else if (e.key === 'h') giveHint();
     else if (e.key === 's') $('skip-btn').click();
   });
