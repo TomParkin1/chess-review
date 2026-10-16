@@ -1,17 +1,27 @@
 // Game view: step through a game with engine evals, an eval graph and my mistakes marked.
+import { createAnalysis } from './analysis.js';
 import { api, arrow, el, formatEval, lastMove, makeBoard, sideToMove, SYMBOLS, winChance } from './common.js';
+import { createEvalBar } from './evalbar.js';
 
 const { game, positions } = await api(`/api/game/${window.GAME_ID}`);
 const myColor = game.my_color;
 const analysed = positions.some(p => p.eval);
 let current = 0;
 
-const board = makeBoard(document.getElementById('board'), { orientation: myColor, animation: { enabled: false } });
+// viewOnly must be false at creation so the analysis board can take moves later.
+const board = makeBoard(document.getElementById('board'), {
+  orientation: myColor, viewOnly: false, movable: { color: undefined }, animation: { enabled: false },
+});
 const bestToggle = document.getElementById('best-toggle');
+const analyseBtn = document.getElementById('analyse-btn');
+let orientation = myColor;
+const evalBar = createEvalBar(document.querySelector('.board-wrap'));
+const analysis = createAnalysis({ board, panel: document.getElementById('analysis'), evalBar });
 
 // ------------------------------------------------------------ navigation
 
 function goTo(index) {
+  if (analysis.active) stopAnalysis();
   current = Math.max(0, Math.min(positions.length - 1, index));
   const pos = positions[current];
   const prev = positions[current - 1];
@@ -39,6 +49,7 @@ function goTo(index) {
     if (bestToggle.checked && pos.best_uci) shapes.push(arrow(pos.best_uci, 'blue'));
   }
   board.setAutoShapes(shapes.filter(Boolean));
+  evalBar.set(analysed ? pos.eval : null, orientation);
 
   document.getElementById('eval-text').textContent = analysed ? formatEval(pos.eval) : 'Not analysed yet';
   document.getElementById('best-text').textContent = pos.best_san ? `Best: ${pos.best_line || pos.best_san}` : '';
@@ -53,14 +64,49 @@ document.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click',
   const nav = b.dataset.nav;
   goTo({ first: 0, prev: current - 1, next: current + 1, last: positions.length - 1 }[nav]);
 }));
-document.getElementById('flip-btn').addEventListener('click', () => board.toggleOrientation());
+function flip() {
+  orientation = orientation === 'white' ? 'black' : 'white';
+  board.set({ orientation });
+  if (!analysis.active) evalBar.set(analysed ? positions[current].eval : null, orientation);
+  else evalBar.set(null, orientation);  // redrawn by the next analysis update
+}
+
+// ------------------------------------------------------------ analysis board
+
+function startAnalysis() {
+  const prev = positions[current - 1];
+  analysis.start(positions[current].fen, { last: lastMove(prev?.move_uci) });
+  analyseBtn.textContent = 'Back to game';
+  analyseBtn.classList.add('active');
+  document.getElementById('explanation').hidden = true;
+}
+
+function stopAnalysis() {
+  analysis.stop();
+  analyseBtn.textContent = 'Analyse';
+  analyseBtn.classList.remove('active');
+}
+
+analyseBtn.addEventListener('click', () => {
+  if (analysis.active) { stopAnalysis(); goTo(current); } else startAnalysis();
+});
+
+document.getElementById('flip-btn').addEventListener('click', flip);
 bestToggle.addEventListener('change', () => goTo(current));
 document.addEventListener('keydown', e => {
-  if (e.target.matches('input, select, textarea')) return;
+  if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey) return;
+  if (analysis.active) {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); analysis.back(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); analysis.forward(); }
+    else if (e.key === 'Escape' || e.key === 'a') { stopAnalysis(); goTo(current); }
+    else if (e.key === 'f') flip();
+    return;
+  }
   const keys = { ArrowLeft: current - 1, ArrowRight: current + 1, Home: 0, End: positions.length - 1,
                  ArrowUp: 0, ArrowDown: positions.length - 1 };
   if (e.key in keys) { e.preventDefault(); goTo(keys[e.key]); }
-  if (e.key === 'f') board.toggleOrientation();
+  if (e.key === 'f') flip();
+  if (e.key === 'a') startAnalysis();
 });
 
 // ------------------------------------------------------------ header + move list

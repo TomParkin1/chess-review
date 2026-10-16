@@ -5,7 +5,9 @@
 //                                                    until playout_moves are found -> done
 // "View solution" ends as failed, "Skip" records a skip and moves on.
 import { Chess } from 'chess.js';
+import { createAnalysis } from './analysis.js';
 import { api, arrow, lastMove, legalDests, makeBoard, SYMBOLS } from './common.js';
+import { createEvalBar } from './evalbar.js';
 
 const $ = id => document.getElementById(id);
 const form = $('filters');
@@ -13,6 +15,9 @@ const form = $('filters');
 const board = makeBoard($('board'), {
   viewOnly: false, animation: { enabled: true, duration: 200 }, movable: { color: undefined },
 });
+
+const evalBar = createEvalBar(document.querySelector('.board-wrap'));
+const analysis = createAnalysis({ board, panel: $('analysis'), evalBar });
 
 let items = [];
 let index = 0;
@@ -131,7 +136,10 @@ function show(i) {
   $('done-actions').hidden = true;
   $('answer').hidden = true;
 
+  stopAnalysis();
   board.set({ orientation: m.my_color });
+  evalBar.set(m.eval_before_white, m.my_color);
+  evalBar.hide(true);  // no peeking while solving
   setSolvingBoard();
 }
 
@@ -346,16 +354,40 @@ function buildSolution(m) {
 
 function showSolutionStep(i) {
   if (!solution.length || puzzle?.phase !== 'done') return;
+  stopAnalysis();
   solIndex = Math.max(0, Math.min(solution.length - 1, i));
   const s = solution[solIndex];
   const m = puzzle.item;
   board.set({ fen: s.fen, lastMove: s.last, check: new Chess(s.fen).inCheck(), movable: { color: undefined } });
+  evalBar.hide(false);
+  evalBar.set(solIndex === 0 ? m.eval_before_white : null, m.my_color);  // only the game position has a stored eval
   board.setAutoShapes(solIndex === 0
     ? [arrow(m.move_uci, 'red'), arrow(m.best_uci, 'green')].filter(Boolean)
     : []);
   document.querySelectorAll('#solution-moves .sm').forEach(c =>
     c.classList.toggle('current', +c.dataset.index === solIndex));
 }
+
+// ------------------------------------------------------------ analysis board
+
+function startAnalysis() {
+  if (puzzle?.phase !== 'done') return;
+  const s = solution[solIndex];
+  analysis.start(s.fen, { last: s.last });
+  $('analyse-btn').textContent = 'Back to puzzle';
+  $('analyse-btn').classList.add('active');
+}
+
+function stopAnalysis() {
+  if (!analysis.active) return;
+  analysis.stop();
+  $('analyse-btn').textContent = 'Analyse';
+  $('analyse-btn').classList.remove('active');
+}
+
+$('analyse-btn').addEventListener('click', () => {
+  if (analysis.active) { stopAnalysis(); showSolutionStep(solIndex); } else startAnalysis();
+});
 
 // ------------------------------------------------------------ buttons + keys
 
@@ -375,7 +407,15 @@ $('sol-next').addEventListener('click', () => showSolutionStep(solIndex + 1));
 document.addEventListener('keydown', e => {
   if (e.target.matches('input, select, textarea') || !items.length || e.metaKey || e.ctrlKey) return;
   const done = puzzle?.phase === 'done';
-  if (e.key === 'Enter' && done) { e.preventDefault(); show(index + 1); }
+  if (analysis.active) {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); analysis.back(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); analysis.forward(); }
+    else if (e.key === 'Escape' || e.key === 'a') { stopAnalysis(); showSolutionStep(solIndex); }
+    else if (e.key === 'Enter') { e.preventDefault(); show(index + 1); }
+    return;
+  }
+  if (e.key === 'a' && done) startAnalysis();
+  else if (e.key === 'Enter' && done) { e.preventDefault(); show(index + 1); }
   else if (e.key === 'ArrowLeft' && done) { e.preventDefault(); showSolutionStep(solIndex - 1); }
   else if (e.key === 'ArrowRight' && done) { e.preventDefault(); showSolutionStep(solIndex + 1); }
   else if (e.key === 'h') giveHint();

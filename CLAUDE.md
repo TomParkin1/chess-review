@@ -40,6 +40,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   Chessground boards that take moves must be created with `viewOnly: false` (listeners bind only at creation).
 - UI preferences: review is always interactive (puzzle first); board sized from window height for desktop; chess.com
   "Neo" pieces (hotlinked from images.chesscomfiles.com) on a brown/cream board (CSS in `style.css`).
+- `static/evalbar.js` (vertical eval bar) and `static/analysis.js` (free analysis board: variation + SSE live lines,
+  closes its EventSource on `done` so it doesn't auto-reconnect) are shared by game view and review.
 - `chessreview/templates/` + `chessreview/static/`: plain ES modules, no build step. chessground 9.2.1 and
   chess.js 1.4.0 via an import map from jsdelivr (see `base.html`). `common.js` has shared helpers.
 
@@ -56,3 +58,4 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - [x] Stage 2: Stockfish analysis with caching and progress (`analyse` CLI, AnalysisJob worker pool)
 - [x] Stage 3: classification and explanations
 - [x] Stage 4: web UI (upload, game view, mistake review)
+- [x] Interactive review: live judging + hints + play-out, eval bar, analysis board

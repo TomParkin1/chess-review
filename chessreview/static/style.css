@@ -227,3 +227,36 @@ table.games tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, tr
 .solution-moves .sm:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .solution-moves .sm.current { background: var(--accent); color: #fff; }
 .nav-row { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+/* Eval bar beside the board */
+.board-wrap { display: flex; gap: 8px; align-items: stretch; }
+.board-wrap .board { flex: 1; min-width: 0; }
+.layout { grid-template-columns: calc(var(--board-size) + 30px) minmax(300px, 1fr); }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+.evalbar {
+  position: relative; width: 22px; flex: none; border-radius: 4px; overflow: hidden;
+  background: #403d39; transition: opacity .2s;
+}
+.evalbar-white { position: absolute; left: 0; right: 0; bottom: 0; background: #f4f2ee; transition: height .4s ease; }
+.evalbar.flipped .evalbar-white { bottom: auto; top: 0; }
+.evalbar-mid { position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; background: rgba(214, 79, 0, .5); }
+.evalbar-label {
+  position: absolute; left: 0; right: 0; text-align: center; font-size: 10px; font-weight: 700;
+  top: 4px; color: #f4f2ee; z-index: 1;
+}
+.evalbar-label.on-white { top: auto; bottom: 4px; color: #403d39; }
+.evalbar.flipped .evalbar-label { top: auto; bottom: 4px; }
+.evalbar.flipped .evalbar-label.on-white { top: 4px; bottom: auto; }
+.evalbar.unknown { opacity: .35; }
+.evalbar.concealed { visibility: hidden; }
+
+/* Analysis board panel */
+.analysis-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin: 12px 0; }
+.analysis-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.analysis-lines { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; min-height: 66px; }
+.analysis-line { display: flex; gap: 10px; padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+.analysis-line:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.analysis-line .eval { min-width: 52px; }
+.analysis-line .line-moves { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.analysis-var-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
