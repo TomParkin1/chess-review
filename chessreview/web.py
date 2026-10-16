@@ -25,6 +25,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     cfg = cfg or load_config()
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB of PGN is plenty
+    app.config["TEMPLATES_AUTO_RELOAD"] = True  # edited pages show up without a server restart
 
     state = {"job": AnalysisJob(cfg)}
     quick_engine = QuickEngine(cfg)
@@ -156,6 +157,11 @@ def create_app(cfg: Config | None = None) -> Flask:
             if args.get(arg):
                 where.append(f"{column} = ?")
                 params.append(args[arg])
+        last = args.get("last", type=int)
+        if last and last > 0:
+            # Only my most recent N games (newest by date, then by import order).
+            where.append("g.id IN (SELECT id FROM games ORDER BY date DESC, id DESC LIMIT ?)")
+            params.append(last)
         order = {
             "worst": "m.win_drop DESC",
             "newest": "g.date DESC, g.id DESC, m.ply",

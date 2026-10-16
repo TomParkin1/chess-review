@@ -149,7 +149,7 @@ function renderGames(games) {
   }));
 }
 
-document.getElementById('reset-btn').addEventListener('click', async () => {
+document.getElementById('reset-btn')?.addEventListener('click', async () => {
   const n = document.querySelectorAll('#games-body tr').length;
   if (!n) return;
   if (!confirm(`Delete all ${n} games and their analysis?\n\nUse this to start afresh with a new batch. ` +

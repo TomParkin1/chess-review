@@ -79,3 +79,15 @@ def test_delete_all_games(client):
         r = c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
     assert r.get_json()["imported"] == 3
     wait_for_analysis(c)
+
+
+def test_review_last_n_games(client):
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    newest = c.get("/api/games").get_json()[0]["id"]
+    every = c.get("/api/mistakes?judgement=inaccuracy,mistake,blunder").get_json()["items"]
+    last1 = c.get("/api/mistakes?judgement=inaccuracy,mistake,blunder&last=1").get_json()["items"]
+    assert {m["game_id"] for m in last1} <= {newest}
+    assert len(last1) <= len(every)

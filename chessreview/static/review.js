@@ -27,8 +27,10 @@ function restoreFilters() {
     if (field.type === 'checkbox') field.checked = value === 'on';
     else field.dataset.saved = value;  // applied once the options exist
   }
-  form.elements.judgement.value = saved.judgement || form.elements.judgement.value;
-  form.elements.sort.value = saved.sort || form.elements.sort.value;
+  // These selects have fixed options, so saved values can be applied straight away.
+  for (const name of ['judgement', 'sort', 'last']) {
+    if (saved[name] !== undefined) form.elements[name].value = saved[name];
+  }
 }
 
 function fillOptions(options) {
