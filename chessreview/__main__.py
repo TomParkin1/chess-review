@@ -2,14 +2,18 @@
 
     python -m chessreview import FILE_OR_DIR [...]
     python -m chessreview summary
+    python -m chessreview analyse [--limit N]
 """
 
 import argparse
 import sqlite3
+import sys
+import time
 from pathlib import Path
 
 from . import db
 from .config import load_config
+from .engine import AnalysisJob
 from .pgn_import import import_paths
 
 
@@ -56,6 +60,51 @@ def cmd_summary(conn: sqlite3.Connection, cfg, args) -> None:
     _wdl_table(_wdl_query(conn, "opening_family", limit=args.openings), "Top openings")
 
 
+def _format_eta(seconds: float | None) -> str:
+    if seconds is None:
+        return "--:--"
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def cmd_analyse(conn: sqlite3.Connection, cfg, args) -> None:
+    pending = conn.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NULL").fetchone()[0]
+    done = conn.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NOT NULL").fetchone()[0]
+    print(f"{done} games already analysed (cached), {pending} to analyse.")
+    if not pending:
+        return
+    e = cfg.engine
+    print(f"Engine: {e.path}, {e.time_per_position}s/position, "
+          f"{e.workers} workers x {e.threads} threads. Ctrl+C stops (finished games are kept).")
+
+    job = AnalysisJob(cfg, limit=args.limit)
+    job.start()
+    try:
+        while job.is_running():
+            _print_progress(job)
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\nStopping after current positions...")
+        job.stop()
+        job.wait()
+    _print_progress(job)
+    p = job.progress
+    print(f"\nAnalysed {p.games_done} of {p.games_total} games.")
+    for err in p.errors:
+        print(f"Error: {err}")
+
+
+def _print_progress(job: AnalysisJob) -> None:
+    p = job.progress
+    width = 30
+    filled = int(width * p.fraction)
+    bar = "#" * filled + "-" * (width - filled)
+    sys.stdout.write(f"\r[{bar}] {p.fraction * 100:5.1f}%  games {p.games_done}/{p.games_total}  "
+                     f"positions {p.positions_done}/{p.positions_total}  ETA {_format_eta(p.eta_seconds)} ")
+    sys.stdout.flush()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="chessreview", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -69,6 +118,10 @@ def main() -> None:
     p = sub.add_parser("summary", help="print a summary of imported games")
     p.add_argument("--openings", type=int, default=15, help="number of openings to list")
     p.set_defaults(func=cmd_summary)
+
+    p = sub.add_parser("analyse", help="analyse un-analysed games with Stockfish")
+    p.add_argument("--limit", type=int, default=None, help="only analyse N games (newest first)")
+    p.set_defaults(func=cmd_analyse)
 
     args = parser.parse_args()
     cfg = load_config(args.config) if args.config else load_config()
