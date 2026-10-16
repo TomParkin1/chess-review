@@ -68,6 +68,14 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   - Real-game mode (`item.mode = 'blind'`, Train default `training.blind`, Practice checkbox): no badge/arrow; threat step
     first (`/api/threat/check`); `srs.real_game_deck()` mixes in calm positions (`coach.calm_ratio`; good moves, half with
     a real threat). Failed calm positions become `cards.kind='position'`. `review_results.mode/threat_result` record it.
+- v3 Today + Progress (Milestone 2):
+  - `coach.py`: `today_plan()` builds the day's blocks (reviews capped at `coach.due_cap`, real-game = new cards + calm
+    positions, focus = my #1 weakness from `insights.weaknesses(last=100)`, opening lines) and freezes it in meta
+    `today_plan`; an item is done once it has a review result today (`attempted_today`), lines via `cards.last_on`.
+    API `/api/today`, `/api/today/<block>`; the Train page (`/train`, sidebar "Today") is the block checklist + runner.
+  - `progress.py`: last N games vs the N before (`coach.progress_window`, game windows not weeks), metrics at my current
+    level (`level.winning_chance` bands for conversion), rolling series, kinds per game, weekly training. `/progress`,
+    `/api/progress/report`, summary sentence on Home. (Route fn for `/api/progress` is `analysis_progress`.)
 - Design rule: nothing is tuned to one rating. Derive from the engine, the current rating's band, or my rolling data.
 - Chessground `events.after` passes (orig, dest, metadata): always wrap handlers as `(o, d) => fn(o, d)`.
 - `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump
@@ -111,7 +119,7 @@ Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--conf
 
 ## v3 roadmap (plan approved; milestone by milestone, stop after each for testing)
 1. [x] Real-game training: threat check, blind positions + calm mix, puzzle quality, current-level judging
-2. [ ] "Today" workout + progress report
+2. [x] "Today" workout + progress report
 3. [ ] Convert won positions + essential endgames
 4. [ ] Puzzle library (Lichess DB, every rating, puzzle rating)
 5. [ ] Self-review before the engine in new-games sessions

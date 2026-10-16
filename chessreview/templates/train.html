@@ -1,25 +1,29 @@
 {% extends "base.html" %}
-{% block title %}Train · Chess Review{% endblock %}
+{% block title %}Today · Chess Review{% endblock %}
 {% block content %}
-<section class="card train-hero" id="train-start">
-  <div class="ring-wrap" id="ring"></div>
-  <div class="train-copy">
-    <h1>Daily training</h1>
-    <p class="muted" id="train-sub">Loading your queue…</p>
-    <div class="chips" id="train-chips"></div>
-    <label class="mode-toggle" title="Positions appear as in a real game: nothing says a mistake was made, some are positions you played well, and you name the opponent's threat first">
-      <input type="checkbox" id="blind-toggle"> Real game mode</label>
-    <div class="actions">
-      <button class="btn primary big" id="start-btn" hidden>Start training</button>
-      <a class="btn big" id="practice-link" href="/review" hidden>Practice anything</a>
+<section id="plan-view">
+  <section class="card train-hero" id="train-start">
+    <div class="ring-wrap" id="ring"></div>
+    <div class="train-copy">
+      <h1>Today's workout</h1>
+      <p class="muted" id="train-sub">Loading your plan…</p>
+      <label class="mode-toggle" title="Reviews appear as in a real game: nothing says a mistake was made, and you name the opponent's threat first">
+        <input type="checkbox" id="blind-toggle"> Real game mode for reviews</label>
+      <div class="actions">
+        <button class="btn primary big" id="start-btn" hidden>Start workout</button>
+        <a class="btn big" id="practice-link" href="/review" hidden>Practise more</a>
+      </div>
     </div>
-  </div>
-  <div class="streak" id="streak"></div>
+    <div class="streak" id="streak"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><h2>The plan</h2><span class="muted small" id="plan-note"></span></div>
+    <ol class="blocks" id="blocks"></ol>
+  </section>
 </section>
 
-<section class="stats" id="train-stats"></section>
-
-<section class="card summary-card" id="train-done" hidden></section>
+<section class="card summary-card" id="block-done" hidden></section>
 
 {% set puzzle_hidden = True %}
 {% include "_puzzle.html" %}

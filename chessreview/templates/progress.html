@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Progress · Chess Review{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Progress</h1>
+    <p class="muted" id="progress-scope">Is your training working?</p>
+  </div>
+</div>
+
+<p class="card progress-summary" id="summary"></p>
+
+<section class="stats" id="tiles"></section>
+
+<div class="insight-grid">
+  <section class="card">
+    <div class="card-title"><h2>Blunders per game</h2><span class="muted small rolling-note"></span></div>
+    <div id="chart-blunders"></div>
+  </section>
+  <section class="card">
+    <div class="card-title"><h2>Threats missed per game</h2><span class="muted small rolling-note"></span></div>
+    <div id="chart-threats"></div>
+  </section>
+  <section class="card">
+    <div class="card-title"><h2>Won from winning positions</h2><span class="muted small" id="winning-note"></span></div>
+    <div id="chart-conversion"></div>
+  </section>
+  <section class="card">
+    <div class="card-title"><h2>Accuracy</h2><span class="muted small rolling-note"></span></div>
+    <div id="chart-accuracy"></div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-title"><h2>What changed</h2><span class="muted small">mistakes + blunders per game, by type</span></div>
+  <div class="table-wrap">
+    <table class="games" id="kinds"><thead><tr><th>Type</th><th>Before</th><th>Now</th><th>Change</th></tr></thead><tbody></tbody></table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-title"><h2>Training</h2><span class="muted small">per week</span></div>
+  <div class="table-wrap">
+    <table class="games" id="training"><thead><tr><th>Week of</th><th>Days</th><th>Positions</th><th>Solved</th><th>Threats spotted</th></tr></thead><tbody></tbody></table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='progress.js') }}"></script>{% endblock %}

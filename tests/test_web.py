@@ -62,7 +62,7 @@ def test_upload_analyse_and_review(client):
     body = r.get_json()
     assert body["judgement"] == m["judgement"] and body["explanation"]  # same verdict as the game
 
-    for page in ("/", "/review", "/games", "/settings", "/insights", "/train", "/session", f"/game/{m["game_id"]}"):
+    for page in ("/", "/review", "/games", "/settings", "/insights", "/train", "/session", "/progress", f"/game/{m["game_id"]}"):
         assert c.get(page).status_code == 200
 
 
@@ -204,3 +204,24 @@ def test_threat_check_and_real_game_queue(client):
                                            "mode": "blind", "calm": first["calm"], "threat_result": "correct"})
     assert r.status_code == 200
     assert c.get("/api/train/queue?blind=0").get_json()["blind"] is False
+
+
+def test_today_and_progress_api(client):
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    st = c.get("/api/session").get_json()
+    c.post("/api/session/done", json={"batch_ids": st["batch_ids"]})
+    today = c.get("/api/today").get_json()
+    plan = today["plan"]
+    assert plan["total"] > 0 and all("items" not in b for b in plan["blocks"])
+    for b in plan["blocks"]:
+        if b["id"] == "opening":
+            continue
+        items = c.get(f"/api/today/{b['id']}").get_json()["items"]
+        assert len(items) == b["count"]
+        assert all(i["mode"] == "blind" for i in items) if b["id"] == "real" else True
+    assert c.get("/api/today/nonsense").status_code == 404
+    report = c.get("/api/progress/report").get_json()
+    assert report["games"] == 3 and report["summary"] and len(report["headline"]) == 6

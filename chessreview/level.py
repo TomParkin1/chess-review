@@ -7,7 +7,7 @@ from under 800 to 2000+. Nothing here is tuned to one rating.
 
 import sqlite3
 
-from .classify import Thresholds, adaptive_enabled, thresholds_for
+from .classify import Eval, Thresholds, adaptive_enabled, thresholds_for
 from .config import Config
 
 
@@ -28,3 +28,20 @@ def current_rating(conn: sqlite3.Connection, time_class: str | None = None) -> i
 def current_thresholds(conn: sqlite3.Connection, cfg: Config) -> Thresholds:
     """Judgement thresholds for my current rating (or the standard ones in standard mode)."""
     return thresholds_for(current_rating(conn), cfg, adaptive_enabled(conn, cfg))
+
+
+# "Clearly winning" by rating: stronger players are expected to convert smaller edges.
+# (rating below, centipawns); used for conversion stats (progress.py) and Convert (later).
+WINNING_BANDS = [(1200, 500), (1800, 400), (None, 300)]
+
+
+def winning_cp(rating: int | None) -> int:
+    for below, cp in WINNING_BANDS:
+        if below is None or (rating or 0) < below:
+            return cp
+    raise AssertionError("unreachable")
+
+
+def winning_chance(rating: int | None) -> float:
+    """Win chance (Lichess -1..1 scale) from which I count as clearly winning."""
+    return Eval(winning_cp(rating), None).win_chance()

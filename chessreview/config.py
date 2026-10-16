@@ -80,6 +80,10 @@ class TrainingConfig:
 class CoachConfig:
     calm_ratio: float = 0.3          # share of the real-game deck that is positions I handled well
     recent_games: int = 100          # calm positions come from my last N games
+    due_cap: int = 15                # Today: at most this many due reviews (the rest roll over)
+    real_game: int = 6               # Today: real-game positions (new mistakes + calm positions)
+    focus: int = 5                   # Today: puzzles on my #1 weakness
+    progress_window: int = 25        # Progress: compare my last N games with the N before
 
 
 @dataclass(frozen=True)

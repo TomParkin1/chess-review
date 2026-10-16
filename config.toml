@@ -52,6 +52,10 @@ blind = true              # Train shows positions as in a real game: no "you blu
 [coach]
 calm_ratio = 0.3          # share of real-game positions where you played well (so there isn't always a trick)
 recent_games = 100        # those calm positions come from your last N games
+due_cap = 15              # Today: at most this many due reviews per day (the rest roll over)
+real_game = 6             # Today: real-game positions (new mistakes + positions you played well)
+focus = 5                 # Today: puzzles on your #1 weakness (from Insights)
+progress_window = 25      # Progress: your last N games compared with the N before
 
 [database]
 path = "data/chess.db"

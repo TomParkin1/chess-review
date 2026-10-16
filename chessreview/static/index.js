@@ -172,12 +172,15 @@ function renderGames(games) {
 }
 
 async function loadTraining() {
-  const s = await api('/api/train/stats');
-  const todo = s.due + s.new;
-  document.getElementById('train-cta-title').textContent = todo ? `${todo} puzzles today` : 'Training done for today';
+  const [s, today] = await Promise.all([api('/api/train/stats'), api('/api/today')]);
+  const plan = today.plan;
+  const left = plan.total - plan.finished;
+  document.getElementById('train-cta-title').textContent = plan.complete || !plan.total
+    ? "Today's workout: done ✓" : `Today's workout: ${left} position${left === 1 ? '' : 's'}`;
   document.getElementById('train-cta-sub').textContent =
     `🔥 ${s.streak}-day streak · ${s.mastered} mastered · ${s.learning} learning`;
-  document.getElementById('train-cta-btn').className = todo ? 'btn primary' : 'btn';
+  document.getElementById('train-cta-btn').className = left && !plan.complete ? 'btn primary' : 'btn';
+  document.getElementById('train-cta-btn').textContent = plan.finished && !plan.complete ? 'Continue' : 'Open';
   const session = s.session;
   const card = document.getElementById('session-card');
   card.hidden = !session.open;
@@ -198,8 +201,15 @@ async function loadWeaknesses() {
   if (!card.hidden) renderWeaknesses(document.getElementById('weaknesses'), d.weaknesses, '100');
 }
 
+async function loadProgress() {
+  const p = await api('/api/progress/report');
+  document.getElementById('progress-card').hidden = !p.games;
+  document.getElementById('progress-summary').textContent = p.summary;
+}
+
 loadGames();
 loadSyncStatus();
+loadProgress();
 loadTraining();
 loadWeaknesses();
 pollProgress();

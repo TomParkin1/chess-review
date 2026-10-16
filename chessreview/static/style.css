@@ -476,3 +476,18 @@ a.chip { text-decoration: none; }
 .reveal { background: var(--panel-2); border-left: 4px solid var(--panel-3); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; color: var(--text-2); }
 .reveal strong { color: var(--text); }
 .mode-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 14px; cursor: pointer; }
+
+/* Today: the workout plan */
+.blocks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.block-row { display: grid; grid-template-columns: 40px 1fr auto auto; align-items: center; gap: 14px; background: var(--panel-2); border-radius: 8px; padding: 12px 14px; }
+.block-row.done { opacity: .65; }
+.block-row.done .block-icon { color: var(--green); font-weight: 900; }
+.block-icon { font-size: 22px; text-align: center; }
+.block-text strong { font-size: 16px; }
+.block-count { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Progress */
+.progress-summary { font-size: 17px; font-weight: 700; }
+.stat .delta { font-size: 13px; font-weight: 700; color: var(--muted); margin-top: 4px; }
+.stat .delta.good, td.good { color: var(--green); }
+.stat .delta.bad, td.bad { color: var(--miss); }

@@ -327,4 +327,5 @@ document.addEventListener('keydown', e => {
 });
 
 loadOverview();
-loadNode();
+if (location.hash === '#drill') showTab('drill');   // from Today's "Opening lines" block
+else loadNode();

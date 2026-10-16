@@ -11,7 +11,7 @@ import threading
 import chess
 from flask import Flask, Response, abort, g, jsonify, render_template, request
 
-from . import chesscom, db, insights, level, report, repertoire, session, srs
+from . import chesscom, coach, db, insights, level, progress, report, repertoire, session, srs
 from .classify import (ADAPTIVE_BANDS, MODE_KEY, Eval, adaptive_enabled, ensure_classified,
                        thresholds_for)
 from .config import Config, effective_workers, load_config
@@ -139,7 +139,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         return jsonify(state["job"].progress.as_dict())
 
     @app.get("/api/progress")
-    def progress():
+    def analysis_progress():
         c = conn()
         p = state["job"].progress.as_dict()
         p["pending"] = count_pending(c)
@@ -369,6 +369,45 @@ def create_app(cfg: Config | None = None) -> Flask:
             q = srs.queue(c, cfg)
             items = _items_for(c, [(k, "due") for k in q["due"]] + [(k, "new") for k in q["new"]])
         return jsonify(items=items, stats=srs.stats(c, cfg), blind=blind)
+
+    @app.get("/api/today")
+    def today():
+        """Today's workout plan with progress, plus streak and the real-game default."""
+        c = conn()
+        ensure_classified(c, cfg)
+        plan = coach.today_plan(c, cfg)
+        for block in plan["blocks"]:
+            del block["items"]      # the keys are internal; /api/today/<block> serves the puzzles
+        return jsonify(plan=plan, streak=srs.streak(c), blind=cfg.training.blind,
+                       session=session.status(c, cfg))
+
+    @app.get("/api/today/<block_id>")
+    def today_block(block_id: str):
+        """The puzzles of one block, each marked done_today. Reviews follow the real-game toggle
+        (?blind=1|0), real-game positions are always blind, focus puzzles are labelled."""
+        c = conn()
+        plan = coach.today_plan(c, cfg)
+        block = next((b for b in plan["blocks"] if b["id"] == block_id), None)
+        if block is None:
+            return jsonify(error="no such block today"), 404
+        attempted = coach.attempted_today(c, srs.today())
+        blind = request.args.get("blind", "1" if cfg.training.blind else "0") == "1"
+        mode = {"reviews": "blind" if blind else None, "real": "blind"}.get(block_id)
+        items = _items_for(c, coach.block_items(plan, block_id))
+        for item in items:
+            item["mode"] = mode
+            item["done_today"] = (item["game_id"], item["ply"]) in attempted
+        return jsonify(items=items, block={k: v for k, v in block.items() if k != "items"})
+
+    @app.get("/progress")
+    def progress_page():
+        return render_template("progress.html")
+
+    @app.get("/api/progress/report")
+    def progress_report():
+        c = conn()
+        ensure_classified(c, cfg)
+        return jsonify(progress.report(c, cfg))
 
     def _items_for(c, keyed: list[tuple[tuple[int, int], str]]) -> list[dict]:
         """Puzzle items for ((game_id, ply), tag) pairs, in the given order, tagged due/new/calm."""

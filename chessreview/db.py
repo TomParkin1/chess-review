@@ -186,7 +186,12 @@ def _migrate_4(conn: sqlite3.Connection) -> None:
         conn.execute(f"ALTER TABLE review_results ADD COLUMN {column}")
 
 
-MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4]   # index i upgrades user_version i -> i + 1
+def _migrate_5(conn: sqlite3.Connection) -> None:
+    """Today workout: the day a card was last practised (opening lines have no review_results)."""
+    conn.execute("ALTER TABLE cards ADD COLUMN last_on TEXT")
+
+
+MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5]   # index i upgrades user_version i -> i + 1
 
 
 def migrate(conn: sqlite3.Connection) -> None:

@@ -84,8 +84,8 @@ def record(conn: sqlite3.Connection, game_id: int, ply: int, result: str, on: da
     with conn:
         conn.execute(
             """UPDATE cards SET box = ?, due_on = ?, mastered_on = ?, last_result = ?, reps = reps + 1,
-                   lapses = lapses + ?, introduced_on = COALESCE(introduced_on, ?) WHERE id = ?""",
-            (box, due_on, mastered_on, result, int(result not in SOLVED), on.isoformat(), card["id"]))
+                   lapses = lapses + ?, introduced_on = COALESCE(introduced_on, ?), last_on = ? WHERE id = ?""",
+            (box, due_on, mastered_on, result, int(result not in SOLVED), on.isoformat(), on.isoformat(), card["id"]))
 
 
 def _open_session_games() -> str:
@@ -178,7 +178,11 @@ def real_game_deck(conn: sqlite3.Connection, cfg: Config, on: date | None = None
     ratio = min(max(cfg.coach.calm_ratio, 0.0), 0.8)
     n_calm = round(len(cards) * ratio / (1 - ratio))
     calm = [(k, "calm") for k in calm_positions(conn, cfg, n_calm, on.isoformat())]
-    # Spread calm positions evenly: card i sits at i, calm j between the cards around it.
+    return spread(cards, calm)
+
+
+def spread(cards: list, calm: list) -> list:
+    """Interleave calm positions evenly among the cards (card i sits at i, calm j in between)."""
     slots = [(float(i), c) for i, c in enumerate(cards)]
     slots += [((j + 1) * len(cards) / (len(calm) + 1) - 0.5, c) for j, c in enumerate(calm)]
     return [c for _, c in sorted(slots, key=lambda s: s[0])]
@@ -209,8 +213,8 @@ def record_line(conn: sqlite3.Connection, key: str, result: str, on: date | None
     with conn:
         conn.execute(
             """UPDATE cards SET box = ?, due_on = ?, mastered_on = ?, last_result = ?, reps = reps + 1,
-                   lapses = lapses + ?, introduced_on = COALESCE(introduced_on, ?) WHERE id = ?""",
-            (box, due_on, mastered_on, result, int(result not in SOLVED), on.isoformat(), card["id"]))
+                   lapses = lapses + ?, introduced_on = COALESCE(introduced_on, ?), last_on = ? WHERE id = ?""",
+            (box, due_on, mastered_on, result, int(result not in SOLVED), on.isoformat(), on.isoformat(), card["id"]))
 
 
 def due_lines(conn: sqlite3.Connection, color: str, on: date | None = None) -> list[str]:

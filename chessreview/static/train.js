@@ -1,10 +1,13 @@
-// Train: today's spaced-repetition queue (due mistakes + a few new ones), Chessly style.
-// Puzzles failed during the session come back once more at the end ("again").
+// Today: the daily workout (chessreview/coach.py). A checklist of blocks; each block runs its
+// puzzles in the shared puzzle component. Puzzles failed in a block come back once at its end.
 import { api, el } from './common.js';
 import { createPuzzle } from './puzzle.js';
 import { progressRing } from './widgets.js';
 
 const $ = id => document.getElementById(id);
+const ICONS = { reviews: '🔁', real: '⚔️', focus: '🎯', opening: '📖' };
+let plan = null;
+let block = null;      // the block being played: { id, title, ... }
 let queue = [];
 let index = 0;
 let tally = { solved: 0, failed: 0 };
@@ -23,102 +26,136 @@ const puzzle = createPuzzle({
   onNext: () => next(),
 });
 
+// ------------------------------------------------------------ real-game toggle (reviews block)
+
+const BLIND_KEY = 'train-blind';
+function blindParam() {
+  try {
+    const v = localStorage.getItem(BLIND_KEY);
+    return v === null ? '' : `?blind=${v}`;
+  } catch { return ''; }
+}
+$('blind-toggle').addEventListener('change', () => {
+  try { localStorage.setItem(BLIND_KEY, $('blind-toggle').checked ? '1' : '0'); } catch { /* unavailable */ }
+});
+
+// ------------------------------------------------------------ the plan
+
+async function loadPlan() {
+  const data = await api('/api/today');
+  plan = data.plan;
+  let pref = null;
+  try { pref = localStorage.getItem(BLIND_KEY); } catch { /* unavailable */ }
+  $('blind-toggle').checked = pref === null ? data.blind : pref === '1';
+
+  const left = plan.total - plan.finished;
+  $('ring').replaceChildren(progressRing(plan.finished, plan.total, plan.complete ? '✓' : `${left}`,
+                                         plan.complete ? 'done' : 'to do'));
+  $('streak').replaceChildren(el('div', { class: 'flame' }, '🔥'), el('div', { class: 'streak-n' }, data.streak),
+                              el('div', { class: 'muted small' }, 'day streak'));
+  const minutes = Math.max(5, Math.round(left * 1.2));
+  $('train-sub').textContent = plan.complete
+    ? "Workout complete. Come back tomorrow; extra practice is always welcome."
+    : plan.total ? `${left} positions left, about ${minutes} minutes. Built from your own games and your current weaknesses.`
+      : 'Nothing to train today. Sync new games or practise anything you like.';
+  $('start-btn').hidden = plan.complete || !plan.total;
+  $('start-btn').textContent = plan.finished ? 'Continue workout' : 'Start workout';
+  $('practice-link').hidden = !plan.complete && plan.total > 0;
+  $('plan-note').replaceChildren(data.session?.open
+    ? el('a', { href: '/session' }, `You also have ${data.session.games} new game(s) to review →`) : '');
+
+  $('blocks').replaceChildren(...plan.blocks.map(renderBlock));
+}
+
+function renderBlock(b) {
+  const status = b.done ? '✓' : ICONS[b.id] || '•';
+  const action = b.id === 'opening'
+    ? el('a', { class: `btn ${b.done ? '' : 'primary'}`, href: '/openings#drill' }, b.done ? 'Drill again' : 'Drill on Openings →')
+    : b.done ? el('span', { class: 'chip solved' }, 'Done')
+      : el('button', { class: 'btn', onclick: () => startBlock(b) }, b.finished ? 'Continue' : 'Start');
+  const count = b.id === 'opening' ? `${b.lines_due} due` : `${b.finished} / ${b.count}`;
+  return el('li', { class: `block-row ${b.done ? 'done' : ''}` },
+    el('span', { class: 'block-icon' }, status),
+    el('div', { class: 'block-text' }, el('strong', {}, b.title), el('div', { class: 'muted small' }, b.subtitle || '')),
+    el('span', { class: 'muted small block-count' }, count),
+    action);
+}
+
+function nextBlock() {
+  return plan.blocks.find(b => !b.done && b.id !== 'opening') || null;
+}
+
+// ------------------------------------------------------------ playing a block
+
+async function startBlock(b) {
+  const data = await api(`/api/today/${b.id}${b.id === 'reviews' ? blindParam() : ''}`);
+  block = data.block;
+  queue = data.items.filter(i => !i.done_today);
+  if (!queue.length) { await loadPlan(); return; }
+  index = 0;
+  tally = { solved: 0, failed: 0 };
+  $('plan-view').hidden = true;
+  $('block-done').hidden = true;
+  $('review').hidden = false;
+  showCurrent();
+}
+
 function updateBar() {
   const total = queue.length;
-  $('counter').textContent = `Puzzle ${Math.min(index + 1, total)} of ${total}`;
+  $('counter').textContent = `${block.title} · ${Math.min(index + 1, total)} of ${total}`;
   $('session-score').textContent = `✓ ${tally.solved} · ✗ ${tally.failed}`;
   const bar = $('session-progress');
   bar.hidden = false;
   bar.firstElementChild.style.width = `${(index / Math.max(total, 1)) * 100}%`;
 }
 
-function next() {
-  index += 1;
-  if (index >= queue.length) return finish();
-  showCurrent();
-}
-
 function showCurrent() {
   const item = queue[index];
   updateBar();
   puzzle.show(item);
-  const tag = item.again ? 'Again' : item.queue === 'new' ? 'New' : 'Review';
-  $('status-chip').hidden = item.mode === 'blind' && !item.again;   // "New"/"Review" would give calm positions away
-  $('status-chip').textContent = tag;
-  $('status-chip').className = `chip ${item.again ? 'failed' : item.queue === 'new' ? '' : 'solved'}`;
+  // "New"/"Review" would give calm positions away in real-game mode; "Again" is fine.
+  $('status-chip').hidden = !item.again && item.mode === 'blind';
+  if (item.again || item.mode !== 'blind') {
+    const tag = item.again ? 'Again' : item.queue === 'new' ? 'New' : item.queue === 'focus' ? 'Focus' : 'Review';
+    $('status-chip').textContent = tag;
+    $('status-chip').className = `chip ${item.again ? 'failed' : ''}`;
+  }
 }
 
-async function finish() {
+function next() {
+  index += 1;
+  if (index >= queue.length) return finishBlock();
+  showCurrent();
+}
+
+async function finishBlock() {
   $('review').hidden = true;
-  const stats = await api('/api/train/stats');
+  await loadPlan();
+  const following = nextBlock();
   const total = tally.solved + tally.failed;
-  const box = $('train-done');
+  const box = $('block-done');
   box.hidden = false;
   box.replaceChildren(
-    el('div', { class: 'celebrate' }, total && tally.failed === 0 ? '🏆' : '🎉'),
-    el('h1', {}, 'Session complete!'),
+    el('div', { class: 'celebrate' }, plan.complete ? '🏆' : '✅'),
+    el('h1', {}, plan.complete ? 'Workout complete!' : `${block.title}: done`),
     el('p', { class: 'muted' }, `${tally.solved} of ${total} solved.` +
-       (tally.failed ? ' The ones you missed come back tomorrow.' : ' Perfect run!')),
-    el('div', { class: 'chips' },
-      el('span', { class: 'chip solved' }, `✓ ${tally.solved} solved`),
-      el('span', { class: 'chip failed' }, `✗ ${tally.failed} to repeat`),
-      el('span', { class: 'chip' }, `🔥 ${stats.streak}-day streak`),
-      el('span', { class: 'chip' }, `★ ${stats.mastered} mastered`)),
+       (tally.failed ? ' The ones you missed come back soon.' : '')),
     el('div', { class: 'actions' },
-      el('a', { class: 'btn primary big', href: '/' }, 'Home'),
-      el('a', { class: 'btn big', href: '/review' }, 'Practice more')),
+      following ? el('button', { class: 'btn primary big', onclick: () => startBlock(following) }, `Next: ${following.title} ▶`) : '',
+      el('button', { class: `btn big ${following ? '' : 'primary'}`, onclick: () => showPlan() }, 'Back to the plan'),
+      plan.complete ? el('a', { class: 'btn big', href: '/progress' }, 'See your progress') : ''),
   );
 }
 
-// Real-game mode (default from config.toml, remembered per browser once changed).
-const BLIND_KEY = 'train-blind';
-function blindPref() {
-  try { return localStorage.getItem(BLIND_KEY); } catch { return null; }
-}
-$('blind-toggle').addEventListener('change', () => {
-  try { localStorage.setItem(BLIND_KEY, $('blind-toggle').checked ? '1' : '0'); } catch { /* unavailable */ }
-  load();
-});
-
-async function load() {
-  const pref = blindPref();
-  const data = await api(`/api/train/queue${pref === null ? '' : `?blind=${pref}`}`);
-  $('blind-toggle').checked = data.blind;
-  const s = data.stats;
-  queue = data.items;
-  const doneToday = s.done_today;
-  const goal = doneToday + queue.length;
-  $('ring').replaceChildren(progressRing(doneToday, goal, queue.length ? `${queue.length}` : '✓',
-                                         queue.length ? 'to do' : 'done'));
-  $('streak').replaceChildren(el('div', { class: 'flame' }, '🔥'), el('div', { class: 'streak-n' }, s.streak),
-                              el('div', { class: 'muted small' }, 'day streak'));
-  $('train-chips').replaceChildren(
-    el('span', { class: 'chip' }, `${s.due} due for review`),
-    el('span', { class: 'chip' }, `${s.new} new`),
-    s.lines_due ? el('a', { class: 'chip failed', href: '/openings' }, `📖 ${s.lines_due} opening positions due →`) : '',
-  );
-  if (queue.length) {
-    $('train-sub').textContent = data.blind
-      ? 'Positions from your games, as you met them: spot the threat, then play your move. Some are mistakes you made, some you got right.'
-      : 'Solve the positions you got wrong. Ones you miss come back sooner; ones you know drift away.';
-    $('start-btn').hidden = false;
-  } else {
-    $('train-sub').textContent = s.session?.open
-      ? 'Nothing due. You have new games waiting: start a new-games session from Home.'
-      : "All done for today. Come back tomorrow, or practise anything you like.";
-    $('practice-link').hidden = false;
-  }
-  $('train-stats').replaceChildren(
-    ...[[s.learning, 'learning'], [s.mastered, 'mastered'], [s.unseen, 'not seen yet'], [doneToday, 'solved today']]
-      .map(([v, label]) => el('div', { class: 'stat' }, el('div', { class: 'value' }, v), el('div', { class: 'label' }, label))));
+function showPlan() {
+  $('block-done').hidden = true;
+  $('review').hidden = true;
+  $('plan-view').hidden = false;
 }
 
 $('start-btn').addEventListener('click', () => {
-  $('train-start').hidden = true;
-  $('train-stats').hidden = true;
-  $('review').hidden = false;
-  index = 0;
-  showCurrent();
+  const b = nextBlock();
+  if (b) startBlock(b);
 });
 
-load();
+loadPlan();
