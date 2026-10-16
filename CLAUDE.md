@@ -16,7 +16,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - `config.toml`: all tunables (engine time/workers, classification thresholds, phase rules, DB path).
 - `chessreview/config.py`: loads config into dataclasses.
 - `chessreview/db.py`: SQLite schema (`games`, `positions`, `mistakes`, `meta`) and helpers. DB lives in `data/` (gitignored).
-- `chessreview/pgn_import.py`: PGN parsing, my colour/result, opening family, time class, dedupe (Link header, else sha1 of players+date+moves).
+- `chessreview/pgn_import.py`: PGN parsing, my colour/result, time class, dedupe (Link header, else sha1 of players+date+moves).
+- `chessreview/openings.py` + `chessreview/data/openings.tsv`: names openings from the moves using the Lichess chess-openings DB (CC0), matched by position. My chess.com exports have no ECO/ECOUrl/Link headers.
 - `chessreview/engine.py`: Stockfish analysis, worker pool, progress, caching. (Stage 2)
 - `chessreview/classify.py`, `explain.py`, `phases.py`: mistake judgement, rule-based explanations, game phases. (Stage 3)
 - `chessreview/web.py` + `templates/` + `static/`: Flask app, chessground + chess.js from jsdelivr, no build step. (Stage 4)

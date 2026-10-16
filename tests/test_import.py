@@ -33,7 +33,7 @@ def test_import_detects_colour_result_and_skips(conn, cfg):
     assert (g1["my_color"], g1["my_result"]) == ("white", "loss")
     g2 = rows["https://www.chess.com/game/live/1002"]
     assert (g2["my_color"], g2["my_result"]) == ("black", "win")  # case-insensitive name
-    assert g2["opening_family"] == "Queens Gambit"
+    assert g2["opening_family"] == "Queen's Gambit Declined"
 
 
 def test_reimport_is_all_duplicates(conn, cfg):
@@ -60,3 +60,10 @@ def test_time_class(tc, expected):
 def test_opening_family():
     headers = {"ECOUrl": "https://www.chess.com/openings/Sicilian-Defense-Najdorf-Variation-6.Be3"}
     assert opening_from_headers(headers) == ("Sicilian Defense Najdorf Variation", "Sicilian Defense")
+
+
+def test_opening_from_moves_without_headers(conn, cfg):
+    import_paths(conn, [SAMPLE], cfg)
+    row = conn.execute("SELECT eco, opening FROM games WHERE link IS NULL").fetchone()
+    assert row["eco"] == "B90"
+    assert row["opening"].startswith("Sicilian Defense: Najdorf Variation")

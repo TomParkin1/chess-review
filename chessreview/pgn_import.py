@@ -1,6 +1,7 @@
 """Parse PGN files, work out my colour/result/opening, and store new games.
 
-Duplicates are detected by the chess.com Link header, or by a hash of the
+Openings are named from the moves (openings.py), falling back to chess.com's
+ECO/ECOUrl headers. Duplicates are detected by the chess.com Link header, or by a hash of the
 players, date and moves when there is no Link.
 """
 
@@ -14,6 +15,7 @@ from pathlib import Path
 import chess
 import chess.pgn
 
+from . import openings
 from .config import Config
 
 # Words that end the "family" part of an opening name,
@@ -125,7 +127,8 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
         stats.skip("username not found in game")
         return
 
-    moves = [m.uci() for m in game.mainline_moves()]
+    mainline = list(game.mainline_moves())
+    moves = [m.uci() for m in mainline]
     if len(moves) < cfg.imports.min_plies:
         stats.skip(f"fewer than {cfg.imports.min_plies} plies")
         return
@@ -141,8 +144,13 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
         stats.duplicates += 1
         return
 
-    opening, family = opening_from_headers(h)
     start_fen = h.get("FEN") if h.get("SetUp") == "1" else None
+    known = openings.identify(mainline, start_fen)
+    if known:
+        eco, opening, family = known
+    else:
+        eco = h.get("ECO")
+        opening, family = opening_from_headers(h)
     conn.execute(
         """INSERT INTO games (dedupe_key, link, white, black, white_elo, black_elo,
                my_color, my_result, result, termination, date, time_control, time_class,
@@ -154,7 +162,7 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
             color, res, result, h.get("Termination"),
             h.get("Date", "").replace(".", "-"),
             h.get("TimeControl"), time_class(h.get("TimeControl", "")),
-            h.get("ECO"), opening, family, start_fen,
+            eco, opening, family, start_fen,
             moves_uci, len(moves), str(game), source,
         ),
     )
