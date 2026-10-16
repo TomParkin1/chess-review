@@ -170,23 +170,32 @@ class AnalysisJob:
             self._thread.join(timeout)
 
     def _run(self) -> None:
+        attempted: set[int] = set()
         try:
-            conn = db.connect(self.cfg.db_path)
-            games = pending_games(conn, self.limit)
-            conn.close()
-            self.progress.games_total = len(games)
-            self.progress.positions_total = sum(g["num_plies"] + 1 for g in games)
+            # Keep going in rounds so games uploaded while a job is running get picked up too.
+            while not self._stop.is_set():
+                conn = db.connect(self.cfg.db_path)
+                games = [g for g in pending_games(conn, self.limit) if g["id"] not in attempted]
+                conn.close()
+                if self.limit:
+                    games = games[: max(0, self.limit - len(attempted))]
+                if not games:
+                    break
+                attempted.update(g["id"] for g in games)
+                with self._lock:
+                    self.progress.games_total += len(games)
+                    self.progress.positions_total += sum(g["num_plies"] + 1 for g in games)
 
-            work: queue.Queue = queue.Queue()
-            for g in games:
-                work.put(g)
-            n_workers = max(1, min(self.cfg.engine.workers, len(games)))
-            workers = [threading.Thread(target=self._worker, args=(work,), daemon=True)
-                       for _ in range(n_workers)]
-            for w in workers:
-                w.start()
-            for w in workers:
-                w.join()
+                work: queue.Queue = queue.Queue()
+                for g in games:
+                    work.put(g)
+                n_workers = max(1, min(self.cfg.engine.workers, len(games)))
+                workers = [threading.Thread(target=self._worker, args=(work,), daemon=True)
+                           for _ in range(n_workers)]
+                for w in workers:
+                    w.start()
+                for w in workers:
+                    w.join()
             self.progress.state = "done"
         except Exception as exc:  # surface unexpected failures (e.g. bad engine path)
             self.progress.errors.append(str(exc))

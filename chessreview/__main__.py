@@ -5,6 +5,7 @@
     python -m chessreview analyse [--limit N]
     python -m chessreview reclassify
     python -m chessreview mistakes [--limit N]
+    python -m chessreview serve [--port 8000]
 """
 
 import argparse
@@ -172,6 +173,13 @@ def _print_progress(job: AnalysisJob) -> None:
     sys.stdout.flush()
 
 
+def cmd_serve(conn: sqlite3.Connection, cfg, args) -> None:
+    from .web import create_app  # Flask is only needed for the web app
+    ensure_classified(conn, cfg)
+    print(f"Open http://127.0.0.1:{args.port} in your browser (Ctrl+C to stop).")
+    create_app(cfg).run(host="127.0.0.1", port=args.port, threaded=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="chessreview", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -196,6 +204,10 @@ def main() -> None:
     p = sub.add_parser("mistakes", help="list my worst moves with explanations")
     p.add_argument("--limit", type=int, default=20)
     p.set_defaults(func=cmd_mistakes)
+
+    p = sub.add_parser("serve", help="run the web app")
+    p.add_argument("--port", type=int, default=8000)
+    p.set_defaults(func=cmd_serve)
 
     args = parser.parse_args()
     cfg = load_config(args.config) if args.config else load_config()

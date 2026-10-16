@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Chess Review{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.2.1/assets/chessground.base.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.2.1/assets/chessground.brown.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.2.1/assets/chessground.cburnett.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script type="importmap">
+    {
+      "imports": {
+        "chessground": "https://cdn.jsdelivr.net/npm/chessground@9.2.1/dist/chessground.min.js",
+        "chess.js": "https://cdn.jsdelivr.net/npm/chess.js@1.4.0/dist/esm/chess.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">♞ Chess Review</a>
+    <nav>
+      <a href="/" class="{{ 'active' if request.path == '/' }}">Games</a>
+      <a href="/review" class="{{ 'active' if request.path == '/review' }}">Review mistakes</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

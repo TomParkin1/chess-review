@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card" id="upload-card">
+  <div id="dropzone" class="dropzone">
+    <p><strong>Drop PGN files here</strong> or <label class="link">choose files<input type="file" id="file-input" multiple accept=".pgn,text/plain" hidden></label></p>
+    <p class="muted">Many files and many games per file are fine. Duplicates are skipped, and analysis starts automatically.</p>
+  </div>
+  <div id="upload-result" class="muted"></div>
+  <div id="progress" class="progress-block" hidden>
+    <div class="progress-head">
+      <span id="progress-label">Analysing…</span>
+      <button id="stop-btn" class="btn small">Stop</button>
+      <button id="start-btn" class="btn small" hidden>Analyse remaining games</button>
+    </div>
+    <div class="progress"><div id="progress-bar"></div></div>
+    <div id="progress-errors" class="error"></div>
+  </div>
+</section>
+
+<section class="stats" id="stats"></section>
+
+<section class="card">
+  <div class="table-head">
+    <h2>Games of {{ username }}</h2>
+    <span class="muted" id="games-count"></span>
+  </div>
+  <div class="table-wrap">
+    <table class="games">
+      <thead>
+        <tr><th>Date</th><th>Colour</th><th>Opponent</th><th>Result</th><th>Opening</th><th>Moves</th><th title="inaccuracies / mistakes / blunders">?! / ? / ??</th></tr>
+      </thead>
+      <tbody id="games-body"></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='index.js') }}"></script>{% endblock %}
