@@ -45,9 +45,8 @@ def test_lost_chance_is_not_a_threat(cfg):
 
 
 @pytest.mark.parametrize("fen,threat,real", [
-    # Black's pawn on d5 attacks the white knight on e4: if White passed, it falls (the engine
-    # may start with a rook check first, so only the verdict is checked).
-    ("r3k3/8/8/3p4/4N3/8/4K3/7R w - - 0 1", None, True),
+    # Black's pawn on d5 attacks the white knight on e4: if White passed, dxe4.
+    ("r3k3/p7/8/3p4/4N3/8/P7/R3K3 w - - 0 1", "d5e4", True),
     # Back rank: Black threatens Re1#.
     ("4r1k1/8/8/8/8/8/5PPP/6K1 w - - 0 1", "e8e1", True),
     # Quiet: nothing attacked.
