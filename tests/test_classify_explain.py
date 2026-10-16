@@ -77,3 +77,11 @@ def test_missed_opportunity_when_winning():
     kind, text = explain(ctx("e4 e5", "a2a3", "g1f3", ["g1f3", "b8c6"], ["g8f6"],
                              Eval(500, None), Eval(100, None)))
     assert kind == "missed_opportunity" and "Stronger was" in text
+
+
+def test_discovered_attack():
+    # Nb5 moves off the d-file and uncovers the rook on d1 against the undefended queen on d8.
+    kind, text = explain(ctx("3q4/6k1/8/8/3N4/8/8/3RK3 b - - 0 1", "g7g6", "d8d4", ["d8d4"],
+                             ["d4b5", "g6f5", "d1d8"], Eval(800, None), Eval(-900, None)))
+    assert kind == "discovered_attack"
+    assert "Nb5" in text and "rook on d1" in text and "queen on d8" in text

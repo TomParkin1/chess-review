@@ -20,7 +20,7 @@ from .phases import PIECE_VALUES
 if TYPE_CHECKING:
     from .classify import Eval
 
-VERSION = 4
+VERSION = 6
 LINE_PLIES = 8        # how far along an engine line to count material
 MIN_LOSS = 2          # material swing (in pawns) that counts as a tactic, not positional
 
@@ -220,6 +220,46 @@ def walked_into_fork(ctx: MoveContext):
                     f"and you lose {describe_trade(result)}.")
 
 
+def discovered_attack(ctx: MoveContext):
+    """The opponent's reply moves a piece out of the way of one of their long-range
+    pieces, which then attacks something valuable of mine."""
+    if not ctx.reply_line:
+        return None
+    after = ctx.board_after()
+    reply = ctx.reply_line[0]
+    if reply not in after.legal_moves:
+        return None
+    result = play_line(ctx.board, [ctx.move] + ctx.reply_line, ctx.me)
+    if -result.net < MIN_LOSS:
+        return None
+
+    them = not ctx.me
+    sliders = [sq for pt in (chess.BISHOP, chess.ROOK, chess.QUEEN)
+               for sq in after.pieces(pt, them) if sq != reply.from_square]
+    attacked_before = {sq: after.attacks(sq) for sq in sliders}
+    reply_san = after.san(reply)
+    after.push(reply)
+    candidates = []  # (target value, slider square, target square)
+    for sq in sliders:
+        slider = after.piece_at(sq)
+        if slider is None or slider.color != them:  # it was captured by the reply
+            continue
+        for target_sq in after.attacks(sq) & ~attacked_before[sq]:
+            target = after.piece_at(target_sq)
+            if (target and target.color == ctx.me and target.piece_type != chess.KING
+                    and value(target.piece_type) >= 3
+                    and (value(target.piece_type) > value(slider.piece_type)
+                         or not after.is_attacked_by(ctx.me, target_sq))):
+                candidates.append((value(target.piece_type), sq, target_sq))
+    if not candidates:
+        return None
+    _, sq, target_sq = max(candidates)
+    return "discovered_attack", (
+        f"This allows a discovered attack: {reply_san} uncovers the "
+        f"{piece_on(after, sq)}, which now attacks your "
+        f"{piece_on(after, target_sq)}. You lose {describe_trade(result)}.")
+
+
 def hanging_piece(ctx: MoveContext):
     if not ctx.reply_line:
         return None
@@ -312,7 +352,7 @@ def positional(ctx: MoveContext):
                           f"({ctx.before} to {ctx.after}).")
 
 
-RULES = [missed_mate, allowed_mate, walked_into_fork, hanging_piece, loses_material,
+RULES = [missed_mate, allowed_mate, walked_into_fork, discovered_attack, hanging_piece, loses_material,
          missed_win, exposed_king, missed_opportunity, positional]
 
 
