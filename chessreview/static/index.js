@@ -1,5 +1,5 @@
 // Home page: upload PGNs, show analysis progress, stats and the games list.
-import { api, el } from './common.js';
+import { api, el, gameRow, GAME_TABLE_HEAD } from './common.js';
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('file-input');
@@ -145,15 +145,18 @@ function renderStats(games) {
   const count = r => games.filter(g => g.my_result === r).length;
   const [w, d, l] = [count('win'), count('draw'), count('loss')];
   const analysed = games.filter(g => g.analysed);
-  const sum = key => analysed.reduce((t, g) => t + (g[key] || 0), 0);
-  const perGame = key => analysed.length ? (sum(key) / analysed.length).toFixed(1) : '–';
+  const recent = analysed.slice(0, 20).filter(g => g.my_accuracy != null);
+  const avgAcc = recent.length ? recent.reduce((t, g) => t + g.my_accuracy, 0) / recent.length : null;
+  const perGame = key => analysed.length ? (analysed.reduce((t, g) => t + (g[key] || 0), 0) / analysed.length).toFixed(1) : '–';
+  const latest = games.find(g => (g.my_color === 'white' ? g.white_elo : g.black_elo));
+  const rating = latest ? (latest.my_color === 'white' ? latest.white_elo : latest.black_elo) : '–';
   const tiles = [
-    [games.length, 'games'],
-    [`${Math.round((w + d / 2) / games.length * 100)}%`, `score (${w}W ${d}D ${l}L)`],
-    [`${analysed.length}/${games.length}`, 'analysed'],
+    [rating, `rating (${latest ? latest.time_class : ''})`],
+    [games.length, `games (${w}W ${d}D ${l}L)`],
+    [avgAcc === null ? '–' : `${avgAcc.toFixed(1)}%`, 'accuracy, last 20 games'],
     [perGame('blunders'), 'blunders per game'],
     [perGame('mistakes'), 'mistakes per game'],
-    [perGame('inaccuracies'), 'inaccuracies per game'],
+    [`${analysed.length}/${games.length}`, 'analysed'],
   ];
   for (const [value, label] of tiles) {
     stats.append(el('div', { class: 'stat' }, el('div', { class: 'value' }, value), el('div', { class: 'label' }, label)));
@@ -162,35 +165,9 @@ function renderStats(games) {
 
 function renderGames(games) {
   document.getElementById('games-count').textContent = `${games.length} games`;
-  const body = document.getElementById('games-body');
-  body.replaceChildren(...games.map(g => {
-    const opp = g.my_color === 'white' ? g.black : g.white;
-    const oppElo = g.my_color === 'white' ? g.black_elo : g.white_elo;
-    const errors = g.analysed
-      ? `${g.inaccuracies || 0} / ${g.mistakes || 0} / ${g.blunders || 0}`
-      : el('span', { class: 'muted' }, 'pending');
-    return el('tr', { onclick: () => { location.href = `/game/${g.id}`; } },
-      el('td', {}, g.date),
-      el('td', {}, el('span', { class: `dot ${g.my_color}`, title: g.my_color })),
-      el('td', {}, opp, oppElo ? el('span', { class: 'muted' }, ` (${oppElo})`) : null),
-      el('td', { class: `result-${g.my_result}` }, g.my_result),
-      el('td', { title: g.opening }, g.opening_family),
-      el('td', {}, Math.ceil(g.num_plies / 2)),
-      el('td', {}, errors),
-    );
-  }));
+  document.getElementById('games-head').innerHTML = GAME_TABLE_HEAD;
+  document.getElementById('games-body').replaceChildren(...games.slice(0, 8).map(gameRow));
 }
-
-document.getElementById('reset-btn')?.addEventListener('click', async () => {
-  const n = document.querySelectorAll('#games-body tr').length;
-  if (!n) return;
-  if (!confirm(`Delete all ${n} games and their analysis?\n\nUse this to start afresh with a new batch. ` +
-               `Your PGN files are not touched, so you can re-upload them later (they will be re-analysed).`)) return;
-  await api('/api/games', { method: 'DELETE' });
-  uploadResult.textContent = `Deleted ${n} games.`;
-  progressBlock.hidden = true;
-  loadGames();
-});
 
 loadGames();
 loadSyncStatus();

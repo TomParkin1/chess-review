@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Settings · Chess Review{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Settings</h1></div>
+<div class="settings-grid">
+  <section class="card">
+    <h2>Board</h2>
+    <p class="muted small">Saved in this browser.</p>
+    <div class="option-row" id="board-options">
+      <button class="option" data-board="brown"><span class="preview" style="background: repeating-conic-gradient(#b88762 0% 25%, #edd6b0 0% 50%) 0 0 / 50% 50%"></span>Brown</button>
+      <button class="option" data-board="green"><span class="preview" style="background: repeating-conic-gradient(#739552 0% 25%, #ebecd0 0% 50%) 0 0 / 50% 50%"></span>Green</button>
+      <button class="option" data-board="blue"><span class="preview" style="background: repeating-conic-gradient(#4b7399 0% 25%, #eae9d2 0% 50%) 0 0 / 50% 50%"></span>Blue</button>
+    </div>
+    <h3 style="margin-top: 16px">Pieces</h3>
+    <div class="option-row" id="piece-options">
+      <button class="option" data-pieces="neo"><span class="preview" style="background: #3c3a37 url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wn.png') center / 80% no-repeat"></span>Neo (chess.com)</button>
+      <button class="option" data-pieces="cburnett"><span class="preview cg-wrap cburnett-only"><piece class="knight white"></piece></span>Classic (Lichess)</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Experience</h2>
+    <label class="switch">Move sounds <input type="checkbox" data-setting="sound"></label>
+    <label class="switch">Board coordinates <input type="checkbox" data-setting="coords"></label>
+    <label class="switch">Move-mark badges on the board <input type="checkbox" data-setting="badges"></label>
+  </section>
+
+  <section class="card">
+    <h2>Engine &amp; account</h2>
+    <p class="muted small">Change these in <code>config.toml</code> and restart the app.</p>
+    <dl class="config">
+      <dt>chess.com user</dt><dd>{{ cfg.player.username }}</dd>
+      <dt>Stockfish</dt><dd>{{ cfg.engine.path }}</dd>
+      <dt>Time per position</dt><dd>{{ cfg.engine.time_per_position }} s × {{ cfg.engine.workers }} workers</dd>
+      <dt>Mistake thresholds</dt><dd>{{ cfg.classification.inaccuracy }} / {{ cfg.classification.mistake }} / {{ cfg.classification.blunder }} ({{ cfg.classification.mode }})</dd>
+      <dt>Puzzle play-out</dt><dd>{{ cfg.review.playout_tactical }} moves (tactics), {{ cfg.review.playout_other }} (other)</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Danger zone</h2>
+    <p class="muted small">Deletes every game, its analysis and your review history. chess.com sync will fetch them again.</p>
+    <button class="btn danger" id="reset-btn">Delete all games</button>
+    <p class="muted small" id="reset-result"></p>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='settings.js') }}"></script>{% endblock %}

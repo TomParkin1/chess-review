@@ -11,7 +11,7 @@ import threading
 import chess
 from flask import Flask, Response, abort, g, jsonify, render_template, request
 
-from . import chesscom, db
+from . import chesscom, db, report
 from .classify import Eval, ensure_classified
 from .config import Config, load_config
 from .engine import AnalysisJob, count_pending
@@ -68,6 +68,14 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/review")
     def review_page():
         return render_template("review.html")
+
+    @app.get("/games")
+    def games_page():
+        return render_template("games.html", username=cfg.player.username)
+
+    @app.get("/settings")
+    def settings_page():
+        return render_template("settings.html", cfg=cfg)
 
     # ------------------------------------------------------------ upload + analysis
 
@@ -141,9 +149,12 @@ def create_app(cfg: Config | None = None) -> Flask:
         c = conn()
         ensure_classified(c, cfg)
         rows = c.execute("""
-            SELECT g.id, g.date, g.white, g.black, g.white_elo, g.black_elo, g.my_color,
-                   g.my_result, g.result, g.time_class, g.eco, g.opening, g.opening_family,
-                   g.num_plies, g.termination, g.analysed_at IS NOT NULL AS analysed,
+            SELECT g.id, g.date, g.end_time, g.white, g.black, g.white_elo, g.black_elo, g.my_color,
+                   g.my_result, g.result, g.time_class, g.time_control, g.eco, g.opening,
+                   g.opening_family, g.num_plies, g.termination, g.source, g.link,
+                   g.analysed_at IS NOT NULL AS analysed,
+                   CASE g.my_color WHEN 'white' THEN g.accuracy_white ELSE g.accuracy_black END AS my_accuracy,
+                   CASE g.my_color WHEN 'white' THEN g.accuracy_black ELSE g.accuracy_white END AS opp_accuracy,
                    SUM(m.judgement = 'inaccuracy') AS inaccuracies,
                    SUM(m.judgement = 'mistake') AS mistakes,
                    SUM(m.judgement = 'blunder') AS blunders
@@ -177,7 +188,10 @@ def create_app(cfg: Config | None = None) -> Flask:
             out_positions = [_position_json(p, mistakes.get(p["ply"])) for p in positions]
         else:
             out_positions = _unanalysed_positions(row)
-        game_json = {k: row[k] for k in row.keys() if k not in ("pgn", "moves_uci")}
+        # Time used by the move played from each position (ply i -> spent[i]).
+        for p, spent in zip(out_positions, report.time_spent(row["clocks_ms"], row["time_control"])):
+            p["spent_ms"] = spent
+        game_json = {k: row[k] for k in row.keys() if k not in ("pgn", "moves_uci", "clocks_ms")}
         return jsonify(game=game_json, positions=out_positions)
 
     # ------------------------------------------------------------ review
@@ -198,6 +212,9 @@ def create_app(cfg: Config | None = None) -> Flask:
             if args.get(arg):
                 where.append(f"{column} = ?")
                 params.append(args[arg])
+        if args.get("game", type=int):
+            where.append("m.game_id = ?")
+            params.append(args.get("game", type=int))
         if args.get("status") in STATUS_FILTERS:
             where.append(STATUS_FILTERS[args["status"]])
         last = args.get("last", type=int)

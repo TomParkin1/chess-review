@@ -1,5 +1,4 @@
 // Helpers shared by the pages.
-import { Chessground } from 'chessground';
 
 export async function api(url, options = {}) {
   const res = await fetch(url, options);
@@ -41,21 +40,8 @@ export function sideToMove(fen) {
   return fen.split(' ')[1] === 'w' ? 'white' : 'black';
 }
 
-// Note: pass viewOnly: false for boards that will ever take moves; chessground only binds
-// input listeners at creation, so switching viewOnly off later has no effect.
-export function makeBoard(el, config = {}) {
-  const cg = Chessground(el, {
-    viewOnly: true,
-    coordinates: true,
-    animation: { enabled: true, duration: 150 },
-    highlight: { lastMove: true, check: true },
-    drawable: { enabled: true, visible: true },
-    ...config,
-  });
-  // Chessground measures its container; redraw when the window size changes.
-  window.addEventListener('resize', () => cg.redrawAll());
-  return cg;
-}
+// The board itself lives in board.js; re-exported here for older imports.
+export { makeBoard } from './board.js';
 
 // Map of legal destinations for chessground, from a chess.js instance.
 export function legalDests(chess) {
@@ -78,4 +64,40 @@ export function el(tag, attrs = {}, ...children) {
     if (c !== null && c !== undefined) node.append(c instanceof Node ? c : String(c));
   }
   return node;
+}
+
+// One row of a games table (Home's recent games and the Games page).
+export function gameRow(g) {
+  const opp = g.my_color === 'white' ? g.black : g.white;
+  const oppElo = g.my_color === 'white' ? g.black_elo : g.white_elo;
+  const myElo = g.my_color === 'white' ? g.white_elo : g.black_elo;
+  const acc = v => (v === null || v === undefined ? '–' : v.toFixed(1));
+  const errors = g.analysed
+    ? el('span', {}, el('span', { class: 'sym inaccuracy' }, g.inaccuracies || 0), ' / ',
+         el('span', { class: 'sym mistake' }, g.mistakes || 0), ' / ',
+         el('span', { class: 'sym blunder' }, g.blunders || 0))
+    : el('span', { class: 'muted' }, 'analysing…');
+  return el('tr', { onclick: () => { location.href = `/game/${g.id}`; } },
+    el('td', {}, el('span', { class: 'result-pill ' + g.my_result }, g.my_result)),
+    el('td', {}, el('span', { class: `dot ${g.my_color}`, title: `You played ${g.my_color}` }), ' ', opp,
+       oppElo ? el('span', { class: 'muted' }, ` (${oppElo})`) : null),
+    el('td', { class: 'num' }, myElo ?? '–'),
+    el('td', { class: 'num', title: 'Your accuracy / opponent accuracy (Lichess method)' },
+       el('strong', {}, acc(g.my_accuracy)), el('span', { class: 'muted' }, ` / ${acc(g.opp_accuracy)}`)),
+    el('td', { title: g.opening }, g.opening_family),
+    el('td', { class: 'num' }, Math.ceil(g.num_plies / 2)),
+    el('td', { class: 'num' }, errors),
+    el('td', { class: 'muted' }, `${g.time_class}`),
+    el('td', { class: 'muted num' }, playedAt(g)),
+  );
+}
+
+export const GAME_TABLE_HEAD =
+  '<tr><th>Result</th><th>Opponent</th><th>Your rating</th><th title="Accuracy (Lichess method)">Accuracy</th>' +
+  '<th>Opening</th><th>Moves</th><th title="inaccuracies / mistakes / blunders">?! / ? / ??</th><th>Type</th><th>Played</th></tr>';
+
+// 'YYYY-MM-DD HH:MM', or just the date when the time is unknown (old bulk downloads).
+export function playedAt(g) {
+  const t = g.end_time || g.date || '';
+  return t.endsWith('00:00:00') ? t.slice(0, 10) : t.slice(0, 16);
 }

@@ -202,4 +202,5 @@ def delete_all_games(conn: sqlite3.Connection) -> int:
         conn.execute("DELETE FROM positions")
         conn.execute("DELETE FROM games")
         conn.execute("DELETE FROM imports")
+        conn.execute("DELETE FROM meta WHERE key LIKE 'chesscom_%'")  # next sync starts afresh
     return n

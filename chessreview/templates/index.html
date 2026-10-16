@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card sync-card">
+<section class="card hero">
+  <div>
+    <h1>Welcome back, {{ username }}</h1>
+    <p class="muted" id="sync-result">Bring in your latest chess.com games to review them.</p>
+  </div>
   <div class="sync-row">
-    <button class="btn primary" id="sync-btn">⟳ Sync from chess.com</button>
     <label class="muted small" id="since-label" hidden>First sync:
       <select id="since">
         <option value="all">All history</option>
@@ -10,17 +13,9 @@
         <option value="1m">This month</option>
       </select>
     </label>
-    <span id="sync-result" class="muted"></span>
+    <button class="btn primary big" id="sync-btn">⟳ Sync from chess.com</button>
   </div>
-</section>
-
-<section class="card" id="upload-card">
-  <div id="dropzone" class="dropzone">
-    <p><strong>Drop PGN files here</strong> or <label class="link">choose files<input type="file" id="file-input" multiple accept=".pgn,text/plain" hidden></label></p>
-    <p class="muted">Many files and many games per file are fine. Duplicates are skipped, and analysis starts automatically.</p>
-  </div>
-  <div id="upload-result" class="muted"></div>
-  <div id="progress" class="progress-block" hidden>
+  <div id="progress" class="progress-block" hidden style="flex-basis: 100%">
     <div class="progress-head">
       <span id="progress-label">Analysing…</span>
       <button id="stop-btn" class="btn small">Stop</button>
@@ -35,20 +30,26 @@
 
 <section class="card">
   <div class="table-head">
-    <h2>Games of {{ username }}</h2>
+    <h2>Recent games</h2>
     <span class="table-actions">
       <span class="muted" id="games-count"></span>
-      <button class="btn small danger" id="reset-btn" title="Delete all games and analysis, e.g. before uploading your next batch">Delete all games</button>
+      <a class="btn small" href="/games">All games →</a>
     </span>
   </div>
   <div class="table-wrap">
     <table class="games">
-      <thead>
-        <tr><th>Date</th><th>Colour</th><th>Opponent</th><th>Result</th><th>Opening</th><th>Moves</th><th title="inaccuracies / mistakes / blunders">?! / ? / ??</th></tr>
-      </thead>
+      <thead id="games-head"></thead>
       <tbody id="games-body"></tbody>
     </table>
   </div>
+</section>
+
+<section class="card">
+  <div id="dropzone" class="dropzone">
+    <p><strong>Or drop PGN files here</strong> or <label class="link">choose files<input type="file" id="file-input" multiple accept=".pgn,text/plain" hidden></label></p>
+    <p class="muted small">For games from elsewhere. Duplicates of synced games are skipped automatically.</p>
+  </div>
+  <div id="upload-result" class="muted small"></div>
 </section>
 {% endblock %}
 {% block scripts %}<script type="module" src="{{ url_for('static', filename='index.js') }}"></script>{% endblock %}

@@ -1,26 +1,53 @@
 {% extends "base.html" %}
-{% block title %}Game · Chess Review{% endblock %}
+{% block title %}Game Report · Chess Review{% endblock %}
 {% block content %}
-<div class="game-header" id="game-header"></div>
 <div class="layout game-layout">
   <div class="board-col">
     <div class="board-wrap"><div id="board" class="board"></div></div>
     <div class="controls">
-      <button class="btn" data-nav="first" title="Start (Home)">⏮</button>
+      <button class="btn" data-nav="first" title="Start (↑)">⏮</button>
       <button class="btn" data-nav="prev" title="Previous (←)">◀</button>
       <button class="btn" data-nav="next" title="Next (→)">▶</button>
-      <button class="btn" data-nav="last" title="End (End)">⏭</button>
+      <button class="btn" data-nav="last" title="End (↓)">⏭</button>
       <button class="btn" id="flip-btn" title="Flip board (f)">⇅</button>
       <button class="btn" id="analyse-btn" title="Analyse from this position (a)">Analyse</button>
-      <label class="toggle"><input type="checkbox" id="best-toggle" checked> Best move arrow</label>
+      <label class="toggle"><input type="checkbox" id="best-toggle" checked> Best-move arrows</label>
     </div>
   </div>
+
   <div class="side-col">
-    <div id="graph" class="graph"></div>
-    <div class="eval-line"><span id="eval-text" class="eval"></span> <span id="best-text" class="muted"></span></div>
-    <div id="explanation" class="explanation" hidden></div>
-    <div id="analysis" hidden></div>
-    <div id="moves" class="moves"></div>
+    <div class="report-panel">
+      <div class="report-head" id="report-head"></div>
+      <div class="report-body" style="padding-bottom: 0">
+        <div class="coach" id="coach"></div>
+        <div class="graph chart-wrap" id="graph"></div>
+      </div>
+      <div class="report-tabs">
+        <button data-tab="summary" class="active">Summary</button>
+        <button data-tab="moves">Moves</button>
+      </div>
+
+      <div class="report-body" data-panel="summary">
+        <div class="players" id="players"></div>
+        <table class="marks" id="marks"></table>
+        <div class="section-title">Key moments</div>
+        <div class="moments" id="moments"></div>
+        <div id="time-section" hidden>
+          <div class="section-title">Time per move</div>
+          <div class="legend"><span class="swatch you"></span> You (above) <span class="swatch opp" style="margin-left: 10px"></span> Opponent (below)</div>
+          <div class="timechart chart-wrap" id="timechart"></div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="start-review">Step through the game ▶</button>
+          <a class="btn" id="practise-link" href="#">Practise this game's mistakes</a>
+        </div>
+      </div>
+
+      <div class="report-body" data-panel="moves" hidden>
+        <div id="analysis" hidden></div>
+        <div class="moves" id="moves"></div>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

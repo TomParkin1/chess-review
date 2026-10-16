@@ -6,7 +6,8 @@
 // "View solution" ends as failed, "Skip" records a skip and moves on.
 import { Chess } from 'chess.js';
 import { createAnalysis } from './analysis.js';
-import { api, arrow, lastMove, legalDests, makeBoard, SYMBOLS } from './common.js';
+import { choosePromotion, createBadge, isPromotion, makeBoard, moveSound, sound } from './board.js';
+import { api, arrow, lastMove, legalDests, SYMBOLS } from './common.js';
 import { createEvalBar } from './evalbar.js';
 
 const $ = id => document.getElementById(id);
@@ -17,6 +18,8 @@ const board = makeBoard($('board'), {
 });
 
 const evalBar = createEvalBar(document.querySelector('.board-wrap'));
+const badge = createBadge(board, $('board'));
+const onlyGame = new URLSearchParams(location.search).get('game');  // "practise this game's mistakes"
 const analysis = createAnalysis({ board, panel: $('analysis'), evalBar });
 
 let items = [];
@@ -68,6 +71,7 @@ function fillOptions(options) {
 function query() {
   const params = new URLSearchParams();
   for (const [k, v] of new FormData(form)) if (v) params.set(k, v);
+  if (onlyGame) params.set('game', onlyGame);
   return params.toString();
 }
 
@@ -137,6 +141,7 @@ function show(i) {
   $('answer').hidden = true;
 
   stopAnalysis();
+  badge.clear();
   board.set({ orientation: m.my_color });
   evalBar.set(m.eval_before_white, m.my_color);
   evalBar.hide(true);  // no peeking while solving
@@ -145,6 +150,7 @@ function show(i) {
 
 function setSolvingBoard() {
   const p = puzzle;
+  badge.clear();
   const chess = new Chess(p.fen);
   board.set({
     fen: p.fen, turnColor: p.item.my_color, lastMove: p.last, check: chess.inCheck(),
@@ -170,14 +176,15 @@ async function onMove(orig, dest) {
   if (p.phase !== 'solving') return;
   const chess = new Chess(p.fen);
   const piece = chess.get(orig);
-  const promotion = piece?.type === 'p' && (dest[1] === '8' || dest[1] === '1') ? 'q' : '';
-  const uci = orig + dest + promotion;
   p.phase = 'checking';
   lockBoard();
+  const promotion = isPromotion(piece, dest)
+    ? await choosePromotion($('board'), p.item.my_color, dest, p.item.my_color) : '';
+  const uci = orig + dest + promotion;
 
   const m = p.item;
   if (p.step === 0 && uci === m.move_uci) {
-    return wrong(p, { san: m.move_san, judgement: m.judgement, after: m.eval_after,
+    return wrong(p, { uci, san: m.move_san, judgement: m.judgement, after: m.eval_after,
                       explanation: "That's the move you played in the game." });
   }
   showFeedback('', 'Checking…');
@@ -199,6 +206,8 @@ async function onMove(orig, dest) {
 
 function wrong(p, r) {
   p.attempts += 1;
+  sound.wrong();
+  badge.show(r.uci?.slice(2, 4) || null, r.judgement);
   showFeedback('bad', `✗ ${r.san} is ${article(r.judgement)} ${r.judgement} (${r.after}).`,
                r.explanation || '', ' Try again.');
   setTimeout(() => {
@@ -214,6 +223,8 @@ function right(p, r, uci) {
   if (m.best_pv_uci[lineIndex] !== uci) p.onLine = false;
   showFeedback('ok', r.is_best ? '✓ Best move!' : `✓ Good move! ${r.san} keeps it at ${r.after}.`);
   board.set({ fen: r.fen_after, lastMove: lastMove(uci) });
+  sound.correct();
+  badge.show(uci.slice(2, 4), r.is_best ? 'best' : 'excellent');
 
   const found = p.step + 1;
   if (found >= m.playout_moves || r.game_over || !r.reply_uci) {
@@ -224,6 +235,8 @@ function right(p, r, uci) {
   if (m.best_pv_uci[lineIndex + 1] !== r.reply_uci) p.onLine = false;
   setTimeout(() => {
     if (puzzle !== p) return;
+    moveSound(r.reply_san);
+    badge.clear();
     p.fen = r.fen_after_reply;
     p.last = lastMove(r.reply_uci);
     p.step = found;
@@ -356,6 +369,7 @@ function showSolutionStep(i) {
   if (!solution.length || puzzle?.phase !== 'done') return;
   stopAnalysis();
   solIndex = Math.max(0, Math.min(solution.length - 1, i));
+  badge.clear();
   const s = solution[solIndex];
   const m = puzzle.item;
   board.set({ fen: s.fen, lastMove: s.last, check: new Chess(s.fen).inCheck(), movable: { color: undefined } });

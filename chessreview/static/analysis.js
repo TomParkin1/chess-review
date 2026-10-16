@@ -2,6 +2,7 @@
 // variation, while live Stockfish lines stream in from /api/analyse/stream.
 // Shared by the game view and the review page.
 import { Chess } from 'chess.js';
+import { choosePromotion, isPromotion, moveSound } from './board.js';
 import { formatEval, lastMove, legalDests, sideToMove } from './common.js';
 
 export function createAnalysis({ board, panel, evalBar }) {
@@ -60,15 +61,19 @@ export function createAnalysis({ board, panel, evalBar }) {
     refresh();
   }
 
-  function onMove(orig, dest) {
+  async function onMove(orig, dest, promo) {
     const chess = new Chess(currentFen());
     const piece = chess.get(orig);
-    const promotion = piece?.type === 'p' && (dest[1] === '8' || dest[1] === '1') ? 'q' : undefined;
+    const promotion = promo || (isPromotion(piece, dest)
+      ? await choosePromotion(board.state.dom.elements.wrap, piece.color === 'w' ? 'white' : 'black', dest,
+                              board.state.orientation)
+      : undefined);
     let mv;
     try { mv = chess.move({ from: orig, to: dest, promotion }); } catch { return refresh(); }
     moves = moves.slice(0, cursor);            // a new move replaces anything after the cursor
     moves.push({ uci: mv.from + mv.to + (mv.promotion || ''), san: mv.san, fen: chess.fen() });
     cursor = moves.length;
+    moveSound(mv.san);
     refresh();
   }
 
@@ -157,7 +162,7 @@ export function createAnalysis({ board, panel, evalBar }) {
       row.addEventListener('click', () => {
         const chess = new Chess(fen);
         const mv = chess.move({ from: l.uci.slice(0, 2), to: l.uci.slice(2, 4), promotion: l.uci[4] });
-        if (mv) onMove(mv.from, mv.to);
+        if (mv) onMove(mv.from, mv.to, mv.promotion);
       });
       return row;
     }));

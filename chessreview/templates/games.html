@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Games · Chess Review{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Games</h1>
+  <div class="filters-row">
+    <input type="search" id="search" placeholder="Opponent or opening…">
+    <select id="f-result"><option value="">All results</option><option value="win">Wins</option><option value="draw">Draws</option><option value="loss">Losses</option></select>
+    <select id="f-color"><option value="">Both colours</option><option value="white">As White</option><option value="black">As Black</option></select>
+    <select id="f-time"><option value="">All time controls</option></select>
+  </div>
+</div>
+<section class="card">
+  <div class="table-head"><span class="muted" id="games-count"></span></div>
+  <div class="table-wrap">
+    <table class="games">
+      <thead id="games-head"></thead>
+      <tbody id="games-body"></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='games.js') }}"></script>{% endblock %}

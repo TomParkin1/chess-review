@@ -45,6 +45,9 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   Chessground boards that take moves must be created with `viewOnly: false` (listeners bind only at creation).
 - UI preferences: review is always interactive (puzzle first); board sized from window height for desktop; chess.com
   "Neo" pieces (hotlinked from images.chesscomfiles.com) on a brown/cream board (CSS in `style.css`).
+- `static/board.js`: makeBoard + settings (localStorage, applied via `html[data-board|data-pieces]`), square badges,
+  promotion picker, WebAudio sounds. `static/icons.js`: our own SVG mark badges (`MARKS`, `markIcon`).
+- `static/game.js` = Game Report (coach, accuracy, mark counts, key moments, eval graph + time chart with hover).
 - `static/evalbar.js` (vertical eval bar) and `static/analysis.js` (free analysis board: variation + SSE live lines,
   closes its EventSource on `done` so it doesn't auto-reconnect) are shared by game view and review.
 - `chessreview/templates/` + `chessreview/static/`: plain ES modules, no build step. chessground 9.2.1 and
@@ -67,7 +70,7 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 
 ## v2 roadmap (plan approved; build milestone by milestone, stop after each for testing)
 1. [x] Data foundation: migrations, chess.com sync, batches, clocks, MultiPV 2, both-side marks, accuracy
-2. [ ] New shell (chess.com-dark sidebar, icons, sounds, promotion, settings) + Game Report page
+2. [x] New shell (chess.com-dark sidebar, icons, sounds, promotion, settings) + Game Report page
 3. [ ] Training: puzzle.js component, SRS cards + daily Train, New-games session + summary, Practice
 4. [ ] Home dashboard + Insights (trends, clock analysis, openings, top-3 weaknesses -> Train this)
 5. [ ] Openings: repertoire explorer + line drills (SRS)

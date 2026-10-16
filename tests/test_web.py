@@ -62,7 +62,7 @@ def test_upload_analyse_and_review(client):
     body = r.get_json()
     assert body["judgement"] == m["judgement"] and body["explanation"]  # same verdict as the game
 
-    for page in ("/", "/review", f"/game/{m['game_id']}"):
+    for page in ("/", "/review", "/games", "/settings", f"/game/{m["game_id"]}"):
         assert c.get(page).status_code == 200
 
 
