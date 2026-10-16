@@ -293,7 +293,7 @@ table.marks tr.zero td.count { color: var(--muted); font-weight: 600; }
 .graph svg { height: 110px; cursor: pointer; }
 .graph .white-area { fill: var(--white-area); }
 .graph .black-area { fill: var(--black-area); }
-.graph .midline { stroke: #8a8782; stroke-width: 1; stroke-dasharray: 3 3; }
+.graph .midline { stroke: #8a8782; stroke-width: 1; }
 .graph .cursor { stroke: var(--blue); stroke-width: 2; }
 .chart-wrap { position: relative; }
 .chart-tip {
@@ -412,3 +412,38 @@ dl.config dd { margin: 0; font-variant-numeric: tabular-nums; }
 .cb-track { height: 10px; background: var(--panel-2); border-radius: 5px; overflow: hidden; }
 .cb-fill { display: block; height: 100%; border-radius: 5px; }
 .cb-n { font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------ insights */
+
+.weakness-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.weakness {
+  position: relative; display: flex; flex-direction: column; gap: 6px; background: var(--panel-2); border-radius: var(--radius);
+  padding: 16px; text-decoration: none; color: var(--text); transition: transform .12s;
+}
+.weakness:hover { transform: translateY(-2px); background: var(--panel-3); }
+.weakness h3 { font-size: 17px; }
+.weakness p { margin: 0; flex: 1; }
+.weakness .btn { align-self: flex-start; }
+.weakness-rank { position: absolute; top: 12px; right: 14px; color: var(--muted); font-weight: 900; }
+.weakness-icon { font-size: 26px; }
+
+.insight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 0 16px; }
+.linechart { width: 100%; height: auto; display: block; }
+.linechart .gridline { stroke: #3a3835; stroke-width: 1; }
+.linechart .tick { fill: var(--muted); font-size: 11px; }
+.linechart .crosshair { stroke: #8a8782; stroke-width: 1; }
+.tip-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+
+.hb-row { display: grid; grid-template-columns: 170px 1fr 92px; align-items: center; gap: 10px; padding: 5px 4px;
+          border-radius: 6px; color: var(--text-2); text-decoration: none; font-size: 14px; }
+a.hb-row:hover { background: var(--panel-2); color: var(--text); }
+.hb-track { height: 14px; background: var(--panel-2); border-radius: 0 4px 4px 0; overflow: hidden; }
+.hb-fill { display: block; height: 100%; border-radius: 0 4px 4px 0; }
+.hb-value { text-align: right; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+
+.color-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.color-tile { background: var(--panel-2); border-radius: var(--radius); padding: 14px; text-decoration: none; color: var(--text); }
+.color-tile:hover { background: var(--panel-3); }
+.color-tile .value { font-size: 30px; font-weight: 900; }
+.wdl { display: inline-flex; width: 90px; height: 10px; border-radius: 5px; overflow: hidden; vertical-align: middle; gap: 2px; }
+.wdl .w { background: var(--green); } .wdl .d { background: #8a8782; } .wdl .l { background: var(--miss); }

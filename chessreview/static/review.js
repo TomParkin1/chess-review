@@ -4,7 +4,12 @@ import { createPuzzle } from './puzzle.js';
 
 const $ = id => document.getElementById(id);
 const form = $('filters');
-const onlyGame = new URLSearchParams(location.search).get('game');  // "practise this game's mistakes"
+const urlParams = new URLSearchParams(location.search);
+const onlyGame = urlParams.get('game');          // "practise this game's mistakes"
+const lowClock = urlParams.get('low_clock');     // "Train this" for time trouble (Insights)
+// Filters given in the URL (from Insights' "Train this") replace the saved ones.
+const FILTER_KEYS = ['status', 'judgement', 'last', 'opening', 'phase', 'result', 'color', 'time_class', 'kind', 'sort'];
+const fromLink = FILTER_KEYS.some(k => urlParams.has(k)) || lowClock;
 
 let items = [];
 let index = 0;
@@ -30,6 +35,7 @@ function saveFilters() {
 function restoreFilters() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { /* ignore */ }
+  if (fromLink) saved = Object.fromEntries(FILTER_KEYS.filter(k => urlParams.has(k)).map(k => [k, urlParams.get(k)]));
   for (const [name, value] of Object.entries(saved)) {
     const field = form.elements[name];
     if (!field) continue;
@@ -51,6 +57,7 @@ function query() {
   const params = new URLSearchParams();
   for (const [k, v] of new FormData(form)) if (v) params.set(k, v);
   if (onlyGame) params.set('game', onlyGame);
+  if (lowClock) params.set('low_clock', lowClock);
   return params.toString();
 }
 
@@ -88,10 +95,12 @@ const puzzle = createPuzzle({
   onPrev: () => show(index - 1),
 });
 
-if (onlyGame) {
+if (onlyGame || fromLink) {
   const box = $('game-filter');
   box.hidden = false;
-  box.innerHTML = `Showing mistakes from one game only. <a href="/review">Show all mistakes</a>`;
+  const what = onlyGame ? 'mistakes from one game' : lowClock ? 'mistakes made with under a minute on the clock'
+    : 'mistakes matching this weakness';
+  box.innerHTML = `Practising ${what}. <a href="/review">Show all mistakes</a>`;
 }
 restoreFilters();
 load();

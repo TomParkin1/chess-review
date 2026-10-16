@@ -11,7 +11,7 @@ import threading
 import chess
 from flask import Flask, Response, abort, g, jsonify, render_template, request
 
-from . import chesscom, db, report, session, srs
+from . import chesscom, db, insights, report, session, srs
 from .classify import Eval, ensure_classified
 from .config import Config, load_config
 from .engine import AnalysisJob, count_pending
@@ -229,9 +229,31 @@ def create_app(cfg: Config | None = None) -> Flask:
         }.get(args.get("sort", "worst"), "m.win_drop DESC")
 
         items = _query_mistakes(c, cfg, where, params, order)
+        if args.get("low_clock"):
+            items = [i for i in items if _low_clock(c, i)]
         return jsonify(items=items, options=_filter_options(c))
 
+    def _low_clock(c, item) -> bool:
+        """Was my clock under a minute when I made this mistake? (needs chess.com clocks)"""
+        g = c.execute("SELECT clocks_ms, time_control FROM games WHERE id = ?", (item["game_id"],)).fetchone()
+        if not g["clocks_ms"]:
+            return False
+        base, _ = report.parse_time_control(g["time_control"])
+        left = insights.clock_before(g["clocks_ms"].split(), base, item["ply"])
+        return left is not None and left < insights.LOW_CLOCK_MS
+
     # ------------------------------------------------------------ training (SRS) + new-games session
+
+    @app.get("/insights")
+    def insights_page():
+        return render_template("insights.html")
+
+    @app.get("/api/insights")
+    def insights_data():
+        c = conn()
+        ensure_classified(c, cfg)
+        return jsonify(insights.compute(c, request.args.get("time_class") or None,
+                                        request.args.get("last", type=int)))
 
     @app.get("/train")
     def train_page():

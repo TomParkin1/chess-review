@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Insights · Chess Review{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Insights</h1>
+  <div class="filters-row">
+    <select id="f-time"><option value="">All time controls</option></select>
+    <select id="f-last">
+      <option value="">All games</option>
+      <option value="20">Last 20 games</option>
+      <option value="50">Last 50 games</option>
+      <option value="100">Last 100 games</option>
+    </select>
+  </div>
+</div>
+
+<section class="stats" id="tiles"></section>
+
+<section class="card">
+  <div class="card-title"><h2>Your biggest weaknesses</h2><span class="muted small">Compared with your own average · click to train</span></div>
+  <div class="weakness-grid" id="weaknesses"></div>
+</section>
+
+<div class="insight-grid">
+  <section class="card">
+    <div class="card-title"><h2>Rating</h2><span class="muted small" id="rating-note"></span></div>
+    <div id="rating-chart"></div>
+  </section>
+  <section class="card">
+    <div class="card-title"><h2>Accuracy</h2>
+      <span class="legend"><span class="swatch you"></span> each game <span class="swatch opp" style="margin-left:8px"></span> 10-game average</span></div>
+    <div id="accuracy-chart"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><h2>By game phase</h2><span class="muted small">accuracy of your moves</span></div>
+    <div id="phase-bars"></div>
+    <p class="muted small" id="phase-note"></p>
+  </section>
+  <section class="card">
+    <div class="card-title"><h2>What goes wrong</h2><span class="muted small">your mistakes + blunders</span></div>
+    <div id="kind-bars"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><h2>The clock</h2><span class="muted small">blunders per 100 moves, by time left</span></div>
+    <div id="clock-bars"></div>
+    <p class="muted small" id="clock-note"></p>
+  </section>
+  <section class="card">
+    <div class="card-title"><h2>White vs Black</h2></div>
+    <div class="color-tiles" id="colors"></div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-title"><h2>Openings</h2><span class="muted small">click an opening to practise its mistakes</span></div>
+  <div class="table-wrap">
+    <table class="games" id="openings">
+      <thead><tr><th>Opening</th><th>As</th><th>Games</th><th>Results</th><th>Score</th><th>Accuracy</th><th title="Accuracy of your moves in the opening phase">Opening moves</th><th>Errors / game</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='insights.js') }}"></script>{% endblock %}

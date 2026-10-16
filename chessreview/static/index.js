@@ -1,5 +1,6 @@
 // Home page: upload PGNs, show analysis progress, stats and the games list.
 import { api, el, gameRow, GAME_TABLE_HEAD } from './common.js';
+import { renderWeaknesses } from './insights.js';
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('file-input');
@@ -190,7 +191,15 @@ async function loadTraining() {
   }
 }
 
+async function loadWeaknesses() {
+  const d = await api('/api/insights?last=100');
+  const card = document.getElementById('weakness-card');
+  card.hidden = !(d.games >= 10 && d.weaknesses?.length);
+  if (!card.hidden) renderWeaknesses(document.getElementById('weaknesses'), d.weaknesses);
+}
+
 loadGames();
 loadSyncStatus();
 loadTraining();
+loadWeaknesses();
 pollProgress();

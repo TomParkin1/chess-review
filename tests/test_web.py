@@ -62,7 +62,7 @@ def test_upload_analyse_and_review(client):
     body = r.get_json()
     assert body["judgement"] == m["judgement"] and body["explanation"]  # same verdict as the game
 
-    for page in ("/", "/review", "/games", "/settings", f"/game/{m["game_id"]}"):
+    for page in ("/", "/review", "/games", "/settings", "/insights", "/train", "/session", f"/game/{m["game_id"]}"):
         assert c.get(page).status_code == 200
 
 
@@ -134,3 +134,16 @@ def test_analysis_stream(client):
     best = snapshots[-1]["lines"][0]
     assert best["uci"] == "a1a8" and best["eval"]["mate"] == 1 and best["san_line"].startswith("1. Ra8#")
     assert c.get("/api/analyse/stream?fen=nonsense").status_code == 400
+
+
+def test_insights_api(client):
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    d = c.get("/api/insights").get_json()
+    assert d["games"] == 3 and len(d["trend"]) == 3
+    assert {p["phase"] for p in d["phases"]} == {"opening", "middlegame", "endgame"}
+    assert sum(o["games"] for o in d["openings"]) == 3
+    assert isinstance(d["weaknesses"], list)
+    assert c.get("/api/insights?last=1").get_json()["games"] == 1

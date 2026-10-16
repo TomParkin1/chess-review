@@ -25,6 +25,10 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   (`/api/review/result`) updates the card. Daily queue = due + `training.new_per_day` new (not from open sessions).
 - `chessreview/session.py`: "new games" session = open import batches (session_done_at NULL). The first chess.com
   sync is a history import (marked done). Summary: results, accuracy, mistake kinds, clock left at blunders.
+- `chessreview/insights.py`: per-game trends, phase accuracy, mistake kinds, clock buckets, openings, colours and
+  heuristic `weaknesses()` (each with a Practice filter). `static/charts.js`: SVG line/bar charts with hover
+  (dataviz rules: one axis, 2px lines, rounded bar ends, validated colours `--series-you/--series-opp`).
+  Practice (`/review`) accepts filters in the URL (incl. `low_clock`), overriding saved filters.
 - `static/puzzle.js` + `templates/_puzzle.html`: the shared puzzle used by Practice (`/review`), Train, Session.
 - `chessreview/report.py`: chess.com-style move marks (documented approximations), Lichess accuracy, time spent.
 - `chessreview/pgn_import.py`: PGN parsing, my colour/result, time class, dedupe (Link header, else sha1 of players+date+moves).
@@ -77,6 +81,6 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 1. [x] Data foundation: migrations, chess.com sync, batches, clocks, MultiPV 2, both-side marks, accuracy
 2. [x] New shell (chess.com-dark sidebar, icons, sounds, promotion, settings) + Game Report page
 3. [x] Training: puzzle.js component, SRS cards + daily Train, New-games session + summary, Practice
-4. [ ] Home dashboard + Insights (trends, clock analysis, openings, top-3 weaknesses -> Train this)
+4. [x] Home dashboard + Insights (trends, clock analysis, openings, top-3 weaknesses -> Train this)
 5. [ ] Openings: repertoire explorer + line drills (SRS)
 Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--config <copy config>`; never the real DB.
