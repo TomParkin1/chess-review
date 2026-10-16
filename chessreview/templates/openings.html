@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Openings · Chess Review{% endblock %}
+{% block content %}
+<div class="layout game-layout">
+  <div class="board-col">
+    <div class="board-wrap"><div id="board" class="board"></div></div>
+    <div class="controls">
+      <button class="btn" id="back-btn" title="Back (←)">◀ Back</button>
+      <button class="btn" id="reset-btn" title="Start position">⏮ Start</button>
+      <span class="muted small" id="board-note"></span>
+    </div>
+  </div>
+
+  <div class="side-col">
+    <div class="report-panel">
+      <div class="report-head">
+        <div class="op-head">
+          <h1>Openings</h1>
+          <div class="segmented" id="color-toggle">
+            <button data-color="white" class="active">As White</button>
+            <button data-color="black">As Black</button>
+          </div>
+        </div>
+        <select id="family" style="margin-top: 8px"><option value="">All my openings</option></select>
+      </div>
+      <div class="report-tabs">
+        <button data-tab="explore" class="active">Explore</button>
+        <button data-tab="drill">Drill</button>
+      </div>
+
+      <div class="report-body" data-panel="explore">
+        <div class="op-name" id="op-name"></div>
+        <div class="solution-moves breadcrumb" id="breadcrumb"></div>
+        <p class="muted small" id="node-summary"></p>
+        <div id="repertoire-note"></div>
+        <table class="marks op-moves" id="moves"></table>
+        <div class="section-title">Repertoire problems</div>
+        <p class="muted small">Positions where your usual move is usually judged an inaccuracy or worse.</p>
+        <div class="moments" id="problems"></div>
+      </div>
+
+      <div class="report-body" data-panel="drill" hidden>
+        <div id="drill-start">
+          <div class="chips" id="drill-stats"></div>
+          <p class="muted">Play through your lines from move 1. The app plays your opponents' most common
+            replies; you play your repertoire moves. Positions you miss come back sooner.</p>
+          <div class="actions">
+            <button class="btn primary big" id="learn-btn">Learn my lines</button>
+            <button class="btn big" id="due-btn">Review due</button>
+          </div>
+        </div>
+        <div id="drill-run" hidden>
+          <div class="session-bar"><span id="drill-counter"></span><span class="muted" id="drill-score"></span></div>
+          <div class="session-progress"><div id="drill-progress"></div></div>
+          <div class="prompt" id="drill-prompt"></div>
+          <div class="feedback" id="drill-feedback" hidden></div>
+          <div class="solution-moves" id="drill-moves"></div>
+          <div class="actions"><button class="btn" id="drill-stop">Stop</button></div>
+        </div>
+        <div class="summary-card" id="drill-done" hidden></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='openings.js') }}"></script>{% endblock %}

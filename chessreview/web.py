@@ -11,7 +11,7 @@ import threading
 import chess
 from flask import Flask, Response, abort, g, jsonify, render_template, request
 
-from . import chesscom, db, insights, report, session, srs
+from . import chesscom, db, insights, report, repertoire, session, srs
 from .classify import Eval, ensure_classified
 from .config import Config, load_config
 from .engine import AnalysisJob, count_pending
@@ -255,6 +255,60 @@ def create_app(cfg: Config | None = None) -> Flask:
         return jsonify(insights.compute(c, request.args.get("time_class") or None,
                                         request.args.get("last", type=int)))
 
+    @app.get("/openings")
+    def openings_page():
+        return render_template("openings.html")
+
+    def _tree(color: str):
+        return repertoire.build(conn(), color, request.args.get("family") or None)
+
+    @app.get("/api/openings")
+    def openings_overview():
+        """Families I play per colour, repertoire problems and drill status."""
+        c = conn()
+        ensure_classified(c, cfg)
+        color = request.args.get("color", "white")
+        tree = _tree(color)
+        families = [dict(r) for r in c.execute(
+            """SELECT opening_family AS family, COUNT(*) AS games FROM games WHERE my_color = ?
+               GROUP BY opening_family ORDER BY games DESC""", (color,))]
+        return jsonify(families=families, problems=repertoire.problems(tree),
+                       stats=srs.line_stats(c, color), positions=sum(
+                           1 for n in tree.values() if n.my_turn and n.repertoire()[1]))
+
+    @app.get("/api/openings/node")
+    def openings_node():
+        c = conn()
+        ensure_classified(c, cfg)
+        color = request.args.get("color", "white")
+        tree = _tree(color)
+        fen = request.args.get("fen")
+        epd = chess.Board(fen).epd() if fen else repertoire.root_epd()
+        node = repertoire.node_json(tree, epd)
+        if node is None:
+            return jsonify(error="You haven't reached this position in your games."), 404
+        return jsonify(node)
+
+    @app.get("/api/openings/drill")
+    def openings_drill():
+        c = conn()
+        ensure_classified(c, cfg)
+        color = request.args.get("color", "white")
+        tree = _tree(color)
+        if request.args.get("mode") == "due":
+            lines = repertoire.due_exercises(tree, color, srs.due_lines(c, color))
+        else:
+            lines = repertoire.drill_lines(tree, color, count=request.args.get("count", 6, type=int))
+        return jsonify(lines=lines)
+
+    @app.post("/api/openings/result")
+    def openings_result():
+        data = request.get_json(force=True)
+        if data.get("result") not in REVIEW_RESULTS or not data.get("key"):
+            return jsonify(error="key and a valid result are required"), 400
+        srs.record_line(conn(), data["key"], data["result"])
+        return jsonify(ok=True)
+
     @app.get("/train")
     def train_page():
         return render_template("train.html")
@@ -269,6 +323,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         ensure_classified(c, cfg)
         out = srs.stats(c, cfg)
         out["session"] = session.status(c, cfg)
+        out["lines_due"] = len(srs.due_lines(c, "white")) + len(srs.due_lines(c, "black"))
         return jsonify(out)
 
     @app.get("/api/train/queue")

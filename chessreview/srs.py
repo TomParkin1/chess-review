@@ -118,3 +118,36 @@ def streak(conn: sqlite3.Connection, on: date | None = None) -> int:
         count += 1
         day -= timedelta(days=1)
     return count
+
+
+# ---------------------------------------------------------------- opening-line cards
+
+def record_line(conn: sqlite3.Connection, key: str, result: str, on: date | None = None) -> None:
+    """Update (or create) the card for one of my repertoire positions after a drill attempt."""
+    on = on or today()
+    with conn:
+        conn.execute("INSERT OR IGNORE INTO cards (kind, key) VALUES ('line', ?)", (key,))
+    card = conn.execute("SELECT * FROM cards WHERE kind = 'line' AND key = ?", (key,)).fetchone()
+    box, due_on, mastered_on = schedule(card["box"], result, on)
+    with conn:
+        conn.execute(
+            """UPDATE cards SET box = ?, due_on = ?, mastered_on = ?, last_result = ?, reps = reps + 1,
+                   lapses = lapses + ?, introduced_on = COALESCE(introduced_on, ?) WHERE id = ?""",
+            (box, due_on, mastered_on, result, int(result not in SOLVED), on.isoformat(), card["id"]))
+
+
+def due_lines(conn: sqlite3.Connection, color: str, on: date | None = None) -> list[str]:
+    on = on or today()
+    return [r[0] for r in conn.execute(
+        """SELECT key FROM cards WHERE kind = 'line' AND key LIKE ? AND mastered_on IS NULL
+           AND due_on IS NOT NULL AND due_on <= ? ORDER BY due_on, box""",
+        (f"{color}:%", on.isoformat()))]
+
+
+def line_stats(conn: sqlite3.Connection, color: str, on: date | None = None) -> dict:
+    on = on or today()
+    row = conn.execute(
+        """SELECT COUNT(*) AS seen, SUM(mastered_on IS NOT NULL) AS mastered,
+                  SUM(mastered_on IS NULL AND due_on <= ?) AS due
+           FROM cards WHERE kind = 'line' AND key LIKE ?""", (on.isoformat(), f"{color}:%")).fetchone()
+    return {"seen": row["seen"] or 0, "mastered": row["mastered"] or 0, "due": row["due"] or 0}

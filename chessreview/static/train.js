@@ -83,6 +83,7 @@ async function load() {
   $('train-chips').replaceChildren(
     el('span', { class: 'chip' }, `${s.due} due for review`),
     el('span', { class: 'chip' }, `${s.new} new`),
+    s.lines_due ? el('a', { class: 'chip failed', href: '/openings' }, `📖 ${s.lines_due} opening positions due →`) : '',
   );
   if (queue.length) {
     $('train-sub').textContent = 'Solve the positions you got wrong. Ones you miss come back sooner; ones you know drift away.';

@@ -147,3 +147,18 @@ def test_insights_api(client):
     assert sum(o["games"] for o in d["openings"]) == 3
     assert isinstance(d["weaknesses"], list)
     assert c.get("/api/insights?last=1").get_json()["games"] == 1
+
+
+def test_openings_api(client):
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    for color in ("white", "black"):
+        assert c.get(f"/api/openings?color={color}").status_code == 200
+        root = c.get(f"/api/openings/node?color={color}").get_json()
+        assert root["games"] >= 1
+        assert c.get(f"/api/openings/drill?color={color}").status_code == 200
+    assert c.get("/api/openings/node?color=white&fen=8/8/8/8/8/8/8/K6k w - - 0 1").status_code == 404
+    assert c.post("/api/openings/result", json={"key": "white:x", "result": "solved"}).get_json()["ok"]
+    assert c.get("/openings").status_code == 200

@@ -29,6 +29,10 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   heuristic `weaknesses()` (each with a Practice filter). `static/charts.js`: SVG line/bar charts with hover
   (dataviz rules: one axis, 2px lines, rounded bar ends, validated colours `--series-you/--series-opp`).
   Practice (`/review`) accepts filters in the URL (incl. `low_clock`), overriding saved filters.
+- `chessreview/repertoire.py`: repertoire tree per colour from my games (EPD-keyed, first MAX_PLY plies);
+  repertoire move = my most played (>= 2 games) unless usually judged bad -> engine best ("problem").
+  Drill lines + due exercises; line cards are `cards.kind='line'`, key `<colour>:<epd>` (srs.record_line).
+  UI: `/openings` (`static/openings.js`: Explore tab + Drill tab).
 - `static/puzzle.js` + `templates/_puzzle.html`: the shared puzzle used by Practice (`/review`), Train, Session.
 - `chessreview/report.py`: chess.com-style move marks (documented approximations), Lichess accuracy, time spent.
 - `chessreview/pgn_import.py`: PGN parsing, my colour/result, time class, dedupe (Link header, else sha1 of players+date+moves).
@@ -82,5 +86,5 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 2. [x] New shell (chess.com-dark sidebar, icons, sounds, promotion, settings) + Game Report page
 3. [x] Training: puzzle.js component, SRS cards + daily Train, New-games session + summary, Practice
 4. [x] Home dashboard + Insights (trends, clock analysis, openings, top-3 weaknesses -> Train this)
-5. [ ] Openings: repertoire explorer + line drills (SRS)
+5. [x] Openings: repertoire explorer + line drills (SRS)
 Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--config <copy config>`; never the real DB.
