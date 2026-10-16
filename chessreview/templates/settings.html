@@ -26,13 +26,22 @@
   </section>
 
   <section class="card">
+    <h2>Mistake thresholds</h2>
+    <p class="muted small">How big a drop in winning chances counts as an inaccuracy, mistake or blunder.</p>
+    <label class="switch"><span><strong>Adaptive to rating</strong><br><span class="muted small" id="adaptive-note"></span></span>
+      <input type="radio" name="th-mode" value="adaptive"></label>
+    <label class="switch"><span><strong>Standard (Lichess)</strong><br><span class="muted small" id="standard-note"></span></span>
+      <input type="radio" name="th-mode" value="standard"></label>
+    <p class="muted small" id="th-result"></p>
+  </section>
+
+  <section class="card">
     <h2>Engine &amp; account</h2>
     <p class="muted small">Change these in <code>config.toml</code> and restart the app.</p>
     <dl class="config">
       <dt>chess.com user</dt><dd>{{ cfg.player.username }}</dd>
       <dt>Stockfish</dt><dd>{{ cfg.engine.path }}</dd>
-      <dt>Time per position</dt><dd>{{ cfg.engine.time_per_position }} s × {{ cfg.engine.workers }} workers</dd>
-      <dt>Mistake thresholds</dt><dd>{{ cfg.classification.inaccuracy }} / {{ cfg.classification.mistake }} / {{ cfg.classification.blunder }} ({{ cfg.classification.mode }})</dd>
+      <dt>Analysis</dt><dd>up to {{ cfg.engine.time_per_position }} s or depth {{ cfg.engine.max_depth }} per position, {{ workers }} engines in parallel</dd>
       <dt>Puzzle play-out</dt><dd>{{ cfg.review.playout_tactical }} moves (tactics), {{ cfg.review.playout_other }} (other)</dd>
     </dl>
   </section>

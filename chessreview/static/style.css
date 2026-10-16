@@ -466,3 +466,7 @@ table.op-moves td { padding: 6px; }
 .solution-moves .sm.mine { color: var(--green); }
 a.chip { text-decoration: none; }
 #drill-done.summary-card { padding: 20px 0 0; }
+
+.filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
+.filter-summary { color: var(--text-2); font-size: 14px; }
+.explanation.best { border-left-color: var(--green); }

@@ -73,25 +73,71 @@ def _mate_judgement(before: Eval, after: Eval) -> str | None:
     return None
 
 
-def judge(before: Eval, after: Eval, cfg: Config) -> tuple[str, float, int]:
+# Adaptive thresholds: the lower the mover's rating, the bigger a swing must be to count.
+# (rating below, inaccuracy, mistake, blunder) as win-chance drops on Lichess' -1..1 scale;
+# the 1600-2000 band equals Lichess' standard 0.1 / 0.2 / 0.3.
+ADAPTIVE_BANDS = [
+    (800, 0.16, 0.28, 0.40),
+    (1200, 0.13, 0.24, 0.35),
+    (1600, 0.11, 0.22, 0.32),
+    (2000, 0.10, 0.20, 0.30),
+    (None, 0.08, 0.17, 0.27),
+]
+MODE_KEY = "thresholds_mode"   # meta override set from the Settings page: 'adaptive' | 'standard'
+
+
+@dataclass(frozen=True)
+class Thresholds:
+    inaccuracy: float
+    mistake: float
+    blunder: float
+    band: str = "standard"
+
+    @property
+    def cp_factor(self) -> float:
+        """Scale for the centipawn-mode thresholds, relative to Lichess' 0.1."""
+        return self.inaccuracy / 0.1
+
+
+def adaptive_enabled(conn: sqlite3.Connection, cfg: Config) -> bool:
+    mode = db.get_meta(conn, MODE_KEY)
+    return cfg.classification.adaptive if mode is None else mode == "adaptive"
+
+
+def thresholds_for(rating: int | None, cfg: Config, adaptive: bool) -> Thresholds:
+    c = cfg.classification
+    if not adaptive or not rating:
+        return Thresholds(c.inaccuracy, c.mistake, c.blunder)
+    lower = 0
+    for below, inacc, mistake, blunder in ADAPTIVE_BANDS:
+        if below is None or rating < below:
+            band = f"{lower}–{below - 1}" if below else f"{lower}+"
+            return Thresholds(inacc, mistake, blunder, band)
+        lower = below
+    raise AssertionError("unreachable")
+
+
+def judge(before: Eval, after: Eval, cfg: Config, th: Thresholds | None = None) -> tuple[str, float, int]:
     """Return (judgement, win-chance drop, centipawn loss) for one move."""
     c = cfg.classification
+    th = th or Thresholds(c.inaccuracy, c.mistake, c.blunder)
     drop = before.win_chance() - after.win_chance()
     cp_loss = max(0, before.as_cp() - after.as_cp())
     mate_verdict = _mate_judgement(before, after)
     if mate_verdict:
         return mate_verdict, drop, cp_loss
     if c.mode == "cp":
-        value, limits = cp_loss, (c.cp_blunder, c.cp_mistake, c.cp_inaccuracy)
+        f = th.cp_factor
+        value, limits = cp_loss, (c.cp_blunder * f, c.cp_mistake * f, c.cp_inaccuracy * f)
     else:
-        value, limits = drop, (c.blunder, c.mistake, c.inaccuracy)
+        value, limits = drop, (th.blunder, th.mistake, th.inaccuracy)
     for name, limit in zip(("blunder", "mistake", "inaccuracy"), limits):
         if value >= limit:
             return name, drop, cp_loss
     return "good", drop, cp_loss
 
 
-def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config) -> int:
+def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config, adaptive: bool | None = None) -> int:
     """(Re)build the mistakes rows for one analysed game: every move, both sides.
 
     My moves get explanations (they become review puzzles); opponent moves get a
@@ -102,6 +148,11 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config) -> int:
     positions = conn.execute(
         "SELECT * FROM positions WHERE game_id = ? ORDER BY ply", (game_id,)).fetchall()
     me = chess.WHITE if game["my_color"] == "white" else chess.BLACK
+    if adaptive is None:
+        adaptive = adaptive_enabled(conn, cfg)
+    # Each side is judged at its own level (its rating in this game).
+    side_thresholds = {chess.WHITE: thresholds_for(game["white_elo"], cfg, adaptive),
+                       chess.BLACK: thresholds_for(game["black_elo"], cfg, adaptive)}
 
     rows = []
     white_pcts = [report.win_pct(Eval.from_row(p, chess.WHITE).win_chance()) for p in positions]
@@ -116,7 +167,7 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config) -> int:
         mover = board.turn
         before = Eval.from_row(before_row, mover)
         after = Eval.from_row(after_row, mover)
-        judgement, drop, cp_loss = judge(before, after, cfg)
+        judgement, drop, cp_loss = judge(before, after, cfg, side_thresholds[mover])
         move = chess.Move.from_uci(before_row["move_uci"])
         forced = board.legal_moves.count() == 1
         is_best = move.uci() == before_row["best_uci"]
@@ -185,9 +236,9 @@ def _second_gap(row: sqlite3.Row, mover: chess.Color, best_pct: float) -> float 
     return best_pct - report.win_pct(second.win_chance())
 
 
-def settings_fingerprint(cfg: Config) -> str:
+def settings_fingerprint(cfg: Config, adaptive: bool = False) -> str:
     """Changes whenever anything that affects classification output changes."""
-    data = {"classification": asdict(cfg.classification), "phases": asdict(cfg.phases),
+    data = {"classification": asdict(cfg.classification), "phases": asdict(cfg.phases), "adaptive": adaptive,
             "explain_version": explain.VERSION, "classify_version": CLASSIFY_VERSION}
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
@@ -195,7 +246,8 @@ def settings_fingerprint(cfg: Config) -> str:
 def ensure_classified(conn: sqlite3.Connection, cfg: Config, force: bool = False) -> int:
     """Classify analysed games that have no classification yet, or all of them if the
     settings changed since the last run. Returns the number of games classified."""
-    fingerprint = settings_fingerprint(cfg)
+    adaptive = adaptive_enabled(conn, cfg)
+    fingerprint = settings_fingerprint(cfg, adaptive)
     rebuild_all = force or db.get_meta(conn, SETTINGS_KEY) != fingerprint
     if rebuild_all:
         sql = "SELECT id FROM games WHERE analysed_at IS NOT NULL"
@@ -204,7 +256,7 @@ def ensure_classified(conn: sqlite3.Connection, cfg: Config, force: bool = False
                  AND NOT EXISTS (SELECT 1 FROM mistakes m WHERE m.game_id = g.id)"""
     game_ids = [r["id"] for r in conn.execute(sql)]
     for game_id in game_ids:
-        classify_game(conn, game_id, cfg)
+        classify_game(conn, game_id, cfg, adaptive)
     with conn:
         db.set_meta(conn, SETTINGS_KEY, fingerprint)
     return len(game_ids)

@@ -12,10 +12,11 @@ import chess
 from flask import Flask, Response, abort, g, jsonify, render_template, request
 
 from . import chesscom, db, insights, report, repertoire, session, srs
-from .classify import Eval, ensure_classified
-from .config import Config, load_config
+from .classify import (ADAPTIVE_BANDS, MODE_KEY, Eval, adaptive_enabled, ensure_classified,
+                       thresholds_for)
+from .config import Config, effective_workers, load_config
 from .engine import AnalysisJob, count_pending
-from .explain import ATTACKING_KINDS, hint, san_line
+from .explain import ATTACKING_KINDS, MoveContext, explain_best, hint, san_line
 from .live import LiveEngine, PositionAnalysis
 from .pgn_import import ImportStats, import_pgn_text
 
@@ -75,7 +76,7 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     @app.get("/settings")
     def settings_page():
-        return render_template("settings.html", cfg=cfg)
+        return render_template("settings.html", cfg=cfg, workers=effective_workers(cfg.engine))
 
     # ------------------------------------------------------------ upload + analysis
 
@@ -255,6 +256,33 @@ def create_app(cfg: Config | None = None) -> Flask:
         return jsonify(insights.compute(c, request.args.get("time_class") or None,
                                         request.args.get("last", type=int)))
 
+    @app.get("/api/settings/thresholds")
+    def thresholds_info():
+        c = conn()
+        latest = c.execute("""SELECT CASE my_color WHEN 'white' THEN white_elo ELSE black_elo END AS elo
+                              FROM games WHERE white_elo IS NOT NULL ORDER BY end_time DESC LIMIT 1""").fetchone()
+        rating = latest["elo"] if latest else None
+        adaptive = adaptive_enabled(c, cfg)
+        th = thresholds_for(rating, cfg, True)
+        std = thresholds_for(None, cfg, False)
+        pct = lambda v: round(v * 50, 1)   # -1..1 win-chance drop -> win% points
+        return jsonify(adaptive=adaptive, rating=rating, band=th.band,
+                       adaptive_thresholds=[pct(th.inaccuracy), pct(th.mistake), pct(th.blunder)],
+                       standard_thresholds=[pct(std.inaccuracy), pct(std.mistake), pct(std.blunder)],
+                       bands=[{"below": b, "values": [pct(i), pct(m), pct(x)]} for b, i, m, x in ADAPTIVE_BANDS])
+
+    @app.post("/api/settings/thresholds")
+    def thresholds_set():
+        adaptive = bool((request.get_json(force=True) or {}).get("adaptive"))
+        c = conn()
+        with c:
+            db.set_meta(c, MODE_KEY, "adaptive" if adaptive else "standard")
+        n = ensure_classified(c, cfg)    # the fingerprint changed: every game is reclassified
+        mine = c.execute("""SELECT SUM(judgement = 'inaccuracy') AS i, SUM(judgement = 'mistake') AS m,
+                                   SUM(judgement = 'blunder') AS b FROM mistakes WHERE is_mine = 1""").fetchone()
+        return jsonify(adaptive=adaptive, games=n, inaccuracies=mine["i"] or 0, mistakes=mine["m"] or 0,
+                       blunders=mine["b"] or 0)
+
     @app.get("/openings")
     def openings_page():
         return render_template("openings.html")
@@ -380,14 +408,20 @@ def create_app(cfg: Config | None = None) -> Flask:
         fen, uci = data.get("fen"), data.get("uci")
         if not fen or not uci:
             return jsonify(error="fen and uci are required"), 400
-        before = None
-        if data.get("step", 0) == 0 and data.get("game_id") is not None:
-            pos = conn().execute("SELECT * FROM positions WHERE game_id = ? AND ply = ?",
-                                 (data["game_id"], data.get("ply"))).fetchone()
-            if pos is not None and pos["fen"] == fen:
-                before = _stored_analysis(pos)
+        before = thresholds = None
+        if data.get("game_id") is not None:
+            c = conn()
+            g = c.execute("SELECT white_elo, black_elo, my_color FROM games WHERE id = ?", (data["game_id"],)).fetchone()
+            if g is not None:   # judge my tries at my level in that game, like the game itself
+                rating = g["white_elo"] if g["my_color"] == "white" else g["black_elo"]
+                thresholds = thresholds_for(rating, cfg, adaptive_enabled(c, cfg))
+            if data.get("step", 0) == 0:
+                pos = c.execute("SELECT * FROM positions WHERE game_id = ? AND ply = ?",
+                                (data["game_id"], data.get("ply"))).fetchone()
+                if pos is not None and pos["fen"] == fen:
+                    before = _stored_analysis(pos)
         try:
-            result = live.judge(fen, uci, before)
+            result = live.judge(fen, uci, before, thresholds)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         return jsonify(result.as_dict())
@@ -431,7 +465,7 @@ def _query_mistakes(c: sqlite3.Connection, cfg: Config, where: list[str], params
     rows = c.execute(f"""
         SELECT m.*, p.fen, p.move_uci, p.move_san, p.best_uci, p.pv_uci,
                p.score_cp AS before_cp, p.score_mate AS before_mate,
-               p2.score_cp AS after_cp, p2.score_mate AS after_mate,
+               p2.score_cp AS after_cp, p2.score_mate AS after_mate, p2.pv_uci AS after_pv,
                p0.move_uci AS prev_move_uci,
                g.my_color, g.white, g.black, g.date, g.opening, g.opening_family,
                g.my_result, g.time_class, {STATUS_SQL} AS status,
@@ -509,6 +543,10 @@ def _mistake_json(r: sqlite3.Row, cfg: Config) -> dict:
     before = Eval.from_row({"score_cp": r["before_cp"], "score_mate": r["before_mate"]}, me)
     after = Eval.from_row({"score_cp": r["after_cp"], "score_mate": r["after_mate"]}, me)
     ply = r["ply"]
+    reply = [chess.Move.from_uci(u) for u in (r["after_pv"] or "").split()]
+    best_explanation = explain_best(MoveContext(
+        board=board, move=chess.Move.from_uci(r["move_uci"]), best=best, best_line=line,
+        reply_line=reply, before=before, after=after), r["kind"]) if best else ""
     return {
         "game_id": r["game_id"], "ply": ply,
         "move_label": f"{ply // 2 + 1}{'.' if ply % 2 == 0 else '...'}{r['move_san']}",
@@ -517,6 +555,7 @@ def _mistake_json(r: sqlite3.Row, cfg: Config) -> dict:
         "fen": r["fen"], "move_uci": r["move_uci"], "move_san": r["move_san"],
         "best_uci": r["best_uci"], "best_san": board.san(best) if best else None,
         "best_line": san_line(board, line, 6),
+        "best_explanation": best_explanation,
         "best_pv_uci": [m.uci() for m in line],
         "eval_before": str(before), "eval_after": str(after),
         "eval_before_white": _eval_white(r["before_cp"], r["before_mate"]),

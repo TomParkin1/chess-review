@@ -162,3 +162,18 @@ def test_openings_api(client):
     assert c.get("/api/openings/node?color=white&fen=8/8/8/8/8/8/8/K6k w - - 0 1").status_code == 404
     assert c.post("/api/openings/result", json={"key": "white:x", "result": "solved"}).get_json()["ok"]
     assert c.get("/openings").status_code == 200
+
+
+def test_threshold_mode_switch_reclassifies(client):
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    info = c.get("/api/settings/thresholds").get_json()
+    assert "adaptive" in info and len(info["standard_thresholds"]) == 3
+    std = c.post("/api/settings/thresholds", json={"adaptive": False}).get_json()
+    assert std["adaptive"] is False and std["games"] == 3          # every game reclassified
+    assert c.get("/api/settings/thresholds").get_json()["adaptive"] is False
+    ada = c.post("/api/settings/thresholds", json={"adaptive": True}).get_json()
+    # Sample players are rated ~1200 (or unrated): adaptive can only be as strict or more lenient.
+    assert ada["mistakes"] + ada["blunders"] <= std["mistakes"] + std["blunders"]

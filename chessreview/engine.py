@@ -19,7 +19,7 @@ import chess
 import chess.engine
 
 from . import db
-from .config import Config
+from .config import Config, effective_workers
 
 # Stored instead of a mate score when the side to move is already checkmated.
 MATED_CP = 10_000
@@ -58,9 +58,9 @@ class PositionEval:
     second_uci: str | None = None
 
 
-def open_engine(cfg: Config) -> chess.engine.SimpleEngine:
+def open_engine(cfg: Config, threads: int | None = None) -> chess.engine.SimpleEngine:
     engine = chess.engine.SimpleEngine.popen_uci(cfg.engine.path)
-    engine.configure({"Threads": cfg.engine.threads, "Hash": cfg.engine.hash_mb})
+    engine.configure({"Threads": threads or cfg.engine.threads, "Hash": cfg.engine.hash_mb})
     return engine
 
 
@@ -73,7 +73,8 @@ def analyse_position(engine: chess.engine.SimpleEngine, board: chess.Board,
     if board.is_game_over(claim_draw=False):  # stalemate, insufficient material, ...
         return PositionEval(0, None, None, "", None)
 
-    infos = engine.analyse(board, chess.engine.Limit(time=cfg.engine.time_per_position), multipv=2)
+    limit = chess.engine.Limit(time=cfg.engine.time_per_position, depth=cfg.engine.max_depth or None)
+    infos = engine.analyse(board, limit, multipv=2)
     first = infos[0]
     score = first["score"].white()
     pv = first.get("pv", [])[: cfg.engine.pv_length]
@@ -229,7 +230,7 @@ class AnalysisJob:
                 work: queue.Queue = queue.Queue()
                 for g in games:
                     work.put(g)
-                n_workers = max(1, min(self.cfg.engine.workers, len(games)))
+                n_workers = max(1, min(effective_workers(self.cfg.engine), len(games)))
                 workers = [threading.Thread(target=self._worker, args=(work,), daemon=True)
                            for _ in range(n_workers)]
                 for w in workers:

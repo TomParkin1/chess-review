@@ -76,9 +76,12 @@ def queue(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> dict
     on = on or today()
     ensure_cards(conn, cfg)
     day = on.isoformat()
-    due = conn.execute("""
-        SELECT c.game_id, c.ply FROM cards c
+    judgements = ("'mistake', 'blunder'" + (", 'inaccuracy'" if cfg.training.include_inaccuracies else ""))
+    # Only cards whose move is still a mistake under the current thresholds (they can change).
+    due = conn.execute(f"""
+        SELECT c.game_id, c.ply FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
         WHERE c.kind = 'mistake' AND c.mastered_on IS NULL AND c.due_on IS NOT NULL AND c.due_on <= ?
+          AND m.judgement IN ({judgements})
         ORDER BY c.due_on, c.box, c.id""", (day,)).fetchall()
     introduced_today = conn.execute(
         "SELECT COUNT(*) FROM cards WHERE introduced_on = ?", (day,)).fetchone()[0]
@@ -86,6 +89,7 @@ def queue(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> dict
     new = conn.execute(f"""
         SELECT c.game_id, c.ply FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
         WHERE c.kind = 'mistake' AND c.due_on IS NULL AND c.mastered_on IS NULL
+          AND m.judgement IN ({judgements})
           AND c.game_id NOT IN ({_open_session_games()})
         ORDER BY m.win_drop DESC LIMIT ?""", (new_slots,)).fetchall()
     return {"due": [(r["game_id"], r["ply"]) for r in due],

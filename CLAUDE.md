@@ -50,6 +50,13 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - `chessreview/live.py`: `LiveEngine` = two long-lived Stockfish processes (judging tries, live analysis stream).
   The stream runs on a worker thread feeding a queue (a paused SSE generator must never hold the engine lock).
   `serve` closes it in a finally block, tests close it in fixtures, otherwise Python cannot exit.
+- Adaptive thresholds (default; `classification.adaptive`, overridable from Settings via meta `thresholds_mode`):
+  `classify.thresholds_for(rating)` bands by the mover's rating in that game; `/api/judge` uses my rating in the game.
+  Switching mode changes the classification fingerprint, so `ensure_classified` rebuilds everything (seconds).
+- `explain.explain_best()`: why the engine's move is better (shown after a puzzle as `best_explanation`).
+- Analysis speed: `effective_workers()` (~2/3 of cores) single-thread engines + `max_depth` cap (benchmarked 2x
+  faster than 4x2 threads, same depth on hard positions). Live judging uses 4 threads.
+- Chessground `events.after` passes (orig, dest, metadata): always wrap handlers as `(o, d) => fn(o, d)`.
 - `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump
   `CLASSIFY_VERSION` when judge logic changes.
 - Review page = Lichess-style "learn from your mistakes" (`static/review.js` state machine: solving → checking →

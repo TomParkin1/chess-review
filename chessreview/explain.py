@@ -409,3 +409,84 @@ ATTACKING_KINDS = {"missed_mate", "missed_capture", "missed_tactic"}
 
 def hint(kind: str | None) -> str:
     return HINTS.get(kind or "", "Think about your opponent's best reply before you move.")
+
+
+# ---------------------------------------------------------------- why the best move works
+
+DEFENSIVE_KINDS = {"allowed_mate", "hanging_piece", "fork", "discovered_attack", "loses_material", "king_safety"}
+
+
+def explain_best(ctx: MoveContext, kind: str | None) -> str:
+    """Plain-English reason the engine's move is better than mine (shown after a puzzle).
+
+    `kind` is the explanation category of my move, which tells us whether the fix was
+    about defending (my move allowed something) or attacking (I missed something).
+    """
+    if ctx.best is None or ctx.best not in ctx.board.legal_moves:
+        return ""
+    board = ctx.board
+    best_san = board.san(ctx.best)
+    line = san_line(board, ctx.best_line, 6)
+    after_best = board.copy(stack=False)
+    after_best.push(ctx.best)
+
+    if ctx.before.mate and ctx.before.mate > 0:
+        if kind == "missed_mate":
+            return ""   # the explanation of my move already shows the mate
+        return f"{best_san} starts a forced checkmate in {ctx.before.mate}: {line}."
+
+    sentences = []
+    gain = play_line(board, ctx.best_line, ctx.me)
+    if kind in DEFENSIVE_KINDS and ctx.reply_line:
+        sentences.append(_what_best_prevents(ctx, best_san, after_best))
+    elif gain.net >= 1:
+        target = board.piece_at(ctx.best.to_square) if board.is_capture(ctx.best) else None
+        free = target and not board.is_attacked_by(not ctx.me, ctx.best.to_square)
+        if free and value(target.piece_type) >= gain.net:
+            sentences.append(f"{best_san} simply takes the undefended {chess.piece_name(target.piece_type)}.")
+        else:
+            sentences.append(f"{best_san} wins {describe_trade(gain, losing=False)}: {line}.")
+    threats = _new_threats(after_best, ctx.best, ctx.me)
+    if threats:
+        sentences.append(f"{best_san} attacks {threats}." if not sentences else f"It attacks {threats}.")
+    if not sentences:
+        sentences.append(f"{best_san} keeps the position at {ctx.before} for you, instead of {ctx.after} "
+                         f"after your move. The main line goes {line}.")
+    return " ".join(s for s in sentences if s)
+
+
+def _what_best_prevents(ctx: MoveContext, best_san: str, after_best: chess.Board) -> str:
+    """Describe how the best move deals with the reply my move allowed."""
+    after_mine = ctx.board_after()
+    threat = ctx.reply_line[0]
+    if threat not in after_mine.legal_moves:
+        return ""
+    threat_san = after_mine.san(threat)
+    if ctx.after.mate and ctx.after.mate < 0:
+        return f"{best_san} keeps your king safe: after your move, {threat_san} started a forced mate."
+    target_sq = threat.to_square
+    target = after_mine.piece_at(target_sq)
+    if target and target.color == ctx.me and target.piece_type != chess.KING:
+        name = chess.piece_name(target.piece_type)
+        moved_from = ctx.best.from_square
+        if moved_from == target_sq or (ctx.move.to_square == target_sq and moved_from == ctx.move.from_square):
+            return f"{best_san} keeps your {name} safe instead of leaving it to {threat_san}."
+        if after_best.is_attacked_by(ctx.me, target_sq) and not after_mine.is_attacked_by(ctx.me, target_sq):
+            return f"{best_san} defends your {name}, so {threat_san} no longer wins it."
+    return (f"{best_san} avoids the problem with your move, which allowed "
+            f"{san_line(after_mine, ctx.reply_line, 3)}.")
+
+
+def _new_threats(after_best: chess.Board, best: chess.Move, me: chess.Color) -> str:
+    """Opponent pieces newly attacked by the moved piece that are undefended or worth more."""
+    piece = after_best.piece_at(best.to_square)
+    if piece is None:
+        return ""
+    found = []
+    for sq in after_best.attacks(best.to_square):
+        target = after_best.piece_at(sq)
+        if not target or target.color == me or target.piece_type in (chess.PAWN, chess.KING):
+            continue
+        if value(target.piece_type) > value(piece.piece_type) or not after_best.is_attacked_by(not me, sq):
+            found.append(f"the {piece_on(after_best, sq)}")
+    return " and ".join(found[:2])

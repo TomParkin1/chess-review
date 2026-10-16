@@ -84,7 +84,7 @@ export function createAnalysis({ board, panel, evalBar }) {
     board.set({
       fen, lastMove: last, turnColor: sideToMove(fen), check: chess.inCheck() ? sideToMove(fen) : false,
       movable: { free: false, color: 'both', dests: legalDests(chess), showDests: true,
-                 events: { after: onMove } },
+                 events: { after: (orig, dest) => onMove(orig, dest) } },  // ignore chessground's 3rd (metadata) arg
     });
     board.setAutoShapes([]);
     renderVariation();

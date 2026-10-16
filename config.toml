@@ -9,13 +9,17 @@ skip_variants = true      # skip Chess960 and other non-standard games
 
 [engine]
 path = "/opt/homebrew/bin/stockfish"
-time_per_position = 0.3   # seconds of engine time per position
-workers = 4               # Stockfish processes run in parallel
-threads = 2               # threads per Stockfish process
+time_per_position = 0.3   # seconds of engine time per position (at most)
+max_depth = 20            # ...or stop earlier once this depth is reached (0 = no cap)
+workers = 0               # Stockfish processes run in parallel; 0 = automatic (~2/3 of CPU cores)
+threads = 1               # threads per process: 1 gives the most positions per second
 hash_mb = 128             # hash table per Stockfish process
 pv_length = 8             # moves of the principal variation to store
 
 [classification]
+# Adaptive: thresholds depend on the mover's rating in that game (lower rating -> only bigger
+# swings count). false = always the standard values below. The Settings page can override this.
+adaptive = true
 # "winchance" (Lichess style) or "cp" (raw centipawn loss)
 mode = "winchance"
 # Drops in win chance on Lichess' -1..1 scale (0.1 = 5 percentage points).
@@ -34,7 +38,7 @@ endgame_material = 13     # endgame when non-pawn material (both sides, N/B=3 R=
 [review]
 playout_tactical = 3      # moves to play out after finding a missed mate / tactic / capture
 playout_other = 1         # moves to play out for defensive and positional mistakes
-live_time = 0.5           # engine seconds per position when judging a move you try
+live_time = 0.35          # engine seconds per position when judging a move you try (4 threads)
 
 [analysis]
 max_seconds = 10          # live analysis board: stop searching a position after this long

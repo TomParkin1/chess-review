@@ -1,5 +1,6 @@
 """Load config.toml into simple dataclasses."""
 
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,10 +24,18 @@ class ImportConfig:
 class EngineConfig:
     path: str = "/opt/homebrew/bin/stockfish"
     time_per_position: float = 0.3
-    workers: int = 4
-    threads: int = 2
+    max_depth: int = 0          # stop a position early at this depth (0 = no depth limit)
+    workers: int = 0            # parallel Stockfish processes; 0 = automatic (about 2/3 of CPU cores)
+    threads: int = 1            # threads per process (1 is most efficient for many positions)
     hash_mb: int = 128
     pv_length: int = 8
+
+
+def effective_workers(engine: "EngineConfig") -> int:
+    """Number of analysis processes: configured, or ~2/3 of the cores (8 on a 12-core Mac)."""
+    if engine.workers > 0:
+        return engine.workers
+    return max(1, min(10, (os.cpu_count() or 3) * 2 // 3))
 
 
 @dataclass(frozen=True)
@@ -38,6 +47,7 @@ class ClassificationConfig:
     cp_inaccuracy: int = 50
     cp_mistake: int = 100
     cp_blunder: int = 300
+    adaptive: bool = True        # thresholds follow the mover's rating (Settings page can override)
 
 
 @dataclass(frozen=True)
@@ -50,7 +60,7 @@ class PhaseConfig:
 class ReviewConfig:
     playout_tactical: int = 3   # my moves to play out when I missed a mate/tactic/capture
     playout_other: int = 1      # my moves to play out for defensive/positional mistakes
-    live_time: float = 0.5      # seconds per position when judging moves I try
+    live_time: float = 0.35     # seconds per position when judging moves I try (4 threads)
 
 
 @dataclass(frozen=True)

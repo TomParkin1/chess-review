@@ -17,11 +17,12 @@ import chess
 import chess.engine
 
 from . import explain
-from .classify import Eval, judge
+from .classify import Eval, Thresholds, judge
 from .config import Config
 from .engine import open_engine
 
 CACHE_SIZE = 2000
+LIVE_THREADS = 4   # interactive work: one position at a time, so give it more threads
 
 
 @dataclass(frozen=True)
@@ -92,10 +93,10 @@ class LiveEngine:
 
         with self._judge_lock:
             if self._judge_engine is None:
-                self._judge_engine = open_engine(self.cfg)
+                self._judge_engine = open_engine(self.cfg, threads=LIVE_THREADS)
             try:
                 info = self._judge_engine.analyse(
-                    board, chess.engine.Limit(time=self.cfg.review.live_time))
+                    board, chess.engine.Limit(time=self.cfg.review.live_time, depth=22))
             except chess.engine.EngineError:
                 self._judge_engine = None  # restart on the next request
                 raise
@@ -107,7 +108,8 @@ class LiveEngine:
             self._cache.popitem(last=False)
         return result
 
-    def judge(self, fen: str, uci: str, before: PositionAnalysis | None = None) -> Judgement:
+    def judge(self, fen: str, uci: str, before: PositionAnalysis | None = None,
+              thresholds: Thresholds | None = None) -> Judgement:
         """Judge my move `uci` in `fen` and work out the opponent's best reply.
 
         `before` lets the caller pass the stored analysis of the position (so the
@@ -127,7 +129,7 @@ class LiveEngine:
         after = self.analyse(after_board)
 
         before_eval, after_eval = before.for_side(me), after.for_side(me)
-        verdict, drop, _ = judge(before_eval, after_eval, self.cfg)
+        verdict, drop, _ = judge(before_eval, after_eval, self.cfg, thresholds)
         is_best = before.best is not None and move == before.best
         if is_best:
             verdict = "good"
@@ -189,7 +191,7 @@ class LiveEngine:
                 if me.cancel.is_set():
                     return
                 if self._stream_engine is None:
-                    self._stream_engine = open_engine(self.cfg)
+                    self._stream_engine = open_engine(self.cfg, threads=LIVE_THREADS)
                 lines: dict[int, dict] = {}
                 last_emit, last_depth = 0.0, 0
                 wanted = min(a.multipv, board.legal_moves.count())

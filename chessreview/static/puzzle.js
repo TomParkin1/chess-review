@@ -40,6 +40,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
   // Must not start viewOnly: chessground only binds its input listeners when the board is created.
   const board = makeBoard($('board'), {
     viewOnly: false, animation: { enabled: true, duration: 200 }, movable: { color: undefined },
+    premovable: { enabled: true, showDests: true },   // move ahead while the reply is being played
   });
   const evalBar = createEvalBar(document.querySelector('.board-wrap'));
   const badge = createBadge(board, $('board'));
@@ -69,7 +70,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
 
     const goal = m.playout_moves > 1 ? ` It takes ${m.playout_moves} good moves in a row.` : '';
     rich($('prompt'), 'You played ', ['strong', `${m.move_san}${SYMBOLS[m.judgement]}`],
-         ` here. Find a better move for ${colorName(m.my_color)}.${goal}`);
+         ` here (red arrow). Find a better move for ${colorName(m.my_color)}.${goal}`);
     $('feedback').hidden = true;
     resetHint();
     $('solve-actions').hidden = false;
@@ -78,6 +79,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
 
     stopAnalysis();
     badge.clear();
+    board.cancelPremove();
     board.set({ orientation: m.my_color });
     evalBar.set(m.eval_before_white, m.my_color);
     evalBar.hide(true);  // no peeking while solving
@@ -91,9 +93,10 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     board.set({
       fen: p.fen, turnColor: p.item.my_color, lastMove: p.last, check: checkOf(p.fen),
       movable: { free: false, color: p.item.my_color, dests: legalDests(chess), showDests: true,
-                 events: { after: onMove } },
+                 events: { after: (orig, dest) => onMove(orig, dest) } },  // ignore chessground's 3rd (metadata) arg
     });
     board.setAutoShapes(hintShapes());
+    board.playPremove();   // a move queued during the opponent's reply is played now
   }
 
   function lockBoard() {
@@ -145,7 +148,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
       if (puzzle !== p) return;
       p.phase = 'solving';
       setSolvingBoard();  // the piece snaps back
-    }, 700);
+    }, 500);
   }
 
   function right(p, r, uci) {
@@ -161,8 +164,9 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     if (found >= m.playout_moves || r.game_over || !r.reply_uci) {
       return finish(p, p.attempts === 0 && p.hints === 0 ? 'solved' : 'solved_with_help', 900);
     }
-    // Play the opponent's best reply, then hand the board back.
+    // Play the opponent's best reply, then hand the board back. Meanwhile a move can be premoved.
     p.phase = 'opponent';
+    board.set({ movable: { free: false, color: m.my_color, dests: new Map(), events: { after: (o, d) => onMove(o, d) } } });
     if (m.best_pv_uci[lineIndex + 1] !== r.reply_uci) p.onLine = false;
     setTimeout(() => {
       if (puzzle !== p) return;
@@ -176,7 +180,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
            ['strong', r.reply_san], `. Keep going: move ${found + 1} of ${m.playout_moves}.`);
       resetHint();
       setSolvingBoard();
-    }, 650);
+    }, 300);
   }
 
   function showFeedback(cls, headline, ...rest) {
@@ -202,9 +206,12 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
 
   function hintShapes() {
     const p = puzzle;
-    if (!p || p.hintLevel < 2) return [];
+    if (!p) return [];
+    // Show where I went in the real game (only in the puzzle's starting position).
+    const shapes = p.step === 0 ? [arrow(p.item.move_uci, 'paleRed')].filter(Boolean) : [];
+    if (p.hintLevel < 2) return shapes;
     const best = hintMove();
-    return best ? [{ orig: best.slice(0, 2), brush: 'green' }] : [];
+    return best ? [...shapes, { orig: best.slice(0, 2), brush: 'green' }] : shapes;
   }
 
   function giveHint() {
@@ -248,6 +255,8 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     $('eval-after').textContent = m.eval_after;
     rich($('explanation'), ['strong', `Why ${m.move_san} was ${article(m.judgement)} ${m.judgement}: `],
          m.explanation);
+    $('best-explanation').hidden = !m.best_explanation;
+    rich($('best-explanation'), ['strong', `Why ${m.best_san} is better: `], m.best_explanation || '');
     $('explanation').className = `explanation ${m.judgement}`;
     setTimeout(() => {
       if (puzzle !== p) return;

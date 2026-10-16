@@ -6,7 +6,10 @@ import { markIcon } from './icons.js';
 
 const $ = id => document.getElementById(id);
 const START = new Chess().fen();
-const board = makeBoard($('board'), { viewOnly: false, movable: { color: undefined }, orientation: 'white' });
+const board = makeBoard($('board'), {
+  viewOnly: false, movable: { color: undefined }, orientation: 'white',
+  premovable: { enabled: true, showDests: true },   // move ahead while the opponent's reply is being played
+});
 const badge = createBadge(board, $('board'));
 
 let color = 'white';
@@ -177,12 +180,13 @@ function startLine() {
   dr.failedStep = false;
   dr.chess = new Chess();
   badge.clear();
+  board.cancelPremove();
   board.set({ fen: START, orientation: color, lastMove: undefined, check: false, movable: { color: undefined } });
   board.setAutoShapes([]);
   $('drill-moves').replaceChildren();
   $('drill-feedback').hidden = true;
   updateDrillBar();
-  setTimeout(advance, 400);
+  setTimeout(advance, 150);
 }
 
 function updateDrillBar() {
@@ -209,9 +213,12 @@ function advance() {
   if (dr.step >= steps.length) return endLine();
   const step = steps[dr.step];
   if (!step.mine) {
+    // Let me drag already: on the opponent's turn a move becomes a premove (chess.com style).
+    board.set({ movable: { free: false, color, dests: new Map(), events: { after: (o, d) => drillMove(o, d) } } });
     playStep(step);
     dr.step += 1;
-    setTimeout(advance, step.setup ? 120 : 450);
+    // My move always follows an opponent move: hand the board over at once (setup moves are paced).
+    if (step.setup) setTimeout(advance, 60); else advance();
     return;
   }
   // My move: hand the board over (failedStep is reset only when a new position comes up,
@@ -220,6 +227,7 @@ function advance() {
   $('drill-prompt').textContent = `Your move as ${color === 'white' ? 'White' : 'Black'}.`;
   board.set({ movable: { free: false, color, dests: legalDests(dr.chess), showDests: true,
                          events: { after: (o, d) => drillMove(o, d) } }, turnColor: sideToMove(fen) });
+  board.playPremove();   // a move queued during the opponent's turn is played now
 }
 
 async function drillMove(orig, dest) {
@@ -242,7 +250,7 @@ async function drillMove(orig, dest) {
     dr.step += 1;
     dr.failedStep = false;
     updateDrillBar();
-    setTimeout(() => { badge.clear(); advance(); }, 600);
+    setTimeout(() => { badge.clear(); advance(); }, 200);
   } else {
     sound.wrong();
     badge.show(dest, 'mistake');
@@ -257,7 +265,7 @@ async function drillMove(orig, dest) {
       board.set({ fen, turnColor: sideToMove(fen), check: checkOf(fen) });
       board.setAutoShapes([arrow(step.uci, 'green')]);
       advance();
-    }, 700);
+    }, 450);
   }
 }
 
@@ -267,7 +275,7 @@ function endLine() {
   $('drill-prompt').textContent = 'Line complete!';
   dr.line += 1;
   if (dr.line >= dr.lines.length) return setTimeout(finishDrill, 700);
-  setTimeout(startLine, 1100);
+  setTimeout(startLine, 600);
 }
 
 function finishDrill() {

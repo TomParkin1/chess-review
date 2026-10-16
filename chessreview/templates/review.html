@@ -1,7 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Practice · Chess Review{% endblock %}
 {% block content %}
-<form id="filters" class="filters card">
+<div class="card filter-bar">
+  <span class="filter-summary" id="filter-summary"></span>
+  <span class="table-actions">
+    <button class="btn small" id="reset-filters" hidden>Reset to recommended</button>
+    <button class="btn small" id="toggle-filters" aria-expanded="false">⚙ Filters</button>
+  </span>
+</div>
+<form id="filters" class="filters card" hidden>
   <label>Show
     <select name="status">
       <option value="unsolved">Not solved yet</option>
@@ -23,7 +30,7 @@
       <option value="">All games</option>
       <option value="10">Last 10</option>
       <option value="20">Last 20</option>
-      <option value="50">Last 50</option>
+      <option value="50" selected>Last 50</option>
       <option value="100">Last 100</option>
       <option value="200">Last 200</option>
     </select>

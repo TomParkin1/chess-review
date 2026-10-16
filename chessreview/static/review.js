@@ -25,7 +25,9 @@ const KIND_LABELS = {
 
 // ------------------------------------------------------------ filters
 
-const STORAGE_KEY = 'review-filters-v2';
+const STORAGE_KEY = 'review-filters-v3';
+// Recommended defaults: what I haven't solved, real errors only, recent games (current habits), worst first.
+const RECOMMENDED = { status: 'unsolved', judgement: 'mistake,blunder', last: '50', sort: 'worst' };
 const FIXED_SELECTS = ['status', 'judgement', 'sort', 'last'];  // options known up front
 
 function saveFilters() {
@@ -70,12 +72,44 @@ async function load() {
     if (query() !== q) return load();  // saved filters became selectable
   }
   items = data.items;
+  renderSummary();
   $('empty').hidden = items.length > 0;
   $('review').hidden = items.length === 0;
   if (items.length) show(0);
 }
 
-form.addEventListener('change', () => { saveFilters(); load(); });
+form.addEventListener('change', () => { saveFilters(); renderSummary(); load(); });
+
+// One-line summary of the active filters; the full form is behind "Filters".
+function renderSummary() {
+  const parts = [];
+  let custom = false;
+  for (const field of form.elements) {
+    if (field.tagName !== 'SELECT') continue;
+    const label = field.selectedOptions[0]?.textContent || '';
+    const isDefault = field.value === (RECOMMENDED[field.name] ?? '');
+    if (!isDefault) custom = true;
+    if (field.value || field.name in RECOMMENDED) {
+      parts.push(field.name === 'opening' || field.name === 'kind' || field.name === 'phase' ||
+                 field.name === 'color' || field.name === 'result' || field.name === 'time_class'
+        ? `${field.closest('label').firstChild.textContent.trim().toLowerCase()}: ${label}` : label.toLowerCase());
+    }
+  }
+  $('filter-summary').textContent = `Showing ${parts.join(' · ')}`;
+  $('reset-filters').hidden = !custom;
+}
+
+$('toggle-filters').addEventListener('click', () => {
+  form.hidden = !form.hidden;
+  $('toggle-filters').setAttribute('aria-expanded', String(!form.hidden));
+  $('toggle-filters').textContent = form.hidden ? '⚙ Filters' : '✕ Hide filters';
+});
+$('reset-filters').addEventListener('click', () => {
+  for (const field of form.elements) if (field.tagName === 'SELECT') field.value = RECOMMENDED[field.name] ?? '';
+  saveFilters();
+  renderSummary();
+  load();
+});
 
 // ------------------------------------------------------------ puzzles
 

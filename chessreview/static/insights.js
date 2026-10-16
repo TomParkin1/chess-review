@@ -6,19 +6,24 @@ const $ = id => document.getElementById(id);
 const pct = v => (v == null ? '–' : `${v.toFixed(0)}%`);
 const ICONS = { kind: '🎯', phase: '⏱️', opening: '📖', low_clock: '⏰', color: '♟️' };
 
-export function trainHref(train) {
-  const params = new URLSearchParams({ status: '', ...train });
+// Practice link for a weakness; `last` keeps the same game range the weakness was found in.
+export function trainHref(train, last = currentLast()) {
+  const params = new URLSearchParams({ status: '', last: last || '', ...train });
   return `/review?${params}`;
 }
 
-export function renderWeaknesses(container, weaknesses) {
+function currentLast() {
+  return document.getElementById('f-last')?.value ?? '';
+}
+
+export function renderWeaknesses(container, weaknesses, last = currentLast()) {
   if (!weaknesses.length) {
     container.replaceChildren(el('p', { class: 'muted' }, 'No clear weaknesses yet: play and analyse a few more games.'));
     return;
   }
   container.replaceChildren(...weaknesses.map((w, i) => {
     const key = Object.keys(w.train)[0];
-    return el('a', { class: 'weakness', href: trainHref(w.train) },
+    return el('a', { class: 'weakness', href: trainHref(w.train, last) },
       el('div', { class: 'weakness-rank' }, `#${i + 1}`),
       el('div', { class: 'weakness-icon' }, ICONS[key] || '💡'),
       el('h3', {}, w.title),
@@ -46,6 +51,8 @@ async function load() {
   ].map(([v, label]) => el('div', { class: 'stat' }, el('div', { class: 'value' }, v), el('div', { class: 'label' }, label))));
 
   renderWeaknesses($('weaknesses'), d.weaknesses);
+  const scope = $('f-last').value ? `your last ${$('f-last').value} games` : 'all your games';
+  $('weakness-scope').textContent = `Based on ${scope}${$('f-time').value ? ` (${$('f-time').value})` : ''}, compared with your own average`;
 
   // Rating: the most-played time class in the selection (ratings differ per time class).
   const counts = {};

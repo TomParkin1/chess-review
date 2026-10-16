@@ -195,7 +195,7 @@ async function loadWeaknesses() {
   const d = await api('/api/insights?last=100');
   const card = document.getElementById('weakness-card');
   card.hidden = !(d.games >= 10 && d.weaknesses?.length);
-  if (!card.hidden) renderWeaknesses(document.getElementById('weaknesses'), d.weaknesses);
+  if (!card.hidden) renderWeaknesses(document.getElementById('weaknesses'), d.weaknesses, '100');
 }
 
 loadGames();

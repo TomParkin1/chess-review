@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import db
 from .classify import ensure_classified
-from .config import load_config
+from .config import effective_workers, load_config
 from .engine import AnalysisJob, count_pending
 from .pgn_import import import_paths
 
@@ -148,8 +148,8 @@ def cmd_analyse(conn: sqlite3.Connection, cfg, args) -> None:
         ensure_classified(conn, cfg)
         return
     e = cfg.engine
-    print(f"Engine: {e.path}, {e.time_per_position}s/position, "
-          f"{e.workers} workers x {e.threads} threads. Ctrl+C stops (finished games are kept).")
+    print(f"Engine: {e.path}, up to {e.time_per_position}s or depth {e.max_depth or '∞'} per position, "
+          f"{effective_workers(e)} workers x {e.threads} thread(s). Ctrl+C stops (finished games are kept).")
 
     job = AnalysisJob(cfg, limit=args.limit)
     job.start()

@@ -98,3 +98,22 @@ def test_discovered_attack():
                              ["d4b5", "g6f5", "d1d8"], Eval(800, None), Eval(-900, None)))
     assert kind == "discovered_attack"
     assert "Nb5" in text and "rook on d1" in text and "queen on d8" in text
+
+
+def test_adaptive_thresholds_by_rating():
+    from chessreview.classify import thresholds_for
+    cfg = load_config()
+    assert thresholds_for(1007, cfg, adaptive=False).inaccuracy == cfg.classification.inaccuracy
+    low, mid, high = (thresholds_for(r, cfg, adaptive=True) for r in (700, 1700, 2300))
+    assert low.inaccuracy > mid.inaccuracy > high.inaccuracy
+    assert mid.inaccuracy == 0.10 and mid.band == "1600–1999"
+    assert thresholds_for(None, cfg, adaptive=True).band == "standard"   # unknown rating
+
+
+def test_adaptive_judgement_is_more_lenient_for_lower_ratings():
+    from chessreview.classify import thresholds_for
+    cfg = load_config()
+    before, after = Eval(0, None), Eval(-120, None)   # a 0.22 win-chance drop: a mistake at 1700
+    assert judge(before, after, cfg, thresholds_for(1700, cfg, True))[0] == "mistake"
+    assert judge(before, after, cfg, thresholds_for(1000, cfg, True))[0] == "inaccuracy"
+    assert judge(before, after, cfg, thresholds_for(700, cfg, True))[0] == "inaccuracy"
