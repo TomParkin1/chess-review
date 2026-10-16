@@ -9,7 +9,7 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - Python 3.15 venv in `.venv` (Homebrew Python, not Anaconda): use `.venv/bin/python`.
 - Stockfish: `/opt/homebrew/bin/stockfish` (configurable in `config.toml`).
 - CLI: `.venv/bin/python -m chessreview import <files|dirs>`, `summary`,
-  `analyse [--limit N]`, `reclassify`, `mistakes [--limit N]`, `serve [--port 8000]`.
+  `analyse [--limit N]`, `reclassify`, `mistakes [--limit N]`, `serve [--port 8000]`, `reset [--yes]`.
   Port 5000 is taken by macOS AirPlay Receiver, hence 8000.
 - Tests: `.venv/bin/pytest`.
 
@@ -29,6 +29,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   data comes from the JSON API (`/api/upload`, `/api/progress`, `/api/analysis/start|stop`, `/api/games`,
   `/api/game/<id>`, `/api/mistakes?filters`, `/api/evaluate`). Upload auto-starts an `AnalysisJob`.
   `/api/evaluate` starts a short-lived Stockfish per request (a long-lived one blocks interpreter exit).
+- UI preferences: review opens in quiz mode by default; board sized from window height for desktop; chess.com
+  "Neo" pieces (hotlinked from images.chesscomfiles.com) on a brown/cream board (CSS in `style.css`).
 - `chessreview/templates/` + `chessreview/static/`: plain ES modules, no build step. chessground 9.2.1 and
   chess.js 1.4.0 via an import map from jsdelivr (see `base.html`). `common.js` has shared helpers.
 

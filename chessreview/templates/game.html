@@ -2,7 +2,7 @@
 {% block title %}Game · Chess Review{% endblock %}
 {% block content %}
 <div class="game-header" id="game-header"></div>
-<div class="layout">
+<div class="layout game-layout">
   <div class="board-col">
     <div class="board-wrap"><div id="board" class="board"></div></div>
     <div class="controls">
@@ -13,9 +13,9 @@
       <button class="btn" id="flip-btn" title="Flip board (f)">⇅</button>
       <label class="toggle"><input type="checkbox" id="best-toggle" checked> Best move arrow</label>
     </div>
-    <div id="graph" class="graph"></div>
   </div>
   <div class="side-col">
+    <div id="graph" class="graph"></div>
     <div class="eval-line"><span id="eval-text" class="eval"></span> <span id="best-text" class="muted"></span></div>
     <div id="explanation" class="explanation" hidden></div>
     <div id="moves" class="moves"></div>

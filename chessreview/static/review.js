@@ -14,7 +14,9 @@ let optionsLoaded = false;
 
 const STORAGE_KEY = 'review-filters';
 function saveFilters() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(new FormData(form)))); } catch { /* storage unavailable */ }
+  const values = Object.fromEntries(new FormData(form));
+  values.quiz = form.elements.quiz.checked ? 'on' : 'off';  // unchecked boxes are missing from FormData
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(values)); } catch { /* storage unavailable */ }
 }
 function restoreFilters() {
   let saved = {};

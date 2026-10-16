@@ -98,3 +98,13 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (key, value),
     )
+
+
+def delete_all_games(conn: sqlite3.Connection) -> int:
+    """Delete every game with its analysis and classification. Returns games deleted."""
+    with conn:
+        n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+        conn.execute("DELETE FROM mistakes")
+        conn.execute("DELETE FROM positions")
+        conn.execute("DELETE FROM games")
+    return n

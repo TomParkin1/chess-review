@@ -22,7 +22,10 @@
 <section class="card">
   <div class="table-head">
     <h2>Games of {{ username }}</h2>
-    <span class="muted" id="games-count"></span>
+    <span class="table-actions">
+      <span class="muted" id="games-count"></span>
+      <button class="btn small danger" id="reset-btn" title="Delete all games and analysis, e.g. before uploading your next batch">Delete all games</button>
+    </span>
   </div>
   <div class="table-wrap">
     <table class="games">

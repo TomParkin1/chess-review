@@ -65,3 +65,17 @@ def test_evaluate_rejects_illegal_move(client):
     m = c.get("/api/mistakes?judgement=inaccuracy,mistake,blunder").get_json()["items"][0]
     r = c.post("/api/evaluate", json={"game_id": m["game_id"], "ply": m["ply"], "uci": "a1a8"})
     assert r.status_code == 400
+
+
+def test_delete_all_games(client):
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    r = c.delete("/api/games")  # also stops the analysis that the upload started
+    assert r.get_json()["deleted"] == 3
+    assert c.get("/api/games").get_json() == []
+    assert c.get("/api/mistakes").get_json()["items"] == []
+    with open(SAMPLE, "rb") as f:  # the same games can be uploaded again afterwards
+        r = c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    assert r.get_json()["imported"] == 3
+    wait_for_analysis(c)

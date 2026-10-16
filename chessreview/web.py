@@ -110,6 +110,15 @@ def create_app(cfg: Config | None = None) -> Flask:
         """).fetchall()
         return jsonify([dict(r) for r in rows])
 
+    @app.delete("/api/games")
+    def delete_games():
+        """Start afresh: remove all games and their analysis (PGN files on disk are untouched)."""
+        job = state["job"]
+        job.stop()
+        job.wait(timeout=30)
+        deleted = db.delete_all_games(conn())
+        return jsonify(deleted=deleted)
+
     @app.get("/api/game/<int:game_id>")
     def game(game_id: int):
         c = conn()

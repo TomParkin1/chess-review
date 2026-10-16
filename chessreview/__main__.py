@@ -6,6 +6,7 @@
     python -m chessreview reclassify
     python -m chessreview mistakes [--limit N]
     python -m chessreview serve [--port 8000]
+    python -m chessreview reset [--yes]
 """
 
 import argparse
@@ -180,6 +181,16 @@ def cmd_serve(conn: sqlite3.Connection, cfg, args) -> None:
     create_app(cfg).run(host="127.0.0.1", port=args.port, threaded=True)
 
 
+def cmd_reset(conn: sqlite3.Connection, cfg, args) -> None:
+    n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+    if not args.yes:
+        answer = input(f"Delete all {n} games and their analysis? PGN files are not touched. [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            print("Nothing deleted.")
+            return
+    print(f"Deleted {db.delete_all_games(conn)} games.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="chessreview", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -208,6 +219,10 @@ def main() -> None:
     p = sub.add_parser("serve", help="run the web app")
     p.add_argument("--port", type=int, default=8000)
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("reset", help="delete all games and analysis to start afresh")
+    p.add_argument("--yes", action="store_true", help="don't ask for confirmation")
+    p.set_defaults(func=cmd_reset)
 
     args = parser.parse_args()
     cfg = load_config(args.config) if args.config else load_config()

@@ -47,7 +47,7 @@ a { color: var(--accent); }
 .topbar nav a { color: var(--muted); text-decoration: none; margin-right: 16px; }
 .topbar nav a.active, .topbar nav a:hover { color: var(--text); }
 
-main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 60px; }
+main { max-width: 1500px; margin: 0 auto; padding: 20px 16px 60px; }
 
 .card {
   background: var(--surface); border: 1px solid var(--border);
@@ -104,9 +104,20 @@ table.games tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, tr
 .dot.black { background: #222; }
 
 /* Board layouts */
-.layout { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 20px; align-items: start; }
-@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
-.board-wrap { width: 100%; max-width: 560px; }
+/* The board is sized from the window height so it fills the screen on a desktop
+   while the controls below it stay visible; --board-offset is the space above and below. */
+.layout {
+  --board-size: clamp(320px, calc(100vh - var(--board-offset, 170px)), 900px);
+  display: grid; grid-template-columns: var(--board-size) minmax(300px, 1fr);
+  gap: 24px; align-items: start;
+}
+.layout.review-layout { --board-offset: 250px; }
+.layout.game-layout { --board-offset: 210px; }
+.graph { margin-bottom: 12px; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; --board-size: 100%; }
+}
+.board-wrap { width: 100%; }
 .board { width: 100%; aspect-ratio: 1 / 1; }
 .controls { display: flex; align-items: center; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
 .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); margin-left: auto; }
@@ -118,7 +129,7 @@ table.games tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, tr
 .eval { font-weight: 650; font-variant-numeric: tabular-nums; }
 .moves {
   display: grid; grid-template-columns: 42px 1fr 1fr; gap: 2px 4px;
-  max-height: 520px; overflow-y: auto; background: var(--surface);
+  max-height: calc(100vh - 470px); min-height: 200px; overflow-y: auto; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius); padding: 8px;
 }
 .moves .num { color: var(--muted); text-align: right; padding: 3px 6px 3px 0; }
@@ -165,3 +176,29 @@ table.games tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, tr
 .try .ok { color: var(--good); font-weight: 600; }
 .try .bad { color: var(--blunder); font-weight: 600; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+/* Board: chess.com style brown/cream squares (a1 is dark). */
+.cg-wrap cg-board {
+  background-color: #edd6b0;
+  background-image: repeating-conic-gradient(#b88762 0% 25%, #edd6b0 0% 50%);
+  background-size: 25% 25%;
+}
+.cg-wrap coords { font-weight: 600; }
+
+/* Pieces: chess.com "Neo" set, loaded from chess.com's image server. */
+.cg-wrap piece.pawn.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wp.png'); }
+.cg-wrap piece.knight.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wn.png'); }
+.cg-wrap piece.bishop.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wb.png'); }
+.cg-wrap piece.rook.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wr.png'); }
+.cg-wrap piece.queen.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wq.png'); }
+.cg-wrap piece.king.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wk.png'); }
+.cg-wrap piece.pawn.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bp.png'); }
+.cg-wrap piece.knight.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bn.png'); }
+.cg-wrap piece.bishop.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bb.png'); }
+.cg-wrap piece.rook.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/br.png'); }
+.cg-wrap piece.queen.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bq.png'); }
+.cg-wrap piece.king.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bk.png'); }
+
+.table-actions { display: flex; align-items: center; gap: 12px; }
+.btn.danger { color: var(--blunder); }
+.btn.danger:hover { border-color: var(--blunder); }

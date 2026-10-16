@@ -149,5 +149,16 @@ function renderGames(games) {
   }));
 }
 
+document.getElementById('reset-btn').addEventListener('click', async () => {
+  const n = document.querySelectorAll('#games-body tr').length;
+  if (!n) return;
+  if (!confirm(`Delete all ${n} games and their analysis?\n\nUse this to start afresh with a new batch. ` +
+               `Your PGN files are not touched, so you can re-upload them later (they will be re-analysed).`)) return;
+  await api('/api/games', { method: 'DELETE' });
+  uploadResult.textContent = `Deleted ${n} games.`;
+  progressBlock.hidden = true;
+  loadGames();
+});
+
 loadGames();
 pollProgress();
