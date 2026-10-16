@@ -84,6 +84,7 @@ class CoachConfig:
     real_game: int = 6               # Today: real-game positions (new mistakes + calm positions)
     focus: int = 5                   # Today: puzzles on my #1 weakness
     progress_window: int = 25        # Progress: compare my last N games with the N before
+    self_review_games: int = 5       # New-games session: games to self-review before the engine
 
 
 @dataclass(frozen=True)

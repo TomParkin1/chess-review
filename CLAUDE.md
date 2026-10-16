@@ -91,6 +91,11 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   = half my mistakes, half themed library puzzles. puzzle.js `mode: 'library'` judges locally against the solution
   (any mate counts). UI: `/puzzles` (Practice switch), Settings card, CLI `puzzles`. Block items for the library are
   `["lib", puzzle_id, tag]` in the Today plan.
+- v3 self-review (Milestone 5): the new-games session starts with "where did this game turn?" for games that went wrong
+  (lost, drawn, or with a blunder of mine; `coach.self_review_games`, losses first). Turning point = my move with the
+  biggest win-chance drop (`session.turning_point`); a pick within 2 plies counts. Table `self_reviews`; API
+  `/api/session/self-review` (GET games without evals/marks, POST pick); hit rate in the session summary and Progress.
+  The self-review board markup sits after `_puzzle.html` (the puzzle attaches its eval bar to the first `.board-wrap`).
 - Design rule: nothing is tuned to one rating. Derive from the engine, the current rating's band, or my rolling data.
 - Chessground `events.after` passes (orig, dest, metadata): always wrap handlers as `(o, d) => fn(o, d)`.
 - `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump
@@ -137,4 +142,4 @@ Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--conf
 2. [x] "Today" workout + progress report
 3. [x] Convert won positions + essential endgames
 4. [x] Puzzle library (Lichess DB, every rating, puzzle rating)
-5. [ ] Self-review before the engine in new-games sessions
+5. [x] Self-review before the engine in new-games sessions

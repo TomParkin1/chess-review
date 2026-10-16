@@ -218,7 +218,21 @@ def _migrate_6(conn: sqlite3.Connection) -> None:
     """)
 
 
-MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5, _migrate_6]   # index i upgrades user_version i -> i + 1
+def _migrate_7(conn: sqlite3.Connection) -> None:
+    """Self-review: where I thought a game turned, before seeing the engine (session.py)."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS self_reviews (
+            id          INTEGER PRIMARY KEY,
+            game_id     INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            picked_ply  INTEGER,                -- NULL = "not sure"
+            actual_ply  INTEGER NOT NULL,       -- my move with the biggest win-chance drop
+            hit         INTEGER NOT NULL,
+            at          TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+
+MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5, _migrate_6, _migrate_7]   # index i upgrades user_version i -> i + 1
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -277,6 +291,7 @@ def delete_all_games(conn: sqlite3.Connection) -> int:
         n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
         conn.execute("DELETE FROM cards")
         conn.execute("DELETE FROM review_results")
+        conn.execute("DELETE FROM self_reviews")
         conn.execute("DELETE FROM mistakes")
         conn.execute("DELETE FROM positions")
         conn.execute("DELETE FROM games")

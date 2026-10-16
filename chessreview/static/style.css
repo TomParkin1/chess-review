@@ -511,3 +511,10 @@ a.chip { text-decoration: none; }
 .segmented a { color: var(--muted); font-weight: 700; padding: 6px 12px; border-radius: 6px; text-decoration: none; }
 .segmented a.active { background: var(--panel-3); color: var(--text); }
 .filter-bar .practice-switch { margin-right: 12px; }
+
+/* Self-review: where did the game turn? */
+.solution-moves.sr-moves .sm.mine { color: var(--text); }
+.solution-moves.sr-moves .sm.theirs { color: var(--muted); }
+.solution-moves.sr-moves .sm.picked { background: var(--series-you); color: #fff; }
+.solution-moves.sr-moves .sm.turning { background: var(--blunder); color: #fff; }
+.solution-moves.sr-moves .sm.at { outline: 2px solid var(--panel-3); }

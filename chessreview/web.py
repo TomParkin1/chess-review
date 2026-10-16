@@ -584,6 +584,24 @@ def create_app(cfg: Config | None = None) -> Flask:
                                       "g.end_time, g.id, m.ply")
         return jsonify(st)
 
+    @app.get("/api/session/self-review")
+    def self_review_games():
+        """Games of the open session to self-review (moves only: no evals, no marks)."""
+        c = conn()
+        st = session.status(c, cfg)
+        return jsonify(games=session.self_review_games(c, cfg, st["batch_ids"]) if st["open"] else [])
+
+    @app.post("/api/session/self-review")
+    def self_review_pick():
+        """Body: {game_id, ply} (ply of my move I think the game turned on, or null = not sure)."""
+        data = request.get_json(force=True)
+        ply = data.get("ply")
+        try:
+            return jsonify(session.record_self_review(conn(), int(data.get("game_id")),
+                                                      None if ply is None else int(ply)))
+        except (LookupError, TypeError, ValueError):
+            return jsonify(error="no turning point for this game"), 404
+
     @app.post("/api/session/done")
     def session_done():
         c = conn()

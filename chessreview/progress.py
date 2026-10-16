@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 import chess
 
-from . import level
+from . import level, session
 from .config import Config
 from .insights import KIND_LABELS, my_accuracy, my_elo
 from .threats import training_threat
@@ -137,6 +137,7 @@ def report(conn: sqlite3.Connection, cfg: Config) -> dict:
         "rating_now": level.current_rating(conn),
         "winning_cp": level.winning_cp(level.current_rating(conn)),
         "training": training_weeks(conn),
+        "self_review": session.self_review_rate(conn),
         "summary": summary_line(window, len(games), cur, base, kinds),
     }
 

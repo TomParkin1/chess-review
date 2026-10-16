@@ -18,5 +18,33 @@
 
 {% set puzzle_hidden = True %}
 {% include "_puzzle.html" %}
+
+{# Self-review comes after the puzzle markup: the puzzle attaches its eval bar to the first .board-wrap. #}
+<div class="layout review-layout" id="self-review" hidden>
+  <div class="board-col">
+    <div class="board-wrap"><div id="sr-board" class="board"></div></div>
+    <div class="controls">
+      <button class="btn" id="sr-back" title="Back (←)">◀</button>
+      <button class="btn" id="sr-fwd" title="Forward (→)">▶</button>
+      <span class="muted small">Step through the game with ← and →</span>
+    </div>
+  </div>
+  <div class="side-col">
+    <div class="session-bar"><span id="sr-counter"></span><span class="muted" id="sr-score"></span></div>
+    <div class="review-head"><h2 id="sr-title"></h2></div>
+    <p class="muted small" id="sr-context"></p>
+    <div class="prompt" id="sr-prompt"></div>
+    <div class="solution-moves sr-moves" id="sr-moves"></div>
+    <div class="feedback" id="sr-feedback" hidden></div>
+    <div class="explanation" id="sr-explanation" hidden></div>
+    <div class="actions" id="sr-actions">
+      <button class="btn primary" id="sr-pick" disabled>Pick one of your moves</button>
+      <button class="btn" id="sr-unsure">Not sure</button>
+    </div>
+    <div class="actions" id="sr-next-actions" hidden>
+      <button class="btn primary" id="sr-next">Next ▶</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}<script type="module" src="{{ url_for('static', filename='session.js') }}"></script>{% endblock %}

@@ -56,6 +56,7 @@ due_cap = 15              # Today: at most this many due reviews per day (the re
 real_game = 6             # Today: real-game positions (new mistakes + positions you played well)
 focus = 5                 # Today: puzzles on your #1 weakness (from Insights)
 progress_window = 25      # Progress: your last N games compared with the N before
+self_review_games = 5     # New-games session: games where you find the turning point yourself first
 
 [database]
 path = "data/chess.db"

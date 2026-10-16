@@ -53,6 +53,11 @@ async function load() {
        k.change == null ? '–' : `${k.change > 0 ? '+' : ''}${k.change.toFixed(2)}`))));
 
   const pct = v => (v == null ? '–' : `${Math.round(v)}%`);
+  const sr = r.self_review;
+  if (sr.tries) {
+    $('self-review-note').textContent = `Turning points you found yourself: ${sr.hits} of your last ${sr.tries} ` +
+      `games reviewed (${pct(sr.rate)}) · per week below`;
+  }
   $('training').tBodies[0].replaceChildren(...(r.training.length ? r.training.map(w => el('tr', {},
     el('td', {}, w.from), el('td', {}, w.days), el('td', {}, w.attempts), el('td', {}, pct(w.solve_rate)),
     el('td', {}, pct(w.threat_rate)))) : [el('tr', {}, el('td', { colspan: 5, class: 'muted' }, 'No training yet.'))]));
