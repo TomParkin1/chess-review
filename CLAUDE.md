@@ -27,8 +27,13 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - `chessreview/phases.py`: opening/middlegame/endgame.
 - `chessreview/web.py`: Flask app factory `create_app(cfg)`; pages (`/`, `/game/<id>`, `/review`) are thin shells,
   data comes from the JSON API (`/api/upload`, `/api/progress`, `/api/analysis/start|stop`, `/api/games`,
-  `/api/game/<id>`, `/api/mistakes?filters`, `/api/evaluate`). Upload auto-starts an `AnalysisJob`.
-  `/api/evaluate` starts a short-lived Stockfish per request (a long-lived one blocks interpreter exit).
+  `/api/game/<id>`, `/api/mistakes?filters` incl. `status` & `last`, `/api/judge`, `/api/review/result`,
+  `/api/analyse/stream` (SSE)). Upload auto-starts an `AnalysisJob`.
+- `chessreview/live.py`: `LiveEngine` = two long-lived Stockfish processes (judging tries, live analysis stream).
+  The stream runs on a worker thread feeding a queue (a paused SSE generator must never hold the engine lock).
+  `serve` closes it in a finally block, tests close it in fixtures, otherwise Python cannot exit.
+- `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump
+  `CLASSIFY_VERSION` when judge logic changes.
 - UI preferences: review opens in quiz mode by default; board sized from window height for desktop; chess.com
   "Neo" pieces (hotlinked from images.chesscomfiles.com) on a brown/cream board (CSS in `style.css`).
 - `chessreview/templates/` + `chessreview/static/`: plain ES modules, no build step. chessground 9.2.1 and

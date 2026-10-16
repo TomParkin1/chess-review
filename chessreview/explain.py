@@ -367,3 +367,27 @@ def explain(ctx: MoveContext) -> tuple[str, str]:
                                  "missed_opportunity"):
         text += f" Best was {_san(ctx.board, ctx.best)}."
     return kind, text
+
+
+# ---------------------------------------------------------------- hints for review mode
+
+HINTS = {
+    "missed_mate": "There's a forced checkmate. Look at every check.",
+    "missed_capture": "You can win material right away. Look at what is undefended.",
+    "missed_tactic": "There's a tactic that wins material: look for checks, captures and threats.",
+    "allowed_mate": "Your king is in danger. What is your opponent threatening?",
+    "fork": "Careful: your opponent has a fork available. Which squares do their knights and queen reach?",
+    "discovered_attack": "Careful: a discovered attack is possible. Look at the lines behind their pieces.",
+    "hanging_piece": "Make sure none of your pieces is left undefended.",
+    "loses_material": "Your move lost material. Check every capture your opponent has.",
+    "king_safety": "Keep your king safe: which checks does your opponent have?",
+    "missed_opportunity": "You're clearly better here. Find the move that keeps the advantage, often the most forcing one.",
+    "positional": "Before moving, ask what your opponent wants to do next.",
+}
+
+# Mistakes where the fix is attacking: these get a longer play-out in review mode.
+ATTACKING_KINDS = {"missed_mate", "missed_capture", "missed_tactic"}
+
+
+def hint(kind: str | None) -> str:
+    return HINTS.get(kind or "", "Think about your opponent's best reply before you move.")

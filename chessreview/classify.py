@@ -23,6 +23,7 @@ from .config import Config
 CP_CAP = 1000          # Lichess caps evals at +-10 pawns for win chances
 MATE_CP = 1000         # a forced mate counts as the cap
 SETTINGS_KEY = "classification_settings"
+CLASSIFY_VERSION = 2   # bump when judge() logic changes so stored judgements are rebuilt
 
 JUDGEMENTS = ("good", "inaccuracy", "mistake", "blunder")
 
@@ -56,11 +57,30 @@ class Eval:
         return f"{(self.cp or 0) / 100:+.2f}"
 
 
+def _mate_judgement(before: Eval, after: Eval) -> str | None:
+    """Lichess' special cases for forced mates, which win chances barely register
+    (missing a mate in 1 while +7 is only a 0.1 drop)."""
+    had_mate = before.mate is not None and before.mate > 0
+    has_mate = after.mate is not None and after.mate > 0
+    if had_mate and not has_mate and not (after.mate is not None and after.mate < 0):
+        cp = after.as_cp()  # lost a forced mate but still have this much
+        return "inaccuracy" if cp > 999 else "mistake" if cp > 700 else "blunder"
+    allowed_mate = after.mate is not None and after.mate < 0
+    already_mated = before.mate is not None and before.mate < 0
+    if allowed_mate and not already_mated:
+        cp = before.as_cp()  # walked into a forced mate from this eval
+        return "inaccuracy" if cp < -999 else "mistake" if cp < -700 else "blunder"
+    return None
+
+
 def judge(before: Eval, after: Eval, cfg: Config) -> tuple[str, float, int]:
     """Return (judgement, win-chance drop, centipawn loss) for one move."""
     c = cfg.classification
     drop = before.win_chance() - after.win_chance()
     cp_loss = max(0, before.as_cp() - after.as_cp())
+    mate_verdict = _mate_judgement(before, after)
+    if mate_verdict:
+        return mate_verdict, drop, cp_loss
     if c.mode == "cp":
         value, limits = cp_loss, (c.cp_blunder, c.cp_mistake, c.cp_inaccuracy)
     else:
@@ -115,7 +135,7 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config) -> int:
 def settings_fingerprint(cfg: Config) -> str:
     """Changes whenever anything that affects classification output changes."""
     data = {"classification": asdict(cfg.classification), "phases": asdict(cfg.phases),
-            "explain_version": explain.VERSION}
+            "explain_version": explain.VERSION, "classify_version": CLASSIFY_VERSION}
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 

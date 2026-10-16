@@ -47,6 +47,19 @@ class PhaseConfig:
 
 
 @dataclass(frozen=True)
+class ReviewConfig:
+    playout_tactical: int = 3   # my moves to play out when I missed a mate/tactic/capture
+    playout_other: int = 1      # my moves to play out for defensive/positional mistakes
+    live_time: float = 0.5      # seconds per position when judging moves I try
+
+
+@dataclass(frozen=True)
+class AnalysisConfig:
+    max_seconds: float = 10     # live analysis stops after this long per position
+    multipv: int = 3            # engine lines shown on the analysis board
+
+
+@dataclass(frozen=True)
 class Config:
     player: PlayerConfig
     imports: ImportConfig
@@ -54,6 +67,8 @@ class Config:
     classification: ClassificationConfig
     phases: PhaseConfig
     db_path: Path
+    review: ReviewConfig = ReviewConfig()
+    analysis: AnalysisConfig = AnalysisConfig()
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
@@ -71,4 +86,6 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
         classification=ClassificationConfig(**raw.get("classification", {})),
         phases=PhaseConfig(**raw.get("phases", {})),
         db_path=db_path,
+        review=ReviewConfig(**raw.get("review", {})),
+        analysis=AnalysisConfig(**raw.get("analysis", {})),
     )

@@ -4,6 +4,7 @@ Tables:
   games      one row per imported game (headers, my colour/result, opening, moves)
   positions  engine analysis of every position in a game (filled by engine.py)
   mistakes   classification + explanation of each of my moves (filled by classify.py)
+  review_results  my attempts at each mistake in review mode (history; latest = status)
   meta       key/value store (e.g. hash of the classification settings)
 """
 
@@ -66,6 +67,16 @@ CREATE TABLE IF NOT EXISTS mistakes (
     PRIMARY KEY (game_id, ply)
 );
 
+CREATE TABLE IF NOT EXISTS review_results (
+    id          INTEGER PRIMARY KEY,
+    game_id     INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    ply         INTEGER NOT NULL,           -- the mistake (ply of the position before my move)
+    result      TEXT NOT NULL,              -- solved | solved_with_help | failed | skipped
+    attempts    INTEGER NOT NULL DEFAULT 0, -- wrong tries before solving / giving up
+    hints_used  INTEGER NOT NULL DEFAULT 0,
+    at          TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -73,6 +84,7 @@ CREATE TABLE IF NOT EXISTS meta (
 
 CREATE INDEX IF NOT EXISTS idx_games_analysed ON games(analysed_at);
 CREATE INDEX IF NOT EXISTS idx_mistakes_judgement ON mistakes(judgement);
+CREATE INDEX IF NOT EXISTS idx_review_results ON review_results(game_id, ply, id);
 """
 
 
@@ -104,6 +116,7 @@ def delete_all_games(conn: sqlite3.Connection) -> int:
     """Delete every game with its analysis and classification. Returns games deleted."""
     with conn:
         n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+        conn.execute("DELETE FROM review_results")
         conn.execute("DELETE FROM mistakes")
         conn.execute("DELETE FROM positions")
         conn.execute("DELETE FROM games")

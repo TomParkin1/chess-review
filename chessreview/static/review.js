@@ -146,10 +146,12 @@ async function onTry(chess, orig, dest) {
   }
   msg.textContent = 'Checking with Stockfish…';
   try {
-    const r = await api('/api/evaluate', {
+    const r = await api('/api/judge', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ game_id: m.game_id, ply: m.ply, uci }),
+      body: JSON.stringify({ game_id: m.game_id, ply: m.ply, fen: m.fen, uci, step: 0 }),
     });
+    r.eval_before = r.before;
+    r.eval_after = r.after;
     if (r.judgement === 'good') {
       setMessage('ok', 'Good move!', `${r.san} keeps the evaluation at ${r.eval_after} ` +
         `(best was ${m.best_san}, ${r.eval_before}).`);

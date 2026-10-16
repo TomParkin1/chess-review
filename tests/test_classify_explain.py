@@ -28,6 +28,19 @@ def test_judge_winchance(before_cp, after_cp, expected):
     assert judgement == expected
 
 
+@pytest.mark.parametrize("before,after,expected", [
+    (Eval(None, 1), Eval(750, None), "mistake"),     # missed mate in 1 but still +7.5
+    (Eval(None, 3), Eval(1200, None), "inaccuracy"), # missed mate, still totally winning
+    (Eval(None, 2), Eval(300, None), "blunder"),
+    (Eval(None, 2), Eval(None, 4), "good"),          # still mating, just slower
+    (Eval(50, None), Eval(None, -3), "blunder"),     # walked into mate
+    (Eval(-800, None), Eval(None, -5), "mistake"),   # already lost, now mated
+    (Eval(None, -4), Eval(None, -2), "good"),        # was already getting mated
+])
+def test_judge_mate_rules(before, after, expected):
+    assert judge(before, after, load_config())[0] == expected
+
+
 def test_hanging_piece():
     kind, text = explain(ctx("e4 e5 Nf3 Nc6", "f3e5", "f1b5", ["f1b5"], ["c6e5"],
                              Eval(30, None), Eval(-250, None)))

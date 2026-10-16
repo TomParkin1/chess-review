@@ -31,5 +31,14 @@ cp_blunder = 300
 opening_plies = 20        # first N half-moves count as the opening
 endgame_material = 13     # endgame when non-pawn material (both sides, N/B=3 R=5 Q=9) <= this
 
+[review]
+playout_tactical = 3      # moves to play out after finding a missed mate / tactic / capture
+playout_other = 1         # moves to play out for defensive and positional mistakes
+live_time = 0.5           # engine seconds per position when judging a move you try
+
+[analysis]
+max_seconds = 10          # live analysis board: stop searching a position after this long
+multipv = 3               # number of engine lines shown
+
 [database]
 path = "data/chess.db"

@@ -178,7 +178,11 @@ def cmd_serve(conn: sqlite3.Connection, cfg, args) -> None:
     from .web import create_app  # Flask is only needed for the web app
     ensure_classified(conn, cfg)
     print(f"Open http://127.0.0.1:{args.port} in your browser (Ctrl+C to stop).")
-    create_app(cfg).run(host="127.0.0.1", port=args.port, threaded=True)
+    app = create_app(cfg)
+    try:
+        app.run(host="127.0.0.1", port=args.port, threaded=True)
+    finally:
+        app.extensions["live"].close()  # stop Stockfish so Python can exit
 
 
 def cmd_reset(conn: sqlite3.Connection, cfg, args) -> None:

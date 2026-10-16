@@ -4,21 +4,32 @@ Pages render a small HTML shell; the data comes from the JSON API below and is
 drawn by the scripts in static/.
 """
 
+import json
 import sqlite3
-import threading
 
 import chess
-import chess.engine
-from flask import Flask, abort, g, jsonify, render_template, request
+from flask import Flask, Response, abort, g, jsonify, render_template, request
 
 from . import db
-from .classify import Eval, ensure_classified, judge
+from .classify import Eval, ensure_classified
 from .config import Config, load_config
-from .engine import AnalysisJob, open_engine
-from .explain import san_line
+from .engine import AnalysisJob
+from .explain import ATTACKING_KINDS, hint, san_line
+from .live import LiveEngine, PositionAnalysis
 from .pgn_import import ImportStats, import_pgn_text
 
 JUDGEMENT_ORDER = ["good", "inaccuracy", "mistake", "blunder"]
+REVIEW_RESULTS = {"solved", "solved_with_help", "failed", "skipped"}
+
+# Latest review result for a mistake row `m` (NULL if never attempted).
+STATUS_SQL = """(SELECT r.result FROM review_results r
+                 WHERE r.game_id = m.game_id AND r.ply = m.ply ORDER BY r.id DESC LIMIT 1)"""
+STATUS_FILTERS = {
+    "new": f"{STATUS_SQL} IS NULL",
+    "unsolved": f"({STATUS_SQL} IS NULL OR {STATUS_SQL} IN ('failed', 'skipped'))",
+    "failed": f"{STATUS_SQL} IN ('failed', 'skipped')",
+    "solved": f"{STATUS_SQL} IN ('solved', 'solved_with_help')",
+}
 
 
 def create_app(cfg: Config | None = None) -> Flask:
@@ -28,7 +39,8 @@ def create_app(cfg: Config | None = None) -> Flask:
     app.config["TEMPLATES_AUTO_RELOAD"] = True  # edited pages show up without a server restart
 
     state = {"job": AnalysisJob(cfg)}
-    quick_engine = QuickEngine(cfg)
+    live = LiveEngine(cfg)
+    app.extensions["live"] = live  # closed by the `serve` command on shutdown
 
     def conn() -> sqlite3.Connection:
         if "db" not in g:
@@ -157,6 +169,8 @@ def create_app(cfg: Config | None = None) -> Flask:
             if args.get(arg):
                 where.append(f"{column} = ?")
                 params.append(args[arg])
+        if args.get("status") in STATUS_FILTERS:
+            where.append(STATUS_FILTERS[args["status"]])
         last = args.get("last", type=int)
         if last and last > 0:
             # Only my most recent N games (newest by date, then by import order).
@@ -172,71 +186,80 @@ def create_app(cfg: Config | None = None) -> Flask:
             SELECT m.*, p.fen, p.move_uci, p.move_san, p.best_uci, p.pv_uci,
                    p.score_cp AS before_cp, p.score_mate AS before_mate,
                    p2.score_cp AS after_cp, p2.score_mate AS after_mate,
+                   p0.move_uci AS prev_move_uci,
                    g.my_color, g.white, g.black, g.date, g.opening, g.opening_family,
-                   g.my_result, g.time_class
+                   g.my_result, g.time_class, {STATUS_SQL} AS status
             FROM mistakes m
             JOIN positions p ON p.game_id = m.game_id AND p.ply = m.ply
             JOIN positions p2 ON p2.game_id = m.game_id AND p2.ply = m.ply + 1
+            LEFT JOIN positions p0 ON p0.game_id = m.game_id AND p0.ply = m.ply - 1
             JOIN games g ON g.id = m.game_id
             WHERE {' AND '.join(where)}
             ORDER BY {order}
         """, params).fetchall()
 
-        items = [_mistake_json(r) for r in rows]
+        items = [_mistake_json(r, cfg) for r in rows]
         return jsonify(items=items, options=_filter_options(c))
 
-    @app.post("/api/evaluate")
-    def evaluate():
-        """Judge a move I try in review mode against the stored eval of that position."""
+    @app.post("/api/judge")
+    def judge_move():
+        """Judge a move I try in review mode.
+
+        Body: {fen, uci, game_id?, ply?, step?}. On the first step of a puzzle (step 0)
+        the stored analysis of the game position is used, so the verdict matches the game.
+        """
         data = request.get_json(force=True)
-        c = conn()
-        pos = c.execute("SELECT * FROM positions WHERE game_id = ? AND ply = ?",
-                        (data["game_id"], data["ply"])).fetchone()
-        if pos is None:
-            abort(404)
-        board = chess.Board(pos["fen"])
+        fen, uci = data.get("fen"), data.get("uci")
+        if not fen or not uci:
+            return jsonify(error="fen and uci are required"), 400
+        before = None
+        if data.get("step", 0) == 0 and data.get("game_id") is not None:
+            pos = conn().execute("SELECT * FROM positions WHERE game_id = ? AND ply = ?",
+                                 (data["game_id"], data.get("ply"))).fetchone()
+            if pos is not None and pos["fen"] == fen:
+                before = _stored_analysis(pos)
         try:
-            move = chess.Move.from_uci(data["uci"])
+            result = live.judge(fen, uci, before)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(result.as_dict())
+
+    @app.post("/api/review/result")
+    def review_result():
+        data = request.get_json(force=True)
+        if data.get("result") not in REVIEW_RESULTS:
+            return jsonify(error="unknown result"), 400
+        c = conn()
+        with c:
+            c.execute("""INSERT INTO review_results (game_id, ply, result, attempts, hints_used)
+                         VALUES (?, ?, ?, ?, ?)""",
+                      (data["game_id"], data["ply"], data["result"],
+                       int(data.get("attempts", 0)), int(data.get("hints_used", 0))))
+        return jsonify(ok=True)
+
+    @app.get("/api/analyse/stream")
+    def analyse_stream():
+        """Server-Sent Events with live multi-line analysis of `fen`."""
+        fen = request.args.get("fen", "")
+        try:
+            chess.Board(fen)
         except ValueError:
-            abort(400)
-        if move not in board.legal_moves:
-            return jsonify(error="Illegal move"), 400
-        me = board.turn
-        san = board.san(move)
-        board.push(move)
-        after = quick_engine.evaluate(board, me)
-        before = Eval.from_row(pos, me)
-        judgement, drop, _ = judge(before, after, cfg)
-        return jsonify(san=san, judgement=judgement, is_best=move.uci() == pos["best_uci"],
-                       eval_before=str(before), eval_after=str(after), win_drop=drop)
+            return jsonify(error="invalid FEN"), 400
+
+        def events():
+            for snapshot in live.stream(fen):
+                yield f"data: {json.dumps(snapshot)}\n\n"
+
+        return Response(events(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     return app
 
 
-class QuickEngine:
-    """Evaluates single positions for /api/evaluate.
-
-    A fresh Stockfish process is started per request (about 0.1s overhead): a long-lived
-    one would keep Python from exiting, and these requests are rare.
-    """
-
-    def __init__(self, cfg: Config):
-        self.cfg = cfg
-        self._lock = threading.Lock()  # one evaluation at a time keeps the CPU free for analysis
-
-    def evaluate(self, board: chess.Board, color: chess.Color) -> Eval:
-        if board.is_checkmate():  # whoever is to move has been mated
-            return Eval(None, 1 if board.turn != color else -1)
-        if board.is_game_over():
-            return Eval(0, None)
-        with self._lock:
-            engine = open_engine(self.cfg)
-            try:
-                info = engine.analyse(board, chess.engine.Limit(time=self.cfg.engine.time_per_position))
-            finally:
-                engine.quit()
-        score = info["score"].pov(color)
-        return Eval(score.score(), score.mate())
+def _stored_analysis(pos: sqlite3.Row) -> PositionAnalysis:
+    pv = tuple(chess.Move.from_uci(u) for u in (pos["pv_uci"] or "").split())
+    best = chess.Move.from_uci(pos["best_uci"]) if pos["best_uci"] else None
+    return PositionAnalysis(Eval(pos["score_cp"], pos["score_mate"]), best, pv)
 
 
 # ------------------------------------------------------------ JSON helpers
@@ -274,7 +297,16 @@ def _unanalysed_positions(game: sqlite3.Row) -> list[dict]:
     return out
 
 
-def _mistake_json(r: sqlite3.Row) -> dict:
+def _playout_moves(kind: str | None, before: Eval, cfg: Config) -> int:
+    """How many of my moves a review puzzle asks for."""
+    if kind == "missed_mate" and before.mate and before.mate > 0:
+        return min(before.mate, 5)
+    if kind in ATTACKING_KINDS:
+        return cfg.review.playout_tactical
+    return cfg.review.playout_other
+
+
+def _mistake_json(r: sqlite3.Row, cfg: Config) -> dict:
     me = chess.WHITE if r["my_color"] == "white" else chess.BLACK
     board = chess.Board(r["fen"])
     best = chess.Move.from_uci(r["best_uci"]) if r["best_uci"] else None
@@ -295,6 +327,8 @@ def _mistake_json(r: sqlite3.Row) -> dict:
         "opponent": r["black"] if r["my_color"] == "white" else r["white"],
         "date": r["date"], "opening": r["opening"], "opening_family": r["opening_family"],
         "my_result": r["my_result"], "time_class": r["time_class"],
+        "prev_move_uci": r["prev_move_uci"], "status": r["status"],
+        "hint": hint(r["kind"]), "playout_moves": _playout_moves(r["kind"], before, cfg),
     }
 
 
@@ -311,4 +345,5 @@ def _filter_options(c: sqlite3.Connection) -> dict:
         "kind": distinct("""SELECT kind FROM mistakes WHERE kind IS NOT NULL
                             GROUP BY kind ORDER BY COUNT(*) DESC"""),
         "color": ["white", "black"],
+        "status": ["unsolved", "new", "failed", "solved"],
     }
