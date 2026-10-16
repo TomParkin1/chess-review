@@ -8,8 +8,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 ## Running
 - Python 3.15 venv in `.venv` (Homebrew Python, not Anaconda): use `.venv/bin/python`.
 - Stockfish: `/opt/homebrew/bin/stockfish` (configurable in `config.toml`).
-- CLI: `.venv/bin/python -m chessreview import <files|dirs>`, `summary`
-  `analyse [--limit N]` (later stages add `reclassify`, `serve`).
+- CLI: `.venv/bin/python -m chessreview import <files|dirs>`, `summary`,
+  `analyse [--limit N]`, `reclassify`, `mistakes [--limit N]` (Stage 4 adds `serve`).
 - Tests: `.venv/bin/pytest`.
 
 ## Layout
@@ -19,7 +19,11 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - `chessreview/pgn_import.py`: PGN parsing, my colour/result, time class, dedupe (Link header, else sha1 of players+date+moves).
 - `chessreview/openings.py` + `chessreview/data/openings.tsv`: names openings from the moves using the Lichess chess-openings DB (CC0), matched by position. My chess.com exports have no ECO/ECOUrl/Link headers.
 - `chessreview/engine.py`: Stockfish analysis, worker pool, progress, caching. Checkmated positions store score_cp = ±10000 (MATED_CP), no engine call.
-- `chessreview/classify.py`, `explain.py`, `phases.py`: mistake judgement, rule-based explanations, game phases. (Stage 3)
+- `chessreview/classify.py`: Lichess win-chance judgement per my move -> `mistakes` table. `ensure_classified()` rebuilds
+  automatically when config thresholds or `explain.VERSION` change (fingerprint in `meta`). Forced moves and the engine's
+  own best move are always "good".
+- `chessreview/explain.py`: ordered list of rule functions (`RULES`), first match wins. Bump `VERSION` when changing output.
+- `chessreview/phases.py`: opening/middlegame/endgame.
 - `chessreview/web.py` + `templates/` + `static/`: Flask app, chessground + chess.js from jsdelivr, no build step. (Stage 4)
 
 ## Conventions
@@ -33,5 +37,5 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 ## Status
 - [x] Stage 1: import, dedupe, CLI summary
 - [x] Stage 2: Stockfish analysis with caching and progress (`analyse` CLI, AnalysisJob worker pool)
-- [ ] Stage 3: classification and explanations
+- [x] Stage 3: classification and explanations
 - [ ] Stage 4: web UI (upload, game view, mistake review)

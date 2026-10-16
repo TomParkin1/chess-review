@@ -3,6 +3,8 @@
     python -m chessreview import FILE_OR_DIR [...]
     python -m chessreview summary
     python -m chessreview analyse [--limit N]
+    python -m chessreview reclassify
+    python -m chessreview mistakes [--limit N]
 """
 
 import argparse
@@ -12,6 +14,7 @@ import time
 from pathlib import Path
 
 from . import db
+from .classify import ensure_classified
 from .config import load_config
 from .engine import AnalysisJob
 from .pgn_import import import_paths
@@ -58,6 +61,57 @@ def cmd_summary(conn: sqlite3.Connection, cfg, args) -> None:
     _wdl_table(_wdl_query(conn, "my_color"), "By colour")
     _wdl_table(_wdl_query(conn, "time_class"), "By time class")
     _wdl_table(_wdl_query(conn, "opening_family", limit=args.openings), "Top openings")
+    _mistake_summary(conn, cfg)
+
+
+def _mistake_summary(conn: sqlite3.Connection, cfg) -> None:
+    ensure_classified(conn, cfg)
+    analysed = conn.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NOT NULL").fetchone()[0]
+    if not analysed:
+        print("\nNo games analysed yet. Run: python -m chessreview analyse")
+        return
+    print(f"\nMy moves in {analysed} analysed games")
+    print(f"{'':<14} {'moves':>6} {'inacc.':>7} {'mistake':>8} {'blunder':>8} {'per game':>9}")
+    rows = conn.execute("""
+        SELECT m.phase AS k, COUNT(*) AS n,
+               SUM(judgement = 'inaccuracy') AS i, SUM(judgement = 'mistake') AS m,
+               SUM(judgement = 'blunder') AS b, COUNT(DISTINCT game_id) AS g
+        FROM mistakes m GROUP BY m.phase
+        UNION ALL
+        SELECT 'all', COUNT(*), SUM(judgement = 'inaccuracy'), SUM(judgement = 'mistake'),
+               SUM(judgement = 'blunder'), COUNT(DISTINCT game_id) FROM mistakes
+    """).fetchall()
+    order = {"opening": 0, "middlegame": 1, "endgame": 2, "all": 3}
+    for r in sorted(rows, key=lambda r: order.get(r["k"], 9)):
+        per_game = (r["m"] + r["b"]) / analysed
+        print(f"{r['k']:<14} {r['n']:>6} {r['i']:>7} {r['m']:>8} {r['b']:>8} {per_game:>9.1f}")
+    print("(per game = mistakes + blunders per analysed game)")
+
+    kinds = conn.execute("""SELECT kind, COUNT(*) AS n FROM mistakes
+                            WHERE judgement IN ('mistake', 'blunder')
+                            GROUP BY kind ORDER BY n DESC""").fetchall()
+    print("\nWhat went wrong (mistakes + blunders)")
+    for r in kinds:
+        print(f"  {r['kind']:<16} {r['n']:>4}")
+    print("\nWorst 10 moves (python -m chessreview mistakes --limit N for more):")
+    _print_mistakes(conn, 10)
+
+
+def _print_mistakes(conn: sqlite3.Connection, limit: int) -> None:
+    rows = conn.execute("""
+        SELECT m.*, p.move_san, g.white, g.black, g.date, g.my_color, g.opening_family
+        FROM mistakes m
+        JOIN positions p ON p.game_id = m.game_id AND p.ply = m.ply
+        JOIN games g ON g.id = m.game_id
+        WHERE m.judgement != 'good'
+        ORDER BY m.win_drop DESC LIMIT ?""", (limit,)).fetchall()
+    for r in rows:
+        opponent = r["black"] if r["my_color"] == "white" else r["white"]
+        move_no = r["ply"] // 2 + 1
+        dots = "." if r["ply"] % 2 == 0 else "..."
+        print(f"\n  {r['judgement'].upper():<10} {move_no}{dots}{r['move_san']}  "
+              f"vs {opponent}, {r['date']} ({r['opening_family']}, {r['phase']}, game {r['game_id']})")
+        print(f"             {r['explanation']}")
 
 
 def _format_eta(seconds: float | None) -> str:
@@ -73,6 +127,7 @@ def cmd_analyse(conn: sqlite3.Connection, cfg, args) -> None:
     done = conn.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NOT NULL").fetchone()[0]
     print(f"{done} games already analysed (cached), {pending} to analyse.")
     if not pending:
+        ensure_classified(conn, cfg)
         return
     e = cfg.engine
     print(f"Engine: {e.path}, {e.time_per_position}s/position, "
@@ -93,6 +148,18 @@ def cmd_analyse(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"\nAnalysed {p.games_done} of {p.games_total} games.")
     for err in p.errors:
         print(f"Error: {err}")
+    n = ensure_classified(conn, cfg)
+    print(f"Classified moves in {n} games. Run 'summary' or 'mistakes' to see results.")
+
+
+def cmd_reclassify(conn: sqlite3.Connection, cfg, args) -> None:
+    n = ensure_classified(conn, cfg, force=True)
+    print(f"Re-classified {n} games with the current thresholds.")
+
+
+def cmd_mistakes(conn: sqlite3.Connection, cfg, args) -> None:
+    ensure_classified(conn, cfg)
+    _print_mistakes(conn, args.limit)
 
 
 def _print_progress(job: AnalysisJob) -> None:
@@ -122,6 +189,13 @@ def main() -> None:
     p = sub.add_parser("analyse", help="analyse un-analysed games with Stockfish")
     p.add_argument("--limit", type=int, default=None, help="only analyse N games (newest first)")
     p.set_defaults(func=cmd_analyse)
+
+    p = sub.add_parser("reclassify", help="rebuild mistake classification from stored evals")
+    p.set_defaults(func=cmd_reclassify)
+
+    p = sub.add_parser("mistakes", help="list my worst moves with explanations")
+    p.add_argument("--limit", type=int, default=20)
+    p.set_defaults(func=cmd_mistakes)
 
     args = parser.parse_args()
     cfg = load_config(args.config) if args.config else load_config()
