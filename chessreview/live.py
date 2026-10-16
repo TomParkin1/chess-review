@@ -141,7 +141,8 @@ class LiveEngine:
         if verdict != "good":
             result.kind, result.explanation = explain.explain(explain.MoveContext(
                 board=board, move=move, best=before.best, best_line=list(before.pv),
-                reply_line=list(after.pv), before=before_eval, after=after_eval))
+                reply_line=list(after.pv), before=before_eval, after=after_eval),
+                reveal_best=False)  # an attempt at a puzzle: don't give the answer away
         if after.best is not None and not result.game_over:
             result.reply_uci = after.best.uci()
             result.reply_san = after_board.san(after.best)

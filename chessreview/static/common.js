@@ -41,6 +41,8 @@ export function sideToMove(fen) {
   return fen.split(' ')[1] === 'w' ? 'white' : 'black';
 }
 
+// Note: pass viewOnly: false for boards that will ever take moves; chessground only binds
+// input listeners at creation, so switching viewOnly off later has no effect.
 export function makeBoard(el, config = {}) {
   const cg = Chessground(el, {
     viewOnly: true,

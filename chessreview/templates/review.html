@@ -1,8 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Review mistakes · Chess Review{% endblock %}
+{% block title %}Learn from your mistakes · Chess Review{% endblock %}
 {% block content %}
 <form id="filters" class="filters card">
   <label>Show
+    <select name="status">
+      <option value="unsolved">Not solved yet</option>
+      <option value="new">Never tried</option>
+      <option value="failed">Failed / skipped</option>
+      <option value="solved">Solved</option>
+      <option value="">All</option>
+    </select>
+  </label>
+  <label>Severity
     <select name="judgement">
       <option value="mistake,blunder">Mistakes + blunders</option>
       <option value="blunder">Blunders only</option>
@@ -25,14 +34,13 @@
   <label>Colour <select name="color"><option value="">All</option></select></label>
   <label>Time <select name="time_class"><option value="">All</option></select></label>
   <label>Type <select name="kind"><option value="">All</option></select></label>
-  <label>Sort
+  <label>Order
     <select name="sort">
       <option value="worst">Worst first</option>
       <option value="newest">Newest first</option>
       <option value="oldest">Oldest first</option>
     </select>
   </label>
-  <label class="toggle"><input type="checkbox" name="quiz" checked> Quiz mode (try before seeing the answer)</label>
 </form>
 
 <div id="empty" class="card muted" hidden>No mistakes match these filters.</div>
@@ -40,35 +48,59 @@
 <div class="layout review-layout" id="review">
   <div class="board-col">
     <div class="board-wrap"><div id="board" class="board"></div></div>
-    <div class="controls">
-      <button class="btn" id="prev-btn" title="Previous mistake (←)">◀ Prev</button>
-      <span id="counter" class="muted"></span>
-      <button class="btn" id="next-btn" title="Next mistake (→)">Next ▶</button>
-    </div>
   </div>
+
   <div class="side-col">
+    <div class="session-bar">
+      <span id="counter"></span>
+      <span id="session-score" class="muted"></span>
+    </div>
+
     <div class="review-head">
       <span id="badge" class="badge"></span>
       <h2 id="move-title"></h2>
+      <span id="status-chip" class="chip" hidden></span>
     </div>
-    <p id="context" class="muted"></p>
-    <div id="answer">
+    <p id="context" class="muted small"></p>
+
+    <div id="prompt" class="prompt"></div>
+    <div id="feedback" class="feedback" hidden></div>
+    <div id="hint" class="hint" hidden></div>
+
+    <div class="actions" id="solve-actions">
+      <button class="btn" id="hint-btn" title="Hint (h)">💡 Hint</button>
+      <button class="btn" id="solution-btn">View solution</button>
+      <button class="btn" id="skip-btn" title="Skip (s)">Skip</button>
+    </div>
+
+    <div id="answer" hidden>
       <div class="evals">
         <div><span class="muted">Before</span> <span id="eval-before" class="eval"></span></div>
         <div><span class="muted">After your move</span> <span id="eval-after" class="eval"></span></div>
       </div>
-      <p class="muted small">Evaluations from your point of view.</p>
       <div id="explanation" class="explanation"></div>
       <p class="legend"><span class="swatch red"></span> your move <span class="swatch green"></span> best move</p>
-      <p id="best-line" class="muted"></p>
+      <div class="solution">
+        <div class="solution-head">
+          <span class="muted small">Best line</span>
+          <span class="solution-nav">
+            <button class="btn small" id="sol-prev" title="Back (←)">◀</button>
+            <button class="btn small" id="sol-next" title="Forward (→)">▶</button>
+          </span>
+        </div>
+        <div id="solution-moves" class="solution-moves"></div>
+      </div>
     </div>
-    <div id="try-panel" class="try" hidden>
-      <p id="try-msg"></p>
-    </div>
-    <div class="actions">
-      <button class="btn primary" id="try-btn">Try again</button>
-      <button class="btn" id="show-btn" hidden>Show answer</button>
+
+    <div class="actions" id="done-actions" hidden>
+      <button class="btn primary" id="next-btn" title="Next mistake (Enter)">Next mistake ▶</button>
+      <button class="btn" id="retry-btn">Retry</button>
       <a class="btn" id="game-link" href="#">Open game</a>
+    </div>
+
+    <div class="nav-row">
+      <button class="btn small" id="prev-btn" title="Previous mistake">◀ Previous</button>
+      <span class="muted small">Keys: h hint · Enter next · ←/→ step through the best line</span>
     </div>
   </div>
 </div>

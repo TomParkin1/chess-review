@@ -322,6 +322,7 @@ def _mistake_json(r: sqlite3.Row, cfg: Config) -> dict:
         "fen": r["fen"], "move_uci": r["move_uci"], "move_san": r["move_san"],
         "best_uci": r["best_uci"], "best_san": board.san(best) if best else None,
         "best_line": san_line(board, line, 6),
+        "best_pv_uci": [m.uci() for m in line],
         "eval_before": str(before), "eval_after": str(after),
         "my_color": r["my_color"],
         "opponent": r["black"] if r["my_color"] == "white" else r["white"],

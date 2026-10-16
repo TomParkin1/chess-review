@@ -31,7 +31,8 @@ def test_best_move_is_good_and_reply_is_none_after_mate(live):
 def test_blunder_is_explained(live):
     r = live.judge(MATE_IN_ONE, "h2h3")
     assert r.judgement != "good"
-    assert r.kind == "missed_mate" and "Ra8#" in r.explanation
+    assert r.kind == "missed_mate" and "checkmate" in r.explanation
+    assert "Ra8" not in r.explanation  # explanations of attempts never give the answer away
 
 
 def test_reasonable_alternative_counts_as_good(live):

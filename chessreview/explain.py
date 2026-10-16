@@ -356,13 +356,31 @@ RULES = [missed_mate, allowed_mate, walked_into_fork, discovered_attack, hanging
          missed_win, exposed_king, missed_opportunity, positional]
 
 
-def explain(ctx: MoveContext) -> tuple[str, str]:
-    """Return (kind, explanation) for a move judged to be an inaccuracy or worse."""
+# Wording for "missed_*" kinds that does not give the answer away (review puzzles).
+SPOILER_FREE = {
+    "missed_mate": "There was a forced checkmate, and this move misses it.",
+    "missed_capture": "This misses a chance to win material.",
+    "missed_tactic": "This misses a tactic that wins material.",
+}
+
+
+def explain(ctx: MoveContext, reveal_best: bool = True) -> tuple[str, str]:
+    """Return (kind, explanation) for a move judged to be an inaccuracy or worse.
+
+    With reveal_best=False (judging my attempts at a puzzle) the text never names the
+    engine's best move.
+    """
     for rule in RULES:
         result = rule(ctx)
         if result:
             kind, text = result
             break
+    if not reveal_best:
+        if kind in SPOILER_FREE:
+            text = SPOILER_FREE[kind]
+        elif kind == "missed_opportunity":
+            text = f"You were clearly better ({ctx.before}) but this lets the advantage slip ({ctx.after})."
+        return kind, text
     if ctx.best and kind not in ("missed_mate", "missed_capture", "missed_tactic",
                                  "missed_opportunity"):
         text += f" Best was {_san(ctx.board, ctx.best)}."

@@ -34,7 +34,11 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   `serve` closes it in a finally block, tests close it in fixtures, otherwise Python cannot exit.
 - `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump
   `CLASSIFY_VERSION` when judge logic changes.
-- UI preferences: review opens in quiz mode by default; board sized from window height for desktop; chess.com
+- Review page = Lichess-style "learn from your mistakes" (`static/review.js` state machine: solving → checking →
+  wrong (snap back + spoiler-free explanation via `explain(..., reveal_best=False)`) / right (auto-play reply, continue
+  for `playout_moves`) → done (explanation, best-line stepper)). Hints: text from `explain.HINTS`, then piece highlight.
+  Chessground boards that take moves must be created with `viewOnly: false` (listeners bind only at creation).
+- UI preferences: review is always interactive (puzzle first); board sized from window height for desktop; chess.com
   "Neo" pieces (hotlinked from images.chesscomfiles.com) on a brown/cream board (CSS in `style.css`).
 - `chessreview/templates/` + `chessreview/static/`: plain ES modules, no build step. chessground 9.2.1 and
   chess.js 1.4.0 via an import map from jsdelivr (see `base.html`). `common.js` has shared helpers.

@@ -202,3 +202,28 @@ table.games tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, tr
 .table-actions { display: flex; align-items: center; gap: 12px; }
 .btn.danger { color: var(--blunder); }
 .btn.danger:hover { border-color: var(--blunder); }
+
+/* Learn-from-mistakes panel */
+.session-bar { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; margin-bottom: 8px; }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.chip.solved, .chip.solved_with_help { color: var(--good); border-color: var(--good); }
+.chip.failed, .chip.skipped { color: var(--blunder); border-color: var(--blunder); }
+.prompt {
+  font-size: 17px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin: 6px 0 10px;
+}
+.prompt .ok, .feedback.ok strong { color: var(--good); }
+.prompt .bad, .feedback.bad strong { color: var(--blunder); }
+.feedback { border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); }
+.feedback.ok { border-color: color-mix(in srgb, var(--good) 50%, var(--border)); }
+.feedback.bad { border-color: color-mix(in srgb, var(--blunder) 50%, var(--border)); }
+.hint { border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; border: 1px dashed var(--inaccuracy); }
+#answer { margin-top: 12px; }
+.solution { margin-top: 8px; }
+.solution-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.solution-nav { display: inline-flex; gap: 4px; }
+.solution-moves { display: flex; flex-wrap: wrap; gap: 2px 4px; }
+.solution-moves .sm { padding: 2px 6px; border-radius: 4px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.solution-moves .sm:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.solution-moves .sm.current { background: var(--accent); color: #fff; }
+.nav-row { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
