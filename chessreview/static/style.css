@@ -109,6 +109,7 @@ select, input[type=text], input[type=search] {
 .badge.inaccuracy { color: var(--inaccuracy); }
 .badge.mistake { color: var(--mistake); }
 .badge.blunder { color: var(--blunder); }
+.badge.miss { color: var(--miss); }
 .mark-icon { flex: none; vertical-align: middle; }
 
 /* ------------------------------------------------------------ home: sync, upload, progress */
@@ -518,3 +519,8 @@ a.chip { text-decoration: none; }
 .solution-moves.sr-moves .sm.picked { background: var(--series-you); color: #fff; }
 .solution-moves.sr-moves .sm.turning { background: var(--blunder); color: #fff; }
 .solution-moves.sr-moves .sm.at { outline: 2px solid var(--panel-3); }
+
+/* Analysis: the moves that led to the analysed position (greyed out, still clickable). */
+.analysis-panel .sm.pre { opacity: .55; }
+/* Convert: moves Stockfish played for me in "Watch Stockfish play it". */
+.solution-moves .sm.demo { color: var(--green); }

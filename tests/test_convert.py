@@ -97,3 +97,4 @@ def test_convert_positions(conn):
     assert convert.next_convert(conn) == "convert/2:0"      # tried today: due again tomorrow
     t = convert.task_for(conn, "convert/1:2")
     assert t.goal == "win" and t.color == "white" and "lost" in t.subtitle
+    assert t.start_cp is not None and t.start_cp > 0      # for "where it slipped" after a failed try

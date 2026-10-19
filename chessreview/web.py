@@ -205,10 +205,13 @@ def create_app(cfg: Config | None = None) -> Flask:
         ensure_classified(c, cfg)
         args = request.args
         where, params = ["m.is_mine = 1"], []
-        judgements = [j for j in args.get("judgement", "mistake,blunder").split(",")
-                      if j in JUDGEMENT_ORDER]
-        where.append(f"m.judgement IN ({','.join('?' * len(judgements))})")
-        params += judgements
+        if args.get("judgement") == "miss":     # mistakes/blunders that let the opponent's error go
+            where.append("m.mark = 'miss'")
+        else:
+            judgements = [j for j in args.get("judgement", "mistake,blunder").split(",")
+                          if j in JUDGEMENT_ORDER]
+            where.append(f"m.judgement IN ({','.join('?' * len(judgements))})")
+            params += judgements
         for arg, column in [("opening", "g.opening_family"), ("phase", "m.phase"),
                             ("result", "g.my_result"), ("time_class", "g.time_class"),
                             ("kind", "m.kind"), ("color", "g.my_color")]:

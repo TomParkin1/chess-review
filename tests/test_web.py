@@ -62,6 +62,10 @@ def test_upload_analyse_and_review(client):
     body = r.get_json()
     assert body["judgement"] == m["judgement"] and body["explanation"]  # same verdict as the game
 
+    # Misses: only mistakes/blunders marked "miss" (right after the opponent's own error).
+    misses = c.get("/api/mistakes?judgement=miss").get_json()["items"]
+    assert all(i["mark"] == "miss" for i in misses)
+
     for page in ("/", "/review", "/games", "/settings", "/insights", "/train", "/session", "/progress", "/convert", "/puzzles", f"/game/{m["game_id"]}"):
         assert c.get(page).status_code == 200
 

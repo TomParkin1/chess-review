@@ -40,8 +40,14 @@
           <button class="btn" id="resign-btn">Give up</button>
         </div>
         <div id="play-done" hidden>
+          <div class="explanation" id="play-lesson" hidden></div>
+          <div class="actions" id="lesson-actions" hidden>
+            <button class="btn" id="from-slip-btn">Try again from there</button>
+            <button class="btn" id="watch-btn">Watch Stockfish play it</button>
+          </div>
           <div id="play-chart"></div>
           <div class="actions">
+            <a class="btn primary" id="today-btn" href="/train" hidden>Back to Today ▶</a>
             <button class="btn primary" id="next-btn">Next ▶</button>
             <button class="btn" id="retry-btn">Retry</button>
             <button class="btn" id="analyse-btn">Analyse</button>

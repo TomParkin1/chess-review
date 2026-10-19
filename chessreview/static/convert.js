@@ -1,11 +1,13 @@
 // Convert: play won positions from my games, and essential endgames, against Stockfish
 // (chessreview/convert.py decides when a playout is won or failed). The eval stays hidden
-// while playing, as in a real game, and is shown as a graph afterwards.
+// while playing, as in a real game, and is shown as a graph afterwards. After a failed attempt
+// the move where the advantage slipped most is shown with Stockfish's choice there, and you can
+// try again from that point or watch Stockfish play your side from it.
 import { Chess } from 'chess.js';
 import { createAnalysis } from './analysis.js';
 import { choosePromotion, isPromotion, makeBoard, moveSound, sound } from './board.js';
 import { lineChart } from './charts.js';
-import { api, arrow, el, lastMove, legalDests, sideToMove } from './common.js';
+import { api, arrow, el, lastMove, legalDests, sideToMove, winChance } from './common.js';
 import { createEvalBar } from './evalbar.js';
 
 const $ = id => document.getElementById(id);
@@ -23,7 +25,8 @@ const analysis = createAnalysis({ board, panel: $('analysis'), evalBar });
 let overview = null;
 let list = [];          // the list the current task came from (for "Next")
 let tab = 'games';
-let play = null;        // { task, moves, sans, fen, last, evals, streak, hints, phase }
+let play = null;        // { task, moves, sans, fen, last, evals, streak, hints, phase, partial, lesson }
+const FROM_TODAY = new URLSearchParams(location.search).get('from') === 'today';
 
 // ------------------------------------------------------------ lists
 
@@ -62,6 +65,7 @@ function preview(p) {
   if (play) return;
   board.set({ fen: p.fen, orientation: p.color, lastMove: undefined, check: checkOf(p.fen), movable: { color: undefined } });
   board.setAutoShapes([]);
+  board.setShapes([]);
 }
 
 function showTab(name) {
@@ -84,12 +88,16 @@ function backToList() {
 
 // ------------------------------------------------------------ playing
 
-async function start(key, from) {
+// `resume` = {moves, evals}: continue from part-way through an earlier attempt (it then
+// counts as solved with help at best).
+async function start(key, from, resume = null) {
   const task = await api(`/api/convert/task?key=${encodeURIComponent(key)}`);
   list = from || [];
-  const previousTab = tab === 'play' ? (task.kind === 'endgame' ? 'endgames' : 'games') : tab;
-  play = { task, moves: [], sans: [], fen: task.fen, last: undefined, evals: [], streak: 0, hints: 0,
-           phase: 'mine', returnTab: previousTab };
+  const previousTab = tab === 'play' ? (task.kind === 'endgame' ? 'endgames' : 'games') : (play?.returnTab || tab);
+  const replayed = replay(task.fen, resume?.moves || []);
+  play = { task, moves: replayed.moves, sans: replayed.sans, fen: replayed.fen, last: replayed.last,
+           evals: resume?.evals || [], streak: 0, hints: 0, phase: 'mine', returnTab: previousTab,
+           partial: replayed.moves.length > 0, lesson: null };
   stopAnalysis();
   showTab('play');
   $('play-title').textContent = task.title;
@@ -102,17 +110,35 @@ async function start(key, from) {
     : task.goal === 'win' ? `Win as ${side}${task.finish === 'mate' ? ' by checkmate' : ''}. Stockfish defends.`
       : `Hold the draw as ${side}. Stockfish attacks.`;
   $('play-feedback').hidden = true;
+  if (play.partial) showFeedback('', 'Carrying on from the move where it slipped. Find a better plan this time.');
   $('play-tip').hidden = true;
   $('tip-btn').hidden = !task.tip;
   $('play-actions').hidden = false;
   $('play-done').hidden = true;
+  $('watch-btn').textContent = 'Watch Stockfish play it';
+  play.watched = null;
   $('game-btn').hidden = !task.game_id;
   if (task.game_id) $('game-btn').href = `/game/${task.game_id}#${task.ply}`;
   renderMoves();
   evalBar.hide(true);
   board.set({ orientation: task.color });
   board.setAutoShapes([]);
+  board.setShapes([]);
   setMyTurn();
+}
+
+// UCI moves from a FEN -> the position, SANs and last move (stops at an illegal move).
+function replay(fen, ucis) {
+  const chess = new Chess(fen);
+  const moves = [];
+  const sans = [];
+  for (const uci of ucis) {
+    let mv;
+    try { mv = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }); } catch { break; }
+    moves.push(uci);
+    sans.push(mv.san);
+  }
+  return { moves, sans, fen: chess.fen(), last: lastMove(moves[moves.length - 1]) };
 }
 
 function setMyTurn() {
@@ -168,13 +194,13 @@ async function onMove(orig, dest) {
   }, r.reply_uci ? 150 : 0);
 }
 
-function renderMoves() {
+function renderMoves(sans = play.sans, from = 0) {
   const p = play;
   const startPly = (() => { const parts = p.task.fen.split(' '); return (Number(parts[5]) - 1) * 2 + (parts[1] === 'b' ? 1 : 0); })();
-  $('play-moves').replaceChildren(...p.sans.map((san, i) => {
+  $('play-moves').replaceChildren(...sans.map((san, i) => {
     const ply = startPly + i;
     const num = ply % 2 === 0 ? `${ply / 2 + 1}. ` : (i === 0 ? `${Math.floor(ply / 2) + 1}... ` : '');
-    return el('span', { class: 'sm' }, num + san);
+    return el('span', { class: `sm${i >= from && from ? ' demo' : ''}` }, num + san);
   }));
 }
 
@@ -197,6 +223,7 @@ function finish(result, reason) {
   const p = play;
   p.phase = 'done';
   const won = result !== 'failed';
+  if (won && p.partial) result = 'solved_with_help';
   if (won) sound.correct(); else sound.wrong();
   showFeedback(won ? 'ok' : 'bad', `${won ? '✓' : '✗'} ${reason}` +
     (won && p.hints ? ` (with ${p.hints} hint${p.hints > 1 ? 's' : ''})` : ''));
@@ -205,13 +232,111 @@ function finish(result, reason) {
     : 'Not this time. It comes back soon.';
   $('play-actions').hidden = true;
   $('play-done').hidden = false;
-  post('/api/convert/result', { key: p.task.key, result }).catch(() => {});
+  $('today-btn').hidden = !FROM_TODAY;
+  $('next-btn').classList.toggle('primary', !FROM_TODAY);
+  if (!(p.partial && !won)) post('/api/convert/result', { key: p.task.key, result }).catch(() => {});
+  showLesson(p, won);
   const evals = p.evals.map(cp => Math.max(-10, Math.min(10, cp / 100)));
   lineChart($('play-chart'), {
     labels: evals.map((_, i) => `After move ${i + 1}`),
     series: [{ name: 'Your eval', values: evals, color: 'var(--series-you)', line: true, dots: true }],
     yFormat: v => (v > 0 ? `+${v.toFixed(0)}` : v.toFixed(0)), yDomain: [-10, 10], height: 150,
   });
+}
+
+// ------------------------------------------------------------ learning from it
+
+// The move of mine after which my winning chances fell the most: {at (index into moves), drop}.
+function worstMove(p) {
+  let prev = p.task.start_cp ?? p.evals[0];
+  let worst = null;
+  p.evals.forEach((cp, i) => {
+    const drop = winChance({ cp: prev }) - winChance({ cp });
+    if (!worst || drop > worst.drop) worst = { at: 2 * i, drop, before: prev, after: cp };
+    prev = cp;
+  });
+  return worst && worst.drop > 0 ? worst : null;
+}
+
+const pawns = cp => (Math.abs(cp) >= 5000 ? (cp > 0 ? 'mate' : 'getting mated')
+  : `${cp > 0 ? '+' : ''}${(cp / 100).toFixed(1)}`);
+
+async function showLesson(p, won) {
+  $('play-lesson').hidden = true;
+  $('lesson-actions').hidden = won;
+  $('from-slip-btn').hidden = true;
+  p.lesson = { at: 0 };
+  if (won) return;
+  const worst = worstMove(p);
+  if (!worst) {
+    rich('Watch how Stockfish would play your side from the start.');
+    return;
+  }
+  p.lesson = worst;
+  $('from-slip-btn').hidden = worst.at === 0;     // the first move: that is just Retry
+  const san = p.sans[worst.at];
+  const n = moveNumber(p, worst.at);
+  rich(`It slipped most with ${n}${san} (${pawns(worst.before)} → ${pawns(worst.after)}).`);
+  board.setAutoShapes([arrow(p.moves[worst.at], 'red')]);
+  let r;
+  try { r = await post('/api/play/hint', { key: p.task.key, moves: p.moves.slice(0, worst.at) }); } catch { return; }
+  if (play !== p || !r.san) return;
+  if (r.uci === p.moves[worst.at]) return;
+  rich(`It slipped most with ${n}${san} (${pawns(worst.before)} → ${pawns(worst.after)}). ` +
+       `Stockfish played ${r.san} there (green arrow).`);
+  if (play.phase === 'done' && !analysis.active) board.setAutoShapes([arrow(p.moves[worst.at], 'red'), arrow(r.uci, 'green')]);
+}
+
+function rich(text) {
+  $('play-lesson').hidden = false;
+  $('play-lesson').textContent = text;
+}
+
+function moveNumber(p, index) {
+  const parts = p.task.fen.split(' ');
+  const ply = (Number(parts[5]) - 1) * 2 + (parts[1] === 'b' ? 1 : 0) + index;
+  return ply % 2 === 0 ? `${ply / 2 + 1}. ` : `${Math.floor(ply / 2) + 1}... `;
+}
+
+// Stockfish plays my side from the lesson point (both sides at full strength), move by move.
+async function watch() {
+  const p = play;
+  if (!p || (p.phase !== 'done' && p.phase !== 'watching')) return;
+  if (p.phase === 'watching') { p.phase = 'done'; return; }   // the button is "Stop" meanwhile
+  stopAnalysis();
+  p.phase = 'watching';
+  $('watch-btn').textContent = 'Stop';
+  const at = p.lesson?.at ?? 0;
+  let moves = p.moves.slice(0, at);
+  let streak = 0;
+  let shown = replay(p.task.fen, moves);
+  board.set({ fen: shown.fen, lastMove: shown.last, check: checkOf(shown.fen), movable: { color: undefined } });
+  board.setAutoShapes([]);
+  renderMoves(shown.sans, at);
+  showFeedback('', 'Stockfish is playing your side…');
+  let outcome = 'Stopped.';
+  for (let n = 0; n < 40; n++) {
+    let h, r;
+    try {
+      h = await post('/api/play/hint', { key: p.task.key, moves });
+      if (!h.uci || play !== p || p.phase !== 'watching') break;
+      r = await post('/api/play/move', { key: p.task.key, moves, uci: h.uci, streak });
+    } catch (err) { outcome = `Stopped (${err.message}).`; break; }
+    if (play !== p || p.phase !== 'watching') break;
+    moves = [...moves, h.uci, ...(r.reply_uci ? [r.reply_uci] : [])];
+    streak = r.streak;
+    shown = replay(p.task.fen, moves);
+    board.set({ fen: shown.fen, lastMove: shown.last, check: checkOf(shown.fen) });
+    moveSound(r.reply_san || r.san);
+    renderMoves(shown.sans, at);
+    if (r.status !== 'playing') { outcome = `Stockfish: ${r.reason}`; break; }
+    await new Promise(res => setTimeout(res, 700));
+  }
+  if (play !== p) return;
+  p.phase = 'done';
+  p.watched = moves;
+  $('watch-btn').textContent = 'Watch again';
+  showFeedback('', outcome, ' Use Analyse to step through it.');
 }
 
 // ------------------------------------------------------------ analysis + buttons
@@ -227,7 +352,8 @@ $('analyse-btn').addEventListener('click', () => {
   if (!play || play.phase !== 'done') return;
   if (analysis.active) { stopAnalysis(); return; }
   $('analysis').hidden = false;
-  analysis.start(play.fen, { last: play.last });
+  // The whole playout (or Stockfish's demonstration) as history: ◀ steps back through it.
+  analysis.start(play.task.fen, { history: play.watched || play.moves });
   $('analyse-btn').textContent = 'Stop analysis';
 });
 $('hint-btn').addEventListener('click', hint);
@@ -243,6 +369,12 @@ $('resign-btn').addEventListener('click', () => {
   }
 });
 $('retry-btn').addEventListener('click', () => play && start(play.task.key, list));
+$('from-slip-btn').addEventListener('click', () => {
+  const p = play;
+  if (!p || p.phase !== 'done' || !p.lesson) return;
+  start(p.task.key, list, { moves: p.moves.slice(0, p.lesson.at), evals: p.evals.slice(0, p.lesson.at / 2) });
+});
+$('watch-btn').addEventListener('click', watch);
 $('next-btn').addEventListener('click', () => {
   if (!play) return;
   const i = list.findIndex(x => x.key === play.task.key);
@@ -254,7 +386,9 @@ $('list-btn').addEventListener('click', backToList);
 document.querySelectorAll('#tabs [data-tab]').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
 document.addEventListener('keydown', e => {
   if (e.target.matches('input, select, textarea') || !play) return;
-  if (e.key === 'h') hint();
+  if (analysis.active && e.key === 'ArrowLeft') { e.preventDefault(); analysis.back(); }
+  else if (analysis.active && e.key === 'ArrowRight') { e.preventDefault(); analysis.forward(); }
+  else if (e.key === 'h') hint();
 });
 
 await loadOverview();

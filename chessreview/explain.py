@@ -435,24 +435,28 @@ def explain_best(ctx: MoveContext, kind: str | None) -> str:
             return ""   # the explanation of my move already shows the mate
         return f"{best_san} starts a forced checkmate in {ctx.before.mate}: {line}."
 
+    # The explanation of my move already names the best move and what it wins (missed_*),
+    # or its line (missed_opportunity): only add what it doesn't say.
+    said_gain = kind in ("missed_capture", "missed_tactic")
     sentences = []
     gain = play_line(board, ctx.best_line, ctx.me)
     if kind in DEFENSIVE_KINDS and ctx.reply_line:
         sentences.append(_what_best_prevents(ctx, best_san, after_best))
-    elif gain.net >= 1:
+    elif gain.net >= 1 and not said_gain:
         target = board.piece_at(ctx.best.to_square) if board.is_capture(ctx.best) else None
         free = target and not board.is_attacked_by(not ctx.me, ctx.best.to_square)
         if free and value(target.piece_type) >= gain.net:
             sentences.append(f"{best_san} simply takes the undefended {chess.piece_name(target.piece_type)}.")
         else:
-            sentences.append(f"{best_san} wins {describe_trade(gain, losing=False)}: {line}.")
+            shown = "." if kind == "missed_opportunity" else f": {line}."   # that text shows the line
+            sentences.append(f"{best_san} wins {describe_trade(gain, losing=False)}{shown}")
+    sentences = [s for s in sentences if s]
     threats = _new_threats(after_best, ctx.best, ctx.me)
-    if threats:
-        sentences.append(f"{best_san} attacks {threats}." if not sentences else f"It attacks {threats}.")
-    if not sentences:
-        sentences.append(f"{best_san} keeps the position at {ctx.before} for you, instead of {ctx.after} "
-                         f"after your move. The main line goes {line}.")
-    return " ".join(s for s in sentences if s)
+    if threats and not (said_gain and board.is_capture(ctx.best)):
+        sentences.append(f"{best_san} attacks {threats}." if not sentences else f"It also attacks {threats}.")
+    if not sentences and not said_gain and kind != "missed_opportunity":
+        sentences.append(f"{best_san} keeps the position at {ctx.before} for you. The main line goes {line}.")
+    return " ".join(sentences)
 
 
 def _what_best_prevents(ctx: MoveContext, best_san: str, after_best: chess.Board) -> str:
@@ -473,8 +477,7 @@ def _what_best_prevents(ctx: MoveContext, best_san: str, after_best: chess.Board
             return f"{best_san} keeps your {name} safe instead of leaving it to {threat_san}."
         if after_best.is_attacked_by(ctx.me, target_sq) and not after_mine.is_attacked_by(ctx.me, target_sq):
             return f"{best_san} defends your {name}, so {threat_san} no longer wins it."
-    return (f"{best_san} avoids the problem with your move, which allowed "
-            f"{san_line(after_mine, ctx.reply_line, 3)}.")
+    return ""    # nothing to add to the explanation of my move, which shows the line it allowed
 
 
 def _new_threats(after_best: chess.Board, best: chess.Move, me: chess.Color) -> str:

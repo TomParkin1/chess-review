@@ -44,6 +44,27 @@ def test_lost_chance_is_not_a_threat(cfg):
     assert not threat_of(row, chess.WHITE, thresholds_for(2100, cfg, True)).real
 
 
+def test_castling_is_not_a_threat_even_if_the_line_later_wins_material(cfg):
+    """The engine castles first when I pass and only wins material further down the line: that is
+    my lost chance (or a later threat), not "they threaten O-O"."""
+    row = {"fen": "r3k2r/8/8/8/8/8/1N6/4K3 w kq - 0 1", "score_cp": 300, "score_mate": None,
+           "threat_cp": -300, "threat_mate": None, "threat_uci": "e8g8",
+           "threat_pv": "e8g8 e1d1 a8a2 d1c1 a2b2"}
+    assert not threat_of(row, chess.WHITE, thresholds_for(2100, cfg, True)).real
+
+
+@pytest.mark.parametrize("fen,uci,real", [
+    ("4k3/8/2p5/8/3R4/4P3/8/4K3 b - - 0 1", "c6c5", True),     # pawn hits a defended rook: real
+    ("4k3/n7/8/8/8/2N5/1P6/4K3 b - - 0 1", "a7b5", False),    # knight hits a defended knight: even trade
+])
+def test_quiet_threats_need_a_piece_in_danger(cfg, fen, uci, real):
+    """`fen` is the position with the opponent to move (as after my pass); rebuild mine from it."""
+    mine = fen.replace(" b ", " w ")
+    row = {"fen": mine, "score_cp": 0, "score_mate": None, "threat_cp": -400, "threat_mate": None,
+           "threat_uci": uci, "threat_pv": uci}
+    assert threat_of(row, chess.WHITE, thresholds_for(1500, cfg, True)).real is real
+
+
 @pytest.mark.parametrize("fen,threat,real", [
     # Black's pawn on d5 attacks the white knight on e4: if White passed, dxe4.
     ("r3k3/p7/8/3p4/4N3/8/P7/R3K3 w - - 0 1", "d5e4", True),

@@ -43,6 +43,10 @@ const colorName = c => (c === 'white' ? 'White' : 'Black');
 const checkOf = fen => (new Chess(fen).inCheck() ? sideToMove(fen) : false);
 const article = w => (/^[aeiou]/.test(w) ? 'an' : 'a');
 const other = c => (c === 'white' ? 'black' : 'white');
+// What to call my game move: a "miss" (report.py mark: an error right after the opponent's own
+// mistake, when it had left me clearly better) is told apart from a plain blunder or mistake.
+const verdict = m => (m.mark === 'miss' ? 'miss' : m.judgement);
+const MISS_NOTE = ' Your opponent had just gone wrong, and this move let the chance go.';
 // The same position with the opponent to move: "what if I passed?" (only used when I'm not in check).
 function passedFen(fen) {
   const parts = fen.split(' ');
@@ -78,8 +82,8 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
       blind, lib, threatResult: null, threatShapes: [],
     };
     $('badge').hidden = blind || lib;
-    $('badge').textContent = m.judgement;
-    $('badge').className = `badge ${m.judgement}`;
+    $('badge').textContent = verdict(m);
+    $('badge').className = `badge ${verdict(m)}`;
     $('move-title').textContent = lib ? `Puzzle · rated ${m.rating}`
       : blind ? `Move ${Math.floor(m.ply / 2) + 1}` : `${m.move_label}${SYMBOLS[m.judgement]}`;
     $('status-chip').hidden = blind || lib || !m.status;
@@ -109,6 +113,8 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     stopAnalysis();
     badge.clear();
     board.cancelPremove();
+    board.setAutoShapes([]);
+    board.setShapes([]);          // arrows I drew on the last position (right-click) go too
     board.set({ orientation: m.my_color });
     evalBar.set(m.eval_before_white ?? null, m.my_color);
     evalBar.hide(true);  // no peeking while solving
@@ -406,13 +412,13 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
              m.threat?.real ? ' You dealt with the threat then too.' : '');
       } else {
         rich($('reveal'), 'In the game you played ', ['strong', `${m.move_san}${SYMBOLS[m.judgement]}`],
-             ` here: ${article(m.judgement)} ${m.judgement}.`);
+             ` here: ${article(verdict(m))} ${verdict(m)}.`, verdict(m) === 'miss' ? MISS_NOTE : '');
       }
     }
     $('explanation').hidden = calm || p.lib;
     $('answer').querySelector('.legend').hidden = calm || p.lib;
-    rich($('explanation'), ['strong', `Why ${m.move_san} was ${article(m.judgement)} ${m.judgement}: `],
-         m.explanation || '');
+    rich($('explanation'), ['strong', `Why ${m.move_san} was ${article(verdict(m))} ${verdict(m)}: `],
+         m.explanation || '', !p.blind && verdict(m) === 'miss' ? MISS_NOTE : '');
     $('best-explanation').hidden = !m.best_explanation || p.lib;
     rich($('best-explanation'), ['strong', `Why ${m.best_san} is better: `], m.best_explanation || '');
     $('explanation').className = `explanation ${m.judgement}`;
@@ -492,8 +498,9 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
 
   function startAnalysis() {
     if (puzzle?.phase !== 'done') return;
-    const s = solution[solIndex];
-    analysis.start(s.fen, { last: s.last });
+    // From the puzzle position, with the solution moves up to the shown step as history.
+    analysis.start(solution[0].fen, { last: solution[0].last,
+                                      history: puzzle.item.best_pv_uci.slice(0, solIndex) });
     $('analyse-btn').textContent = 'Back to puzzle';
     $('analyse-btn').classList.add('active');
   }

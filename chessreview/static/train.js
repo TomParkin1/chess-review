@@ -2,14 +2,16 @@
 // puzzles in the shared puzzle component. Puzzles failed in a block come back once at its end.
 import { api, el } from './common.js';
 import { createPuzzle } from './puzzle.js';
+import { showTodayBadge } from './shell.js';
 import { progressRing } from './widgets.js';
 
 const $ = id => document.getElementById(id);
 const ICONS = { reviews: '🔁', real: '⚔️', focus: '🎯', convert: '🏁', opening: '📖' };
-// Blocks played on another page: [link, label to start, label when done].
+// Blocks played on another page: [link, label to start, label when done]. `from=today` makes
+// that page offer a way back here when it is done.
 const ELSEWHERE = {
-  opening: b => ['/openings#drill', 'Drill on Openings →', 'Drill again'],
-  convert: b => [`/convert?key=${encodeURIComponent(b.key)}`, 'Play it →', 'Play again'],
+  opening: b => ['/openings?from=today#drill', 'Drill on Openings →', 'Drill again'],
+  convert: b => [`/convert?from=today&key=${encodeURIComponent(b.key)}`, 'Play it →', 'Play again'],
 };
 let plan = null;
 let block = null;      // the block being played: { id, title, ... }
@@ -49,6 +51,7 @@ $('blind-toggle').addEventListener('change', () => {
 async function loadPlan() {
   const data = await api('/api/today');
   plan = data.plan;
+  showTodayBadge(plan);
   let pref = null;
   try { pref = localStorage.getItem(BLIND_KEY); } catch { /* unavailable */ }
   $('blind-toggle').checked = pref === null ? data.blind : pref === '1';
@@ -89,7 +92,14 @@ function renderBlock(b) {
 }
 
 function nextBlock() {
-  return plan.blocks.find(b => !b.done && !ELSEWHERE[b.id]) || null;
+  return plan.blocks.find(b => !b.done) || null;
+}
+
+// Start a block: here for puzzles, on its own page for convert and opening lines.
+function goTo(b) {
+  const elsewhere = ELSEWHERE[b.id]?.(b);
+  if (elsewhere) location.href = elsewhere[0];
+  else startBlock(b);
 }
 
 // ------------------------------------------------------------ playing a block
@@ -148,7 +158,7 @@ async function finishBlock() {
     el('p', { class: 'muted' }, `${tally.solved} of ${total} solved.` +
        (tally.failed ? ' The ones you missed come back soon.' : '')),
     el('div', { class: 'actions' },
-      following ? el('button', { class: 'btn primary big', onclick: () => startBlock(following) }, `Next: ${following.title} ▶`) : '',
+      following ? el('button', { class: 'btn primary big', onclick: () => goTo(following) }, `Next: ${following.title} ▶`) : '',
       el('button', { class: `btn big ${following ? '' : 'primary'}`, onclick: () => showPlan() }, 'Back to the plan'),
       plan.complete ? el('a', { class: 'btn big', href: '/progress' }, 'See your progress') : ''),
   );
@@ -162,7 +172,7 @@ function showPlan() {
 
 $('start-btn').addEventListener('click', () => {
   const b = nextBlock();
-  if (b) startBlock(b);
+  if (b) goTo(b);
 });
 
 loadPlan();

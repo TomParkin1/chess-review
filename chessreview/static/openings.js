@@ -183,6 +183,7 @@ function startLine() {
   board.cancelPremove();
   board.set({ fen: START, orientation: color, lastMove: undefined, check: false, movable: { color: undefined } });
   board.setAutoShapes([]);
+  board.setShapes([]);
   $('drill-moves').replaceChildren();
   $('drill-feedback').hidden = true;
   updateDrillBar();
@@ -287,7 +288,8 @@ function finishDrill() {
   box.hidden = false;
   box.replaceChildren(el('div', { class: 'celebrate' }, failed ? '📘' : '🏆'), el('h2', {}, 'Drill complete'),
     el('p', { class: 'muted' }, `${solved} of ${solved + failed} positions right first time.` +
-      (failed ? ' Missed positions come back tomorrow.' : '')));
+      (failed ? ' Missed positions come back tomorrow.' : '')),
+    FROM_TODAY ? el('div', { class: 'actions' }, el('a', { class: 'btn primary', href: '/train' }, 'Back to Today ▶')) : '');
   loadOverview();
 }
 
@@ -326,6 +328,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft' && path.length) { e.preventDefault(); path.pop(); loadNode(); }
 });
 
+const FROM_TODAY = new URLSearchParams(location.search).get('from') === 'today';
 loadOverview();
 if (location.hash === '#drill') showTab('drill');   // from Today's "Opening lines" block
 else loadNode();

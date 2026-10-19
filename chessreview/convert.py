@@ -55,6 +55,7 @@ class Task:
     game_id: int | None = None
     ply: int | None = None
     start_eval: str | None = None
+    start_cp: int | None = None    # my eval at the start, in centipawns (convert positions only)
 
     @property
     def card_key(self) -> str:
@@ -172,7 +173,8 @@ def task_for(conn: sqlite3.Connection, key: str) -> Task | None:
     outcome = {"win": "won", "loss": "lost", "draw": "drew"}[r["my_result"]]
     return Task(key=key, kind="convert", fen=r["fen"], color=r["my_color"], goal="win", finish="resign",
                 title=f"vs {opponent}, move {ply // 2 + 1}", subtitle=f"{r['date']} · in the game you {outcome}",
-                max_plies=CONVERT_MAX_PLIES, game_id=game_id, ply=ply, start_eval=str(Eval.from_row(r, me)))
+                max_plies=CONVERT_MAX_PLIES, game_id=game_id, ply=ply, start_eval=str(Eval.from_row(r, me)),
+                start_cp=Eval.from_row(r, me).as_cp())
 
 
 # ------------------------------------------------------------ playing it out

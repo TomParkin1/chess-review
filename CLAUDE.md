@@ -96,6 +96,17 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   biggest win-chance drop (`session.turning_point`); a pick within 2 plies counts. Table `self_reviews`; API
   `/api/session/self-review` (GET games without evals/marks, POST pick); hit rate in the session summary and Progress.
   The self-review board markup sits after `_puzzle.html` (the puzzle attaches its eval bar to the first `.board-wrap`).
+- v3 feedback round 1:
+  - Threats: a quiet first move (castling, development) is never "the threat" just because the line wins material
+    later; it must mate, check, promote, capture-and-win, or newly attack a piece of mine that is undefended or worth
+    more than its cheapest attacker (`threats._threatened`).
+  - `explain_best` only adds what the explanation of my move doesn't already say (no repeated line or gain).
+  - Misses (report mark `miss`) are shown as "miss" in puzzles; Practice severity filter `judgement=miss`.
+  - Sidebar badge (`shell.js` `showTodayBadge`) = items left in today's plan, gone when complete.
+  - Today continues into Convert/Openings (`?from=today` -> "Back to Today" there).
+  - `analysis.start(fen, {history})`: moves that led to the position (greyed, ◀ steps back through them).
+  - Convert after a failure: biggest win-chance drop of my moves + Stockfish's move there, "Try again from there"
+    (counts as solved_with_help at best), "Watch Stockfish play it" (hint + play/move loop, nothing recorded).
 - Design rule: nothing is tuned to one rating. Derive from the engine, the current rating's band, or my rolling data.
 - Chessground `events.after` passes (orig, dest, metadata): always wrap handlers as `(o, d) => fn(o, d)`.
 - `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump

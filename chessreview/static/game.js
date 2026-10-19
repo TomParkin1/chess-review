@@ -124,7 +124,10 @@ function flip() {
 
 function startAnalysis() {
   showTab('moves');
-  analysis.start(positions[current].fen, { last: lastMove(positions[current - 1]?.move_uci) });
+  // Start a few moves back, so ◀ can step through the moves that led here.
+  const from = Math.max(0, current - 8);
+  analysis.start(positions[from].fen, { last: lastMove(positions[from - 1]?.move_uci),
+                                       history: positions.slice(from, current).map(p => p.move_uci) });
   badge.clear();
   $('analyse-btn').textContent = 'Back to game';
   $('analyse-btn').classList.add('active');

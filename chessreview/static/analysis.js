@@ -1,6 +1,7 @@
 // Free analysis board: play moves for either side from a starting position, building a
 // variation, while live Stockfish lines stream in from /api/analyse/stream.
-// Shared by the game view and the review page.
+// Shared by the game view, the puzzles and Convert. `history` (UCI moves from `fen`) are the moves
+// that led to the position being analysed: they are shown greyed out and ◀ can step back through them.
 import { Chess } from 'chess.js';
 import { choosePromotion, isPromotion, moveSound } from './board.js';
 import { formatEval, lastMove, legalDests, sideToMove } from './common.js';
@@ -9,6 +10,7 @@ export function createAnalysis({ board, panel, evalBar }) {
   let root = null;          // {fen, last}
   let moves = [];           // [{uci, san, fen}] variation from the root
   let cursor = 0;           // 0 = root position, n = after moves[n-1]
+  let base = 0;             // moves[0..base) are history; Reset returns to `base`
   let source = null;        // EventSource of the running analysis
   let active = false;
   let lines = [];
@@ -25,21 +27,28 @@ export function createAnalysis({ board, panel, evalBar }) {
       <span class="solution-nav">
         <button class="btn small" data-ref="back" title="Back (←)">◀</button>
         <button class="btn small" data-ref="fwd" title="Forward (→)">▶</button>
-        <button class="btn small" data-ref="reset" title="Back to the starting position">Reset</button>
+        <button class="btn small" data-ref="reset" title="Back to where the analysis started">Reset</button>
       </span>
     </div>
     <div class="solution-moves" data-ref="variation"><span class="muted small">Make a move on the board.</span></div>`;
   const ref = name => panel.querySelector(`[data-ref="${name}"]`);
   ref('back').addEventListener('click', () => go(cursor - 1));
   ref('fwd').addEventListener('click', () => go(cursor + 1));
-  ref('reset').addEventListener('click', () => go(0));
+  ref('reset').addEventListener('click', () => go(base));
 
   function currentFen() { return cursor === 0 ? root.fen : moves[cursor - 1].fen; }
 
-  function start(fen, { last, orientation } = {}) {
+  function start(fen, { last, orientation, history = [] } = {}) {
     root = { fen, last };
     moves = [];
-    cursor = 0;
+    const chess = new Chess(fen);
+    for (const uci of history) {
+      let mv;
+      try { mv = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }); } catch { break; }
+      moves.push({ uci: mv.from + mv.to + (mv.promotion || ''), san: mv.san, fen: chess.fen() });
+    }
+    base = moves.length;
+    cursor = base;
     active = true;
     panel.hidden = false;
     if (orientation) board.set({ orientation });
@@ -71,6 +80,7 @@ export function createAnalysis({ board, panel, evalBar }) {
     let mv;
     try { mv = chess.move({ from: orig, to: dest, promotion }); } catch { return refresh(); }
     moves = moves.slice(0, cursor);            // a new move replaces anything after the cursor
+    base = Math.min(base, cursor);
     moves.push({ uci: mv.from + mv.to + (mv.promotion || ''), san: mv.san, fen: chess.fen() });
     cursor = moves.length;
     moveSound(mv.san);
@@ -102,7 +112,7 @@ export function createAnalysis({ board, panel, evalBar }) {
       const ply = startPly + i;
       const num = ply % 2 === 0 ? `${ply / 2 + 1}. ` : (i === 0 ? `${Math.floor(ply / 2) + 1}... ` : '');
       const chip = document.createElement('span');
-      chip.className = `sm${i + 1 === cursor ? ' current' : ''}`;
+      chip.className = `sm${i < base ? ' pre' : ''}${i + 1 === cursor ? ' current' : ''}`;
       chip.textContent = num + m.san;
       chip.addEventListener('click', () => go(i + 1));
       return chip;

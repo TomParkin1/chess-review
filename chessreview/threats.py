@@ -3,9 +3,10 @@
 `gain` is how much my win chance (Lichess -1..1 scale) would drop if I passed. A threat is
 "real" when that drop reaches the *mistake* threshold at my current level (so what counts as
 a threat rescales with my rating, classify.thresholds_for bands, never a fixed number) AND the
-opponent's line actually wins material or mates. The second condition matters: when I have a
-tactic, passing lets the opponent defuse it (e.g. by castling), which also costs me a lot but
-is my lost chance, not their threat.
+opponent's move is a threat a player would name: a mate, a check, a capture that wins material,
+or a new attack on a piece of mine that is really in danger. The second condition matters: when
+I have a tactic, passing lets the opponent defuse it (e.g. by castling), which also costs me a
+lot but is my lost chance, not their threat.
 """
 
 import sqlite3
@@ -15,6 +16,7 @@ import chess
 
 from .classify import Eval, Thresholds
 from .explain import material_change
+from .phases import PIECE_VALUES
 
 
 @dataclass(frozen=True)
@@ -43,10 +45,11 @@ def threat_of(pos: sqlite3.Row | dict, me: chess.Color, th: Thresholds) -> Threa
 
 
 def _line_wins(pos: sqlite3.Row | dict, me: chess.Color, passed: Eval) -> bool:
-    """The opponent's play after my pass is a real threat: it mates, its line wins material,
-    or the move itself is forcing (a check, a promotion, or a new attack on one of my pieces).
-    An even trade is not a threat; a capture that wins something is caught by the material count.
-    Engine lines can be short, hence the forcing-move test on top of counting material."""
+    """The opponent's move after my pass is something a player would call a threat: it starts a
+    forced mate, it is a check or a promotion, it is a capture whose line wins material, or it
+    newly attacks one of my pieces that is undefended or worth more than the attacker.
+    A quiet move (castling, a developing move) whose line only wins material later is not: the
+    engine found it because passing gave away my own chance, not because they threaten it."""
     if passed.mate is not None and passed.mate < 0:
         return True
     if not pos["threat_pv"]:
@@ -54,14 +57,27 @@ def _line_wins(pos: sqlite3.Row | dict, me: chess.Color, passed: Eval) -> bool:
     board = chess.Board(pos["fen"])
     board.push(chess.Move.null())
     line = [chess.Move.from_uci(u) for u in pos["threat_pv"].split()]
-    if material_change(board, line, not me) >= 1:
-        return True
     move = line[0]
+    if board.is_castling(move):
+        return board.gives_check(move)
     if board.gives_check(move) or move.promotion:
         return True
+    if board.is_capture(move):
+        return material_change(board, line, not me) >= 1
     attacked_before = _attacked_pieces(board, me)
     board.push(move)
-    return bool(_attacked_pieces(board, me) - attacked_before)
+    return any(_threatened(board, sq, me) for sq in _attacked_pieces(board, me) - attacked_before)
+
+
+def _threatened(board: chess.Board, sq: chess.Square, me: chess.Color) -> bool:
+    """My newly attacked piece on `sq` is really in danger: undefended, or worth more than its
+    cheapest attacker (this also covers discovered attacks)."""
+    piece = board.piece_at(sq)
+    if not board.is_attacked_by(me, sq):
+        return True
+    attackers = [board.piece_at(a) for a in board.attackers(not me, sq)]
+    cheapest = min(PIECE_VALUES[a.piece_type] for a in attackers if a)
+    return PIECE_VALUES[piece.piece_type] > cheapest
 
 
 def _attacked_pieces(board: chess.Board, me: chess.Color) -> set[chess.Square]:
