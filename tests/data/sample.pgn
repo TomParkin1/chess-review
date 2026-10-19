@@ -1,0 +1,71 @@
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2025.03.01"]
+[White "sampleplayer"]
+[Black "opponent1"]
+[Result "0-1"]
+[WhiteElo "1200"]
+[BlackElo "1210"]
+[TimeControl "600"]
+[ECO "C50"]
+[ECOUrl "https://www.chess.com/openings/Italian-Game-Blackburne-Shilling-Gambit-4.Nxe5"]
+[Termination "opponent1 won by checkmate"]
+[Link "https://www.chess.com/game/live/1001"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bc4 Nd4 4. Nxe5 Qg5 5. Nxf7 Qxg2 6. Rf1 Qxe4+ 7. Be2 Nf3# 0-1
+
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2025.03.02"]
+[White "opponent2"]
+[Black "SamplePlayer"]
+[Result "0-1"]
+[TimeControl "180+2"]
+[ECO "D51"]
+[ECOUrl "https://www.chess.com/openings/Queens-Gambit-Declined-Elephant-Trap"]
+[Termination "SamplePlayer won by resignation"]
+[Link "https://www.chess.com/game/live/1002"]
+
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Nbd7 5. cxd5 exd5 6. Nxd5 Nxd5 7. Bxd8 Bb4+ 8. Qd2 Bxd2+ 9. Kxd2 Kxd8 0-1
+
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2025.03.03"]
+[White "someone"]
+[Black "someoneelse"]
+[Result "1-0"]
+[Link "https://www.chess.com/game/live/1003"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 1-0
+
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2025.03.01"]
+[White "sampleplayer"]
+[Black "opponent1"]
+[Result "0-1"]
+[TimeControl "600"]
+[Link "https://www.chess.com/game/live/1001"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bc4 Nd4 4. Nxe5 Qg5 5. Nxf7 Qxg2 6. Rf1 Qxe4+ 7. Be2 Nf3# 0-1
+
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2025.03.04"]
+[White "sampleplayer"]
+[Black "opponent3"]
+[Result "1-0"]
+[Link "https://www.chess.com/game/live/1004"]
+
+1. e4 e5 1-0
+
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2025.03.05"]
+[White "sampleplayer"]
+[Black "opponent4"]
+[Result "1/2-1/2"]
+[TimeControl "60"]
+[ECO "B20"]
+
+1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 a6 6. Be3 e5 1/2-1/2
