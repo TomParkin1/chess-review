@@ -2,11 +2,20 @@
 // key moments, eval graph, time per move, plus stepping through moves and free analysis.
 import { createAnalysis } from './analysis.js';
 import { createBadge, makeBoard, moveSound } from './board.js';
-import { api, arrow, el, formatEval, lastMove, playedAt, sideToMove, winChance } from './common.js';
+import { api, arrow, el, emptyState, errorState, formatEval, lastMove, playedAt, sideToMove, winChance } from './common.js';
 import { createEvalBar } from './evalbar.js';
 import { MARK_ORDER, MARKS, markIcon } from './icons.js';
 
-const { game, positions } = await api(`/api/game/${window.GAME_ID}`);
+let data;
+try {
+  data = await api(`/api/game/${window.GAME_ID}`);
+} catch (err) {
+  document.querySelector('.game-layout').replaceChildren(err.status === 404
+    ? emptyState('Game not found', 'It may have been deleted, or the link is out of date.', { href: '/games', label: 'All games' })
+    : errorState(err, () => location.reload(), 'this game'));
+  await new Promise(() => {});    // nothing to show: stop here quietly
+}
+const { game, positions } = data;
 const $ = id => document.getElementById(id);
 const myColor = game.my_color;
 const analysed = positions.some(p => p.eval);

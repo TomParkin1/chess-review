@@ -5,16 +5,20 @@ drawn by the scripts in static/.
 """
 
 import json
+import re
 import sqlite3
 import threading
+from datetime import date
 
 import chess
-from flask import Flask, Response, abort, g, jsonify, render_template, request
+from flask import Flask, Response, g, jsonify, render_template, request
+from werkzeug.exceptions import HTTPException
 
-from . import chesscom, coach, convert, db, insights, level, library, progress, report, repertoire, session, srs
+from . import (backup, chesscom, coach, convert, db, insights, level, library, progress, report, repertoire,
+               session, srs)
 from .classify import (ADAPTIVE_BANDS, MODE_KEY, Eval, adaptive_enabled, ensure_classified,
                        thresholds_for)
-from .config import Config, effective_workers, load_config
+from .config import PROJECT_ROOT, Config, effective_workers, load_config
 from .engine import AnalysisJob, count_pending
 from .explain import ATTACKING_KINDS, MoveContext, explain_best, hint, san_line
 from .live import LiveEngine, PositionAnalysis
@@ -43,7 +47,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     app.config["TEMPLATES_AUTO_RELOAD"] = True  # edited pages show up without a server restart
 
     state = {"job": AnalysisJob(cfg), "library": library.FetchProgress(), "library_thread": None}
-    sync_lock = threading.Lock()
+    import_lock = threading.Lock()    # one upload, chess.com sync or restore at a time
     live = LiveEngine(cfg)
     app.extensions["live"] = live  # closed by the `serve` command on shutdown
 
@@ -58,11 +62,32 @@ def create_app(cfg: Config | None = None) -> Flask:
         if c is not None:
             c.close()
 
+    # ------------------------------------------------------------ errors
+
+    @app.errorhandler(HTTPException)
+    def http_error(exc: HTTPException):
+        """API errors are JSON ({error}) so pages can say what went wrong; pages keep HTML."""
+        if request.path.startswith("/api/"):
+            return jsonify(error=exc.description or exc.name), exc.code
+        return exc
+
+    @app.errorhandler(Exception)
+    def server_error(exc: Exception):
+        app.logger.exception("Unexpected error in %s", request.path)
+        if request.path.startswith("/api/"):
+            return jsonify(error=f"Something went wrong on the server ({type(exc).__name__}: {exc})."), 500
+        return "Something went wrong on the server. The details are in the terminal running Chess Review.", 500
+
     # ------------------------------------------------------------ pages
 
     @app.get("/")
     def index():
-        return render_template("index.html", username=cfg.player.username)
+        account = _account(conn())
+        return render_template("index.html", account=account, **account)
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return app.send_static_file("favicon.svg")
 
     @app.get("/game/<int:game_id>")
     def game_page(game_id: int):
@@ -74,11 +99,60 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     @app.get("/games")
     def games_page():
-        return render_template("games.html", username=cfg.player.username)
+        return render_template("games.html", username=db.username(conn(), cfg))
 
     @app.get("/settings")
     def settings_page():
-        return render_template("settings.html", cfg=cfg, workers=effective_workers(cfg.engine))
+        return render_template("settings.html", cfg=cfg, workers=effective_workers(cfg.engine),
+                               account=_account(conn()))
+
+    # ------------------------------------------------------------ account (first run)
+
+    def _account(c: sqlite3.Connection) -> dict:
+        """Who I am and how far the first run has got."""
+        name = db.username(c, cfg)
+        first_import = c.execute("SELECT MIN(date(at, 'localtime')) FROM imports").fetchone()[0]
+        return {"username": name, "username_source": "app" if db.get_meta(c, db.USERNAME_KEY) else
+                ("config" if name else None),
+                "games": c.execute("SELECT COUNT(*) FROM games").fetchone()[0],
+                "synced": db.get_meta(c, chesscom.LAST_MONTH_KEY) is not None,
+                "returning": first_import is not None and first_import < date.today().isoformat()}
+
+    @app.get("/api/account")
+    def account():
+        """?archives=1 also asks chess.com how many months of games there are (first-sync choice)."""
+        c = conn()
+        out = _account(c)
+        if request.args.get("archives") and out["username"]:
+            try:
+                out |= _archive_summary(chesscom.archives_of(out["username"], fetch=chesscom.fetch_json))
+            except (LookupError, OSError):
+                pass
+        return jsonify(out)
+
+    @app.post("/api/account")
+    def account_set():
+        """Set my chess.com username (checked against chess.com). Body: {username}."""
+        name = str((request.get_json(silent=True) or {}).get("username") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", name):
+            return jsonify(error="That doesn't look like a chess.com username."), 400
+        try:
+            archives = chesscom.archives_of(name, fetch=chesscom.fetch_json)
+        except LookupError:
+            return jsonify(error=f"chess.com has no player called “{name}”."), 404
+        except OSError as exc:
+            return jsonify(error=f"Couldn't reach chess.com to check the name ({exc})."), 502
+        c = conn()
+        changed = db.username(c, cfg).lower() != name.lower()
+        with c:
+            db.set_meta(c, db.USERNAME_KEY, name)
+            if changed:     # the next sync starts from the new account's first month
+                c.execute("DELETE FROM meta WHERE key = ?", (chesscom.LAST_MONTH_KEY,))
+        return jsonify(_account(c) | _archive_summary(archives))
+
+    def _archive_summary(archives: list[str]) -> dict:
+        months = ["/".join(u.rstrip("/").split("/")[-2:]) for u in archives]
+        return {"months": len(months), "first_month": months[0] if months else None}
 
     # ------------------------------------------------------------ upload + analysis
 
@@ -87,13 +161,23 @@ def create_app(cfg: Config | None = None) -> Flask:
         files = request.files.getlist("files")
         if not files:
             return jsonify(error="No files received"), 400
-        total = ImportStats()
-        batch_id = db.create_batch(conn(), "upload", f"Upload of {len(files)} file(s)")
-        for f in files:
-            text = f.read().decode("utf-8", errors="replace")
-            total.merge(import_pgn_text(conn(), text, cfg, source=f.filename or "upload",
-                                        batch_id=batch_id))
-        db.finish_batch(conn(), batch_id)
+        c = conn()
+        if not db.username(c, cfg):
+            return jsonify(error="Set your chess.com username first: it tells which side you played."), 400
+        if not import_lock.acquire(timeout=60):
+            return jsonify(error="Another import is still running. Try again when it has finished."), 409
+        try:
+            total = ImportStats()
+            batch_id = db.create_batch(c, "upload", f"Upload of {len(files)} file(s)")
+            try:
+                for f in files:
+                    text = f.read().decode("utf-8", errors="replace")
+                    total.merge(import_pgn_text(c, text, cfg, source=f.filename or "upload",
+                                                batch_id=batch_id))
+            finally:
+                db.finish_batch(c, batch_id)     # an empty batch is dropped, even after an error
+        finally:
+            import_lock.release()
         _start_job()
         return jsonify(files=total.files, games_seen=total.games_seen, imported=total.imported,
                        duplicates=total.duplicates, skipped=total.skipped)
@@ -107,24 +191,26 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/sync")
     def sync_status():
         c = conn()
-        return jsonify(username=cfg.player.username,
+        return jsonify(username=db.username(c, cfg),
                        last_month=db.get_meta(c, chesscom.LAST_MONTH_KEY),
-                       running=sync_lock.locked())
+                       running=import_lock.locked())
 
     @app.post("/api/sync")
     def sync_now():
         """Fetch new games from chess.com (body: {since: all|3m|1m} for the first sync)."""
         since = (request.get_json(silent=True) or {}).get("since")
-        if not sync_lock.acquire(blocking=False):
-            return jsonify(error="A sync is already running"), 409
+        if not import_lock.acquire(blocking=False):
+            return jsonify(error="A sync or upload is already running. Try again when it has finished."), 409
         try:
-            result = chesscom.sync(conn(), cfg, since=since)
+            result = chesscom.sync(conn(), cfg, since=since, fetch=chesscom.fetch_json)
+        except ValueError as exc:       # no username yet
+            return jsonify(error=str(exc)), 400
         except LookupError as exc:
             return jsonify(error=str(exc)), 404
         except OSError as exc:  # network problems (URLError, timeouts)
             return jsonify(error=f"Could not reach chess.com: {exc}"), 502
         finally:
-            sync_lock.release()
+            import_lock.release()
         _start_job()
         return jsonify(result.as_dict())
 
@@ -181,7 +267,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         ensure_classified(c, cfg)
         row = c.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
         if row is None:
-            abort(404)
+            return jsonify(error="Game not found. It may have been deleted."), 404
         positions = c.execute(
             "SELECT * FROM positions WHERE game_id = ? ORDER BY ply", (game_id,)).fetchall()
         mistakes = {r["ply"]: dict(r) for r in c.execute(
@@ -237,7 +323,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         items = _query_mistakes(c, cfg, where, params, order)
         if args.get("low_clock"):
             items = [i for i in items if _low_clock(c, i)]
-        return jsonify(items=items, options=_filter_options(c))
+        return jsonify(items=items, options=_filter_options(c), analysed=coach.analysed_games(c))
 
     def _low_clock(c, item) -> bool:
         """Was my clock under a minute when I made this mistake? (needs chess.com clocks)"""
@@ -357,32 +443,28 @@ def create_app(cfg: Config | None = None) -> Flask:
         out["lines_due"] = len(srs.due_lines(c, "white")) + len(srs.due_lines(c, "black"))
         return jsonify(out)
 
-    @app.get("/api/train/queue")
-    def train_queue():
-        """Today's queue. Real-game mode (?blind=1, default from config) mixes in calm positions
-        and asks the puzzle to hide every clue that a mistake was made."""
-        c = conn()
-        ensure_classified(c, cfg)
-        blind = request.args.get("blind", "1" if cfg.training.blind else "0") == "1"
-        if blind:
-            items = _items_for(c, srs.real_game_deck(c, cfg))
-            for item in items:
-                item["mode"] = "blind"
-        else:
-            q = srs.queue(c, cfg)
-            items = _items_for(c, [(k, "due") for k in q["due"]] + [(k, "new") for k in q["new"]])
-        return jsonify(items=items, stats=srs.stats(c, cfg), blind=blind)
-
     @app.get("/api/today")
     def today():
-        """Today's workout plan with progress, plus streak and the real-game default."""
+        """Today's workout plan with progress, plus streak, the real-game default and how far
+        the games are (for the first run: no games yet / still analysing)."""
         c = conn()
         ensure_classified(c, cfg)
-        plan = coach.today_plan(c, cfg)
+        return _today_json(c, coach.today_plan(c, cfg))
+
+    @app.post("/api/today/refresh")
+    def today_refresh():
+        """Rebuild today's plan (e.g. after new games), keeping what was already tried today."""
+        c = conn()
+        ensure_classified(c, cfg)
+        return _today_json(c, coach.today_plan(c, cfg, refresh=True))
+
+    def _today_json(c: sqlite3.Connection, plan: dict):
         for block in plan["blocks"]:
             del block["items"]      # the keys are internal; /api/today/<block> serves the puzzles
+        games = c.execute("SELECT COUNT(*) AS total, SUM(analysed_at IS NOT NULL) AS analysed FROM games").fetchone()
         return jsonify(plan=plan, streak=srs.streak(c), blind=cfg.training.blind,
-                       session=session.status(c, cfg))
+                       session=session.status(c, cfg), username=db.username(c, cfg),
+                       games={"total": games["total"], "analysed": games["analysed"] or 0})
 
     @app.get("/api/today/<block_id>")
     def today_block(block_id: str):
@@ -418,7 +500,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         rating = level.current_rating(c)
         return jsonify(positions=convert.convert_overview(c), endgames=convert.endgame_overview(c),
                        next=convert.next_convert(c), rating=rating, winning_cp=level.winning_cp(rating),
-                       levels=convert.LEVELS)
+                       levels=convert.LEVELS, analysed=coach.analysed_games(c))
 
     @app.get("/api/convert/task")
     def convert_task():
@@ -574,6 +656,67 @@ def create_app(cfg: Config | None = None) -> Flask:
             return jsonify(library.record(conn(), str(data.get("puzzle_id")), data["result"]))
         except LookupError:
             return jsonify(error="unknown puzzle"), 404
+
+    # ------------------------------------------------------------ backups
+
+    def _backups_folder():
+        return backup.folder_for(cfg.db_path)
+
+    @app.get("/api/backups")
+    def backups_list():
+        folder = _backups_folder()
+        shown = folder.relative_to(PROJECT_ROOT) if folder.is_relative_to(PROJECT_ROOT) else folder
+        return jsonify(backups=[b.as_dict() for b in backup.files(folder)], folder=str(shown))
+
+    @app.post("/api/backups")
+    def backups_make():
+        """Settings -> Back up now."""
+        path = backup.make(conn(), "manual", _backups_folder())
+        backup.rotate(_backups_folder(), cfg.backup)
+        return jsonify(backup=path.name)
+
+    @app.post("/api/backups/restore")
+    def backups_restore():
+        """Replace all data with a backup: JSON {name} of a copy in the backups folder, or a
+        multipart `file` (e.g. an exported copy). The current data is backed up first."""
+        folder = _backups_folder()
+        thread = state["library_thread"]
+        if thread is not None and thread.is_alive():
+            return jsonify(error="The puzzle library is downloading. Restore when it has finished."), 409
+        if not import_lock.acquire(blocking=False):
+            return jsonify(error="A sync or upload is running. Restore when it has finished."), 409
+        try:
+            upload = request.files.get("file")
+            if upload is not None:
+                source = backup.save_upload(folder, upload.read())
+            else:
+                name = str((request.get_json(silent=True) or {}).get("name") or "")
+                source = folder / name
+                if not backup.NAME.match(name) or not source.is_file():
+                    return jsonify(error="No such backup."), 404
+            job = state["job"]
+            job.stop()
+            job.wait(timeout=30)
+            c = conn()
+            try:
+                before = db.restore(c, source)
+            except ValueError as exc:
+                if upload is not None:
+                    source.unlink(missing_ok=True)
+                return jsonify(error=str(exc)), 400
+            backup.rotate(folder, cfg.backup)
+            games = c.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+        finally:
+            import_lock.release()
+        _start_job()        # a copy from before some games were analysed finishes them
+        return jsonify(restored=source.name, before=before.name if before else None, games=games)
+
+    @app.get("/api/backups/export")
+    def backups_export():
+        """Export history: a consistent copy of the whole database (Restore can load it)."""
+        return Response(backup.snapshot_bytes(conn()), mimetype="application/vnd.sqlite3",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="chess-review-{date.today().isoformat()}.db"'})
 
     @app.get("/api/session")
     def session_info():

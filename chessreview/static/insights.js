@@ -1,6 +1,6 @@
 // Insights: trends, phases, mistake types, clock, colours, openings and top weaknesses.
 import { barList, lineChart } from './charts.js';
-import { api, el } from './common.js';
+import { api, el, emptyState, guard } from './common.js';
 
 const $ = id => document.getElementById(id);
 const pct = v => (v == null ? '–' : `${v.toFixed(0)}%`);
@@ -40,8 +40,13 @@ async function load() {
   if (!$('f-time').options.length || $('f-time').options.length === 1) {
     for (const tc of d.time_classes || []) $('f-time').append(new Option(tc[0].toUpperCase() + tc.slice(1), tc));
   }
+  const sections = document.querySelectorAll('main > section.card, main > .insight-grid');
+  sections.forEach(e => { e.hidden = !d.games; });
   if (!d.games) {
-    $('tiles').replaceChildren(el('div', { class: 'stat' }, el('div', { class: 'value' }, '0'), el('div', { class: 'label' }, 'analysed games')));
+    $('tiles').replaceChildren($('f-time').value      // "last N games" can't empty a non-empty history
+      ? emptyState('No analysed games', 'None match this time control.')
+      : emptyState('No analysed games yet', 'Sync your chess.com games on Home. Once they are analysed, your ' +
+                   'trends, weaknesses and openings appear here.', { href: '/', label: 'Go to Home' }));
     return;
   }
   const o = d.overall;
@@ -133,8 +138,9 @@ async function load() {
   }
 }
 
-if (document.getElementById('f-time')) {
-  $('f-time').addEventListener('change', load);
-  $('f-last').addEventListener('change', load);
-  load();
+if (document.getElementById('f-time')) {     // the Insights page (Home only borrows renderWeaknesses)
+  const reload = () => guard(document.querySelector('main'), load, 'your insights');
+  $('f-time').addEventListener('change', reload);
+  $('f-last').addEventListener('change', reload);
+  reload();
 }

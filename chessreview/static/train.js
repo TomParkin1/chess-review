@@ -1,6 +1,6 @@
 // Today: the daily workout (chessreview/coach.py). A checklist of blocks; each block runs its
 // puzzles in the shared puzzle component. Puzzles failed in a block come back once at its end.
-import { api, el } from './common.js';
+import { api, el, guard } from './common.js';
 import { createPuzzle } from './puzzle.js';
 import { showTodayBadge } from './shell.js';
 import { progressRing } from './widgets.js';
@@ -48,8 +48,32 @@ $('blind-toggle').addEventListener('change', () => {
 
 // ------------------------------------------------------------ the plan
 
-async function loadPlan() {
-  const data = await api('/api/today');
+function loadPlan() {
+  return guard($('plan-view'), async () => {
+    try {
+      render(await api('/api/today'));
+    } catch (err) {
+      $('train-sub').textContent = "Couldn't load your plan.";
+      $('plan-card').hidden = true;
+      throw err;
+    }
+  }, 'your plan');
+}
+
+async function refreshPlan() {
+  $('refresh-btn').disabled = true;
+  await guard($('plan-view'), async () => render(await api('/api/today/refresh', { method: 'POST' })), 'your plan');
+  $('refresh-btn').disabled = false;
+}
+
+// While the first games are being analysed there is no plan yet: look again every few seconds.
+let waitTimer = null;
+function waitForGames(games) {
+  clearTimeout(waitTimer);
+  if (!plan.total && games.analysed < games.total) waitTimer = setTimeout(loadPlan, 4000);
+}
+
+function render(data) {
   plan = data.plan;
   showTodayBadge(plan);
   let pref = null;
@@ -57,22 +81,38 @@ async function loadPlan() {
   $('blind-toggle').checked = pref === null ? data.blind : pref === '1';
 
   const left = plan.total - plan.finished;
+  $('ring').hidden = !plan.total;      // an empty plan isn't "done": there was nothing to do yet
   $('ring').replaceChildren(progressRing(plan.finished, plan.total, plan.complete ? '✓' : `${left}`,
                                          plan.complete ? 'done' : 'to do'));
   $('streak').replaceChildren(el('div', { class: 'flame' }, '🔥'), el('div', { class: 'streak-n' }, data.streak),
                               el('div', { class: 'muted small' }, 'day streak'));
   const minutes = Math.max(5, Math.round(left * 1.2));
-  $('train-sub').textContent = plan.complete
-    ? "Workout complete. Come back tomorrow; extra practice is always welcome."
+  const { total: games, analysed } = data.games;
+  const firstRun = !games || !analysed;
+  $('train-sub').textContent =
+    !data.username ? 'Welcome! Set your chess.com username on Home, and your first workout is built from your games.'
+    : !games ? 'No games yet. Sync your chess.com games on Home, and your first workout is built from them.'
+    : !analysed ? `Analysing your games (${analysed} of ${games} done). Your first workout appears here as soon as ` +
+                  'the first ones are ready.'
+    : plan.complete && plan.total ? "Workout complete. Come back tomorrow; extra practice is always welcome."
     : plan.total ? `${left} positions left, about ${minutes} minutes. Built from your own games and your current weaknesses.`
-      : 'Nothing to train today. Sync new games or practise anything you like.';
+    : analysed < games ? `Nothing to train yet: ${games - analysed} game(s) are still being analysed.`
+    : 'Nothing to train today. Sync new games or practise anything you like.';
   $('start-btn').hidden = plan.complete || !plan.total;
   $('start-btn').textContent = plan.finished ? 'Continue workout' : 'Start workout';
-  $('practice-link').hidden = !plan.complete && plan.total > 0;
+  $('home-link').hidden = !(firstRun && analysed === games);    // nothing analysing: Home is the next step
+  $('practice-link').hidden = firstRun || (!plan.complete && plan.total > 0);
+  $('refresh-btn').hidden = firstRun;
   $('plan-note').replaceChildren(data.session?.open
     ? el('a', { href: '/session' }, `You also have ${data.session.games} new game(s) to review →`) : '');
-
+  $('stale-note').hidden = !plan.stale;
+  $('stale-note').replaceChildren(
+    `${plan.new_games} new game${plan.new_games === 1 ? ' was' : 's were'} analysed since this plan was made. `,
+    el('button', { class: 'btn small', onclick: refreshPlan }, '⟳ Refresh plan'),
+    el('span', { class: 'muted small' }, " (what you've done today is kept)"));
+  $('plan-card').hidden = firstRun && !plan.blocks.length;
   $('blocks').replaceChildren(...plan.blocks.map(renderBlock));
+  waitForGames(data.games);
 }
 
 function renderBlock(b) {
@@ -105,7 +145,16 @@ function goTo(b) {
 // ------------------------------------------------------------ playing a block
 
 async function startBlock(b) {
-  const data = await api(`/api/today/${b.id}${b.id === 'reviews' ? blindParam() : ''}`);
+  let data;
+  try {
+    data = await api(`/api/today/${b.id}${b.id === 'reviews' ? blindParam() : ''}`);
+  } catch (err) {
+    showPlan();
+    await loadPlan();      // the plan may have been rebuilt meanwhile (e.g. after new games)
+    if (err.status !== 404) $('plan-view').prepend(el('div', { class: 'state-box error-state', role: 'alert' },
+      el('strong', {}, `Couldn't start ${b.title}.`), el('p', { class: 'muted' }, err.message)));
+    return;
+  }
   block = data.block;
   queue = data.items.filter(i => !i.done_today);
   if (!queue.length) { await loadPlan(); return; }
@@ -174,5 +223,6 @@ $('start-btn').addEventListener('click', () => {
   const b = nextBlock();
   if (b) goTo(b);
 });
+$('refresh-btn').addEventListener('click', refreshPlan);
 
 loadPlan();

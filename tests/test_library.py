@@ -1,12 +1,12 @@
 """v3 milestone 4: the puzzle library (library.py) and its place in Today."""
 import io
-from datetime import date
+from datetime import date, timedelta
 
 import chess
 import pytest
 from compression import zstd
 
-from chessreview import coach, db, library
+from chessreview import backup, coach, db, library
 from chessreview.config import load_config
 
 HEADER = "PuzzleId,FEN,Moves,Rating,RatingDeviation,Popularity,NbPlays,Themes,GameUrl,OpeningTags,DailyDate\n"
@@ -96,3 +96,50 @@ def test_focus_block_mixes_library_puzzles(conn, monkeypatch):
     plan = coach.today_plan(conn, load_config(), date.today())
     focus = next(b for b in plan["blocks"] if b["id"] == "focus")
     assert focus["items"] and all(item[0] == "lib" for item in focus["items"])   # no games here, library only
+
+
+# ------------------------------------------------------------ M1: a refresh can't orphan cards (B2)
+
+NEW_SAMPLE = [   # next month's file: a different sample, without the puzzles above
+    f"fffff,{FEN},c1d2 b4c2 e1e2 c2a1,950,75,95,5000,fork short,https://lichess.org/u,,",
+    f"ggggg,{FEN},c1d2 b4c2 e1e2 c2a1,1550,75,95,5000,mateIn1 oneMove,https://lichess.org/t,,",
+]
+
+
+def refetch(conn, rows):
+    data = zstd.compress((HEADER + "\n".join(rows) + "\n").encode())
+    return library.fetch(conn, opener=lambda req, timeout: FakeResponse(data))
+
+
+def test_refresh_keeps_puzzles_with_cards_and_today_can_finish(conn, monkeypatch):
+    """B2: a refresh deleted every puzzle, so a failed puzzle's card pointed at nothing; Today kept
+    scheduling it (0 / 1, Start did nothing) and the plan could never be completed."""
+    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": []})
+    library.record(conn, "aaaaa", "failed")                  # a card, due tomorrow
+    library.record(conn, "eeeee", "solved")                  # tried: kept for its attempt history
+    assert refetch(conn, NEW_SAMPLE) == 2
+    ids = {r["id"] for r in conn.execute("SELECT id FROM puzzles")}
+    assert ids == {"aaaaa", "eeeee", "fffff", "ggggg"}        # bbbbb (never tried) is replaced
+    assert list(backup.folder_of(conn).glob("chess-before-library-*.db"))   # backed up first
+
+    tomorrow = date.today() + timedelta(days=1)
+    plan = coach.today_plan(conn, load_config(), tomorrow)
+    reviews = next(b for b in plan["blocks"] if b["id"] == "reviews")
+    assert reviews["items"] == [["lib", "aaaaa", "due"]] and reviews["count"] == 1
+    conn.execute("INSERT INTO puzzle_attempts (puzzle_id, result, at) VALUES ('aaaaa', 'solved', ?)",
+                 (f"{tomorrow.isoformat()} 12:00:00",))
+    conn.commit()
+    assert coach.today_plan(conn, load_config(), tomorrow)["complete"]
+
+
+def test_a_card_whose_puzzle_is_gone_is_not_scheduled(conn, monkeypatch):
+    """Libraries refreshed before the fix may already hold such cards: they are skipped."""
+    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": []})
+    library.record(conn, "aaaaa", "failed")
+    tomorrow = date.today() + timedelta(days=1)
+    assert coach.today_plan(conn, load_config(), tomorrow)["total"] == 1
+    conn.execute("DELETE FROM puzzles WHERE id = 'aaaaa'")
+    conn.commit()
+    plan = coach.today_plan(conn, load_config(), tomorrow)       # the stored plan lost an item: rebuilt
+    assert plan["total"] == 0 and plan["complete"]
+    assert coach.today_plan(conn, load_config(), tomorrow + timedelta(days=1))["total"] == 0

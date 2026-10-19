@@ -15,8 +15,8 @@ New cards come best-lesson first (`PUZZLE_VALUE`), and "decided" positions are l
 Card kinds: 'mistake' (my mistakes/blunders), 'position' (a position I handled well in the
 game but failed in real-game mode), 'line' (opening repertoire positions).
 
-`real_game_deck()` mixes calm positions (good moves of mine, with and without a real threat)
-into the queue so a puzzle never gives away that there is a trick.
+`calm_positions()` picks good moves of mine (with and without a real threat) that Today mixes
+into the real-game block, so a puzzle never gives away that there is a trick.
 """
 
 import random
@@ -165,20 +165,6 @@ def calm_positions(conn: sqlite3.Connection, cfg: Config, count: int, seed: str)
     picks += rng.sample(quiet, min(len(quiet), count - want_threat))
     rng.shuffle(picks)
     return picks
-
-
-def real_game_deck(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> list[tuple[tuple[int, int], str]]:
-    """Today's queue for real-game mode: [((game_id, ply), 'due' | 'new' | 'calm')], with calm
-    positions spread evenly through it (cfg.coach.calm_ratio of the deck)."""
-    on = on or today()
-    q = queue(conn, cfg, on)
-    cards = [(k, "due") for k in q["due"]] + [(k, "new") for k in q["new"]]
-    if not cards:
-        return []
-    ratio = min(max(cfg.coach.calm_ratio, 0.0), 0.8)
-    n_calm = round(len(cards) * ratio / (1 - ratio))
-    calm = [(k, "calm") for k in calm_positions(conn, cfg, n_calm, on.isoformat())]
-    return spread(cards, calm)
 
 
 def spread(cards: list, calm: list) -> list:

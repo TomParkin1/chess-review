@@ -1,32 +1,55 @@
-// Home page: upload PGNs, show analysis progress, stats and the games list.
-import { api, el, gameRow, GAME_TABLE_HEAD } from './common.js';
+// Home page: first run (username, first sync), sync and upload, analysis progress, stats and
+// the games list. Each card loads on its own, so one failing call doesn't blank the page.
+import { api, el, emptyState, gameRow, guard, GAME_TABLE_HEAD } from './common.js';
 import { renderWeaknesses } from './insights.js';
 
-const dropzone = document.getElementById('dropzone');
-const fileInput = document.getElementById('file-input');
-const uploadResult = document.getElementById('upload-result');
-const progressBlock = document.getElementById('progress');
-const progressBar = document.getElementById('progress-bar');
-const progressLabel = document.getElementById('progress-label');
-const progressErrors = document.getElementById('progress-errors');
-const stopBtn = document.getElementById('stop-btn');
-const startBtn = document.getElementById('start-btn');
+const $ = id => document.getElementById(id);
+const ACCOUNT = window.ACCOUNT;
+
+// ------------------------------------------------------------ first run: the username
+
+function initOnboarding() {
+  const form = $('account-form');
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const button = form.querySelector('button');
+    button.disabled = true;
+    $('account-result').textContent = 'Checking with chess.com…';
+    try {
+      await api('/api/account', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: $('username-input').value.trim() }),
+      });
+      location.reload();     // Home now offers the first sync
+    } catch (err) {
+      $('account-result').textContent = err.message;
+      $('account-result').classList.add('error');
+      button.disabled = false;
+    }
+  });
+  $('username-input').focus();
+}
 
 // ------------------------------------------------------------ upload
 
-['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, e => {
-  e.preventDefault();
-  dropzone.classList.add('over');
-}));
-['dragleave', 'drop'].forEach(type => dropzone.addEventListener(type, e => {
-  e.preventDefault();
-  dropzone.classList.remove('over');
-}));
-dropzone.addEventListener('drop', e => upload(e.dataTransfer.files));
-fileInput.addEventListener('change', () => upload(fileInput.files));
+function initUpload() {
+  const dropzone = $('dropzone');
+  const fileInput = $('file-input');
+  ['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, e => {
+    e.preventDefault();
+    dropzone.classList.add('over');
+  }));
+  ['dragleave', 'drop'].forEach(type => dropzone.addEventListener(type, e => {
+    e.preventDefault();
+    dropzone.classList.remove('over');
+  }));
+  dropzone.addEventListener('drop', e => upload(e.dataTransfer.files));
+  fileInput.addEventListener('change', () => upload(fileInput.files));
+}
 
 async function upload(files) {
   if (!files.length) return;
+  const uploadResult = $('upload-result');
   const form = new FormData();
   for (const f of files) form.append('files', f);
   uploadResult.textContent = `Uploading ${files.length} file(s)…`;
@@ -40,41 +63,56 @@ async function upload(files) {
   } catch (err) {
     uploadResult.textContent = `Upload failed: ${err.message}`;
   }
-  fileInput.value = '';
+  $('file-input').value = '';
 }
 
 // ------------------------------------------------------------ chess.com sync
 
-const syncBtn = document.getElementById('sync-btn');
-const syncResult = document.getElementById('sync-result');
-
 async function loadSyncStatus() {
   const status = await api('/api/sync');
-  document.getElementById('since-label').hidden = Boolean(status.last_month);
-  syncResult.textContent = status.last_month
+  $('since-label').hidden = Boolean(status.last_month) || Boolean($('first-sync'));
+  $('sync-result').textContent = status.last_month
     ? `Synced up to ${status.last_month}. New games since then will be fetched.`
-    : `Fetches ${status.username}'s games directly; no download needed.`;
+    : `Fetches ${status.username}'s games directly from chess.com; no download needed.`;
 }
 
-syncBtn.addEventListener('click', async () => {
-  syncBtn.disabled = true;
-  syncResult.textContent = 'Fetching games from chess.com…';
-  try {
-    const r = await api('/api/sync', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ since: document.getElementById('since').value }),
-    });
-    syncResult.textContent = `${r.imported} new game(s), ${r.duplicates} already here` +
-      (r.months.length ? ` (${r.months[0]} to ${r.months[r.months.length - 1]})` : '') + '.';
-    document.getElementById('since-label').hidden = true;
-    loadGames();
-    loadTraining();
-    pollProgress();
-  } catch (err) {
-    syncResult.textContent = `Sync failed: ${err.message}`;
+async function loadArchiveNote() {
+  const a = await api('/api/account?archives=1');
+  if (a.months) {
+    $('all-history-note').textContent =
+      `${a.months} month${a.months === 1 ? '' : 's'} of games, since ${formatMonth(a.first_month)}`;
   }
-  syncBtn.disabled = false;
-});
+}
+
+const formatMonth = ym => {
+  const [y, m] = ym.split('/').map(Number);
+  return new Date(y, m - 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+};
+
+function initSync() {
+  const syncBtn = $('sync-btn');
+  syncBtn.addEventListener('click', async () => {
+    syncBtn.disabled = true;
+    const first = document.querySelector('input[name="first-since"]:checked');
+    $('sync-result').textContent = 'Fetching games from chess.com…';
+    try {
+      const r = await api('/api/sync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ since: first ? first.value : $('since').value }),
+      });
+      $('sync-result').textContent = `${r.imported} new game(s), ${r.duplicates} already here` +
+        (r.months.length ? ` (${r.months[0]} to ${r.months[r.months.length - 1]})` : '') + '.';
+      $('since-label').hidden = true;
+      $('first-sync')?.remove();
+      loadGames();
+      loadTraining();
+      pollProgress();
+    } catch (err) {
+      $('sync-result').textContent = `Sync failed: ${err.message}`;
+    }
+    syncBtn.disabled = false;
+  });
+}
 
 // ------------------------------------------------------------ progress
 
@@ -93,7 +131,7 @@ async function pollProgress() {
       if (wasRunning) { loadGames(); loadTraining(); }
       break;
     }
-    if (wasRunning && p.games_done !== renderProgress.lastDone) loadGames();
+    if (wasRunning && p.games_done !== renderProgress.lastDone) { loadGames(); loadTraining(); }
     renderProgress.lastDone = p.games_done;
     wasRunning = true;
     await new Promise(r => setTimeout(r, 1000));
@@ -103,20 +141,20 @@ async function pollProgress() {
 
 function renderProgress(p, running) {
   const show = running || p.pending > 0 || p.errors.length > 0;
-  progressBlock.hidden = !show;
+  $('progress').hidden = !show;
   if (!show) return;
   const pct = Math.round(p.fraction * 100);
-  progressBar.style.width = running ? `${pct}%` : (p.pending ? '0%' : '100%');
+  $('progress-bar').style.width = running ? `${pct}%` : (p.pending ? '0%' : '100%');
   if (running) {
     const eta = p.eta_seconds == null ? '' : ` · about ${formatDuration(p.eta_seconds)} left`;
-    progressLabel.textContent = `${p.state === 'stopping' ? 'Stopping' : 'Analysing'}: ` +
+    $('progress-label').textContent = `${p.state === 'stopping' ? 'Stopping' : 'Analysing'}: ` +
       `game ${p.games_done} of ${p.games_total} (${pct}%)${eta}`;
   } else {
-    progressLabel.textContent = p.pending ? `${p.pending} game(s) waiting for analysis.` : 'Analysis complete.';
+    $('progress-label').textContent = p.pending ? `${p.pending} game(s) waiting for analysis.` : 'Analysis complete.';
   }
-  stopBtn.hidden = !running;
-  startBtn.hidden = running || !p.pending;
-  progressErrors.textContent = p.errors.join(' · ');
+  $('stop-btn').hidden = !running;
+  $('start-btn').hidden = running || !p.pending;
+  $('progress-errors').textContent = p.errors.join(' · ');
 }
 
 function formatDuration(s) {
@@ -126,22 +164,18 @@ function formatDuration(s) {
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
-stopBtn.addEventListener('click', () => api('/api/analysis/stop', { method: 'POST' }));
-startBtn.addEventListener('click', async () => {
-  await api('/api/analysis/start', { method: 'POST' });
-  pollProgress();
-});
-
 // ------------------------------------------------------------ stats + games
 
-async function loadGames() {
-  const games = await api('/api/games');
-  renderStats(games);
-  renderGames(games);
+function loadGames() {
+  return guard($('games-card'), async () => {
+    const games = await api('/api/games');
+    renderStats(games);
+    renderGames(games);
+  }, 'your games');
 }
 
 function renderStats(games) {
-  const stats = document.getElementById('stats');
+  const stats = $('stats');
   stats.replaceChildren();
   if (!games.length) return;
   const count = r => games.filter(g => g.my_result === r).length;
@@ -166,29 +200,50 @@ function renderStats(games) {
 }
 
 function renderGames(games) {
-  document.getElementById('games-count').textContent = `${games.length} games`;
-  document.getElementById('games-head').innerHTML = GAME_TABLE_HEAD;
-  document.getElementById('games-body').replaceChildren(...games.slice(0, 8).map(gameRow));
+  $('games-count').textContent = `${games.length} games`;
+  $('games-head').innerHTML = GAME_TABLE_HEAD;
+  $('games-body').replaceChildren(...(games.length ? games.slice(0, 8).map(gameRow)
+    : [el('tr', { class: 'empty-row' }, el('td', { colspan: 9 }, emptyState('No games yet',
+        'Sync your chess.com games above, or drop PGN files below.')))]));
 }
 
 async function loadTraining() {
-  const [s, today] = await Promise.all([api('/api/train/stats'), api('/api/today')]);
+  const title = $('train-cta-title');
+  const sub = $('train-cta-sub');
+  const btn = $('train-cta-btn');
+  let s, today;
+  try {
+    [s, today] = await Promise.all([api('/api/train/stats'), api('/api/today')]);
+  } catch (err) {
+    title.textContent = "Today's workout";
+    sub.textContent = `Couldn't load it: ${err.message}`;
+    sub.classList.add('error');
+    return;
+  }
+  sub.classList.remove('error');
   const plan = today.plan;
   const left = plan.total - plan.finished;
-  document.getElementById('train-cta-title').textContent = plan.complete || !plan.total
-    ? "Today's workout: done ✓" : `Today's workout: ${left} position${left === 1 ? '' : 's'}`;
-  document.getElementById('train-cta-sub').textContent =
-    `🔥 ${s.streak}-day streak · ${s.mastered} mastered · ${s.learning} learning`;
-  document.getElementById('train-cta-btn').className = left && !plan.complete ? 'btn primary' : 'btn';
-  document.getElementById('train-cta-btn').textContent = plan.finished && !plan.complete ? 'Continue' : 'Open';
+  const { total, analysed } = today.games;
+  if (!total || !analysed) {
+    title.textContent = "Today's workout";
+    sub.textContent = total ? `Analysing your games (${analysed} of ${total} done). Your first workout is nearly ready.`
+      : 'Sync your games to get your first workout.';
+    btn.className = 'btn';
+    btn.textContent = 'Open';
+  } else {
+    title.textContent = plan.complete || !plan.total
+      ? "Today's workout: done ✓" : `Today's workout: ${left} position${left === 1 ? '' : 's'}`;
+    sub.textContent = `🔥 ${s.streak}-day streak · ${s.mastered} mastered · ${s.learning} learning`;
+    btn.className = left && !plan.complete ? 'btn primary' : 'btn';
+    btn.textContent = plan.finished && !plan.complete ? 'Continue' : 'Open';
+  }
   const session = s.session;
-  const card = document.getElementById('session-card');
+  const card = $('session-card');
   card.hidden = !session.open;
   if (session.open) {
-    document.getElementById('session-cta-title').textContent =
-      `${session.games} new game${session.games === 1 ? '' : 's'}`;
+    $('session-cta-title').textContent = `${session.games} new game${session.games === 1 ? '' : 's'}`;
     const waiting = session.games - session.analysed;
-    document.getElementById('session-cta-sub').textContent = waiting
+    $('session-cta-sub').textContent = waiting
       ? `${session.puzzles} mistakes ready · ${waiting} still analysing`
       : `${session.puzzles} mistakes to learn from`;
   }
@@ -196,20 +251,35 @@ async function loadTraining() {
 
 async function loadWeaknesses() {
   const d = await api('/api/insights?last=100');
-  const card = document.getElementById('weakness-card');
+  const card = $('weakness-card');
   card.hidden = !(d.games >= 10 && d.weaknesses?.length);
-  if (!card.hidden) renderWeaknesses(document.getElementById('weaknesses'), d.weaknesses, '100');
+  if (!card.hidden) renderWeaknesses($('weaknesses'), d.weaknesses, '100');
 }
 
 async function loadProgress() {
   const p = await api('/api/progress/report');
-  document.getElementById('progress-card').hidden = !p.games;
-  document.getElementById('progress-summary').textContent = p.summary;
+  $('progress-card').hidden = !p.games;
+  $('progress-summary').textContent = p.summary;
 }
 
-loadGames();
-loadSyncStatus();
-loadProgress();
-loadTraining();
-loadWeaknesses();
-pollProgress();
+// ------------------------------------------------------------ start
+
+if (!ACCOUNT.username) {
+  initOnboarding();
+} else {
+  initUpload();
+  initSync();
+  $('stop-btn').addEventListener('click', () => api('/api/analysis/stop', { method: 'POST' }).catch(() => {}));
+  $('start-btn').addEventListener('click', async () => {
+    await api('/api/analysis/start', { method: 'POST' });
+    pollProgress();
+  });
+  loadGames();
+  guard($('sync-result').parentElement, loadSyncStatus, 'the sync status');
+  if ($('first-sync')) loadArchiveNote().catch(() => { /* the plain label is fine */ });
+  // Optional cards stay hidden if they can't load; the error is in the console.
+  loadProgress().catch(err => console.error(err));
+  loadWeaknesses().catch(err => console.error(err));
+  loadTraining();
+  pollProgress();
+}

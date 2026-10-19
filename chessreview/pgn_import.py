@@ -144,10 +144,10 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
         stats.skip(f"variant ({variant})")
         return
 
-    user = cfg.player.username.lower()
-    if h.get("White", "").lower() == user:
+    user = db.username(conn, cfg).lower()
+    if user and h.get("White", "").lower() == user:
         color = "white"
-    elif h.get("Black", "").lower() == user:
+    elif user and h.get("Black", "").lower() == user:
         color = "black"
     else:
         stats.skip("username not found in game")
@@ -183,12 +183,14 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
     else:
         eco = h.get("ECO")
         opening, family = opening_from_headers(h)
-    conn.execute(
+    # Another import (a second tab, a sync) may have stored the same game since the check above.
+    cur = conn.execute(
         """INSERT INTO games (dedupe_key, link, white, black, white_elo, black_elo,
                my_color, my_result, result, termination, date, time_control, time_class,
                eco, opening, opening_family, start_fen, moves_uci, num_plies, pgn, source_file,
                content_hash, end_time, uuid, rated, source, batch_id, clocks_ms)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT (dedupe_key) DO NOTHING""",
         (
             key, link, h.get("White"), h.get("Black"),
             _int(h.get("WhiteElo")), _int(h.get("BlackElo")),
@@ -202,6 +204,9 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
             origin, batch_id, clocks_ms(game),
         ),
     )
+    if cur.rowcount == 0:
+        stats.duplicates += 1
+        return
     stats.imported += 1
 
 
@@ -227,12 +232,14 @@ def import_paths(conn: sqlite3.Connection, paths: list[Path], cfg: Config) -> Im
     """Import PGN files, or every *.pgn file inside given directories, as one batch."""
     total = ImportStats()
     batch_id = db.create_batch(conn, "upload", f"Upload of {len(paths)} path(s)")
-    for path in paths:
-        files = sorted(path.glob("*.pgn")) if path.is_dir() else [path]
-        for f in files:
-            text = f.read_text(encoding="utf-8", errors="replace")
-            total.merge(import_pgn_text(conn, text, cfg, source=f.name, batch_id=batch_id))
-    db.finish_batch(conn, batch_id)
+    try:
+        for path in paths:
+            files = sorted(path.glob("*.pgn")) if path.is_dir() else [path]
+            for f in files:
+                text = f.read_text(encoding="utf-8", errors="replace")
+                total.merge(import_pgn_text(conn, text, cfg, source=f.name, batch_id=batch_id))
+    finally:
+        db.finish_batch(conn, batch_id)     # an empty batch is dropped, even after an error
     return total
 
 

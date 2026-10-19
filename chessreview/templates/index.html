@@ -1,8 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
+{% if not username %}
+<section class="card onboarding">
+  <div class="onboarding-mark">♞</div>
+  <h1>Welcome to Chess Review</h1>
+  <p class="muted">It brings in your chess.com games, finds your mistakes with Stockfish and turns them into a short
+    daily workout built from your own games.</p>
+  <form id="account-form" class="account-form">
+    <label for="username-input"><strong>Your chess.com username</strong></label>
+    <div class="sync-row">
+      <input type="text" id="username-input" name="username" autocomplete="username" spellcheck="false"
+             autocapitalize="off" required placeholder="e.g. MagnusCarlsen">
+      <button class="btn primary big" type="submit">Continue</button>
+    </div>
+    <p class="muted small" id="account-result">Your games are public on chess.com, so no password is needed.</p>
+  </form>
+</section>
+{% else %}
 <section class="card hero">
   <div>
-    <h1>Welcome back, {{ username }}</h1>
+    <h1>{{ 'Welcome back' if returning else 'Welcome' }}, {{ username }}</h1>
     <p class="muted" id="sync-result">Bring in your latest chess.com games to review them.</p>
   </div>
   <div class="sync-row">
@@ -15,6 +32,21 @@
     </label>
     <button class="btn primary big" id="sync-btn">⟳ Sync from chess.com</button>
   </div>
+  {% if not games and not synced %}
+  <div class="first-sync" id="first-sync">
+    <p><strong>Your first sync: how far back should it go?</strong></p>
+    <div class="choice-row">
+      <label class="choice"><input type="radio" name="first-since" value="1m">
+        <strong>This month</strong><span class="muted small">The quickest start</span></label>
+      <label class="choice"><input type="radio" name="first-since" value="3m" checked>
+        <strong>Last 3 months</strong><span class="muted small">Enough games to show your weaknesses</span></label>
+      <label class="choice"><input type="radio" name="first-since" value="all">
+        <strong>All history</strong><span class="muted small" id="all-history-note">Every game you've played</span></label>
+    </div>
+    <p class="muted small">Stockfish analyses each game in a few seconds. Your first workout is ready as soon as the
+      first games are done; the rest carry on in the background.</p>
+  </div>
+  {% endif %}
   <div id="progress" class="progress-block" hidden style="flex-basis: 100%">
     <div class="progress-head">
       <span id="progress-label">Analysing…</span>
@@ -52,7 +84,7 @@
   <div class="weakness-grid" id="weaknesses"></div>
 </section>
 
-<section class="card">
+<section class="card" id="games-card">
   <div class="table-head">
     <h2>Recent games</h2>
     <span class="table-actions">
@@ -75,5 +107,7 @@
   </div>
   <div id="upload-result" class="muted small"></div>
 </section>
+{% endif %}
+<script>window.ACCOUNT = {{ account|tojson }};</script>
 {% endblock %}
 {% block scripts %}<script type="module" src="{{ url_for('static', filename='index.js') }}"></script>{% endblock %}

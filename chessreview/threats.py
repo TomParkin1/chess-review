@@ -71,13 +71,13 @@ def _line_wins(pos: sqlite3.Row | dict, me: chess.Color, passed: Eval) -> bool:
 
 def _threatened(board: chess.Board, sq: chess.Square, me: chess.Color) -> bool:
     """My newly attacked piece on `sq` is really in danger: undefended, or worth more than its
-    cheapest attacker (this also covers discovered attacks)."""
+    cheapest attacker (this also covers discovered attacks). A king can't take a defended piece."""
     piece = board.piece_at(sq)
     if not board.is_attacked_by(me, sq):
         return True
     attackers = [board.piece_at(a) for a in board.attackers(not me, sq)]
-    cheapest = min(PIECE_VALUES[a.piece_type] for a in attackers if a)
-    return PIECE_VALUES[piece.piece_type] > cheapest
+    values = [PIECE_VALUES[a.piece_type] for a in attackers if a and a.piece_type != chess.KING]
+    return bool(values) and PIECE_VALUES[piece.piece_type] > min(values)
 
 
 def _attacked_pieces(board: chess.Board, me: chess.Color) -> set[chess.Square]:

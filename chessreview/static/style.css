@@ -524,3 +524,40 @@ a.chip { text-decoration: none; }
 .analysis-panel .sm.pre { opacity: .55; }
 /* Convert: moves Stockfish played for me in "Watch Stockfish play it". */
 .solution-moves .sm.demo { color: var(--green); }
+
+/* ------------------------------------------------------------ first run, empty and error states, backups */
+
+.app-banner {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 10px 14px; border-radius: 8px;
+  background: var(--panel); border-left: 4px solid var(--blunder); color: var(--text-2);
+}
+.app-banner-text { flex: 1; }
+.state-box { display: grid; gap: 6px; justify-items: start; padding: 16px 18px; border-radius: var(--radius); background: var(--panel); margin-bottom: 16px; }
+.state-box p { margin: 0; }
+.state-box .btn { margin-top: 4px; }
+.error-state { border-left: 4px solid var(--blunder); }
+.empty-state { background: var(--panel-2); }
+td .state-box, .card .state-box, #summary .state-box { margin: 0; }
+tr.empty-row td { padding: 12px 0; }
+table.games tbody tr.empty-row, table.games tbody tr.empty-row:hover { background: none; cursor: default; }
+
+.onboarding { max-width: 640px; margin: 40px auto; padding: 32px; text-align: center; display: grid; gap: 12px; }
+.onboarding-mark { font-size: 56px; line-height: 1; color: var(--green); }
+.onboarding .account-form { justify-items: center; }
+.account-form { display: grid; gap: 8px; margin-top: 6px; }
+.account-form input[type=text] { min-width: 240px; font-size: 16px; padding: 9px 11px; }
+.first-sync { flex-basis: 100%; border-top: 1px solid var(--border); padding-top: 14px; }
+.first-sync p { margin: 4px 0; }
+.choice-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 8px 0; }
+.choice {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; cursor: pointer;
+  background: var(--panel-2); border: 2px solid transparent; border-radius: 8px; padding: 10px 12px;
+}
+.choice:has(input:checked) { border-color: var(--green); }
+.choice input { grid-row: span 2; accent-color: var(--green); }
+
+.backup-list { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 6px; max-height: 320px; overflow-y: auto; }
+.backup-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--panel-2); border-radius: 8px; padding: 8px 12px; }
+#stale-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.state-box strong { color: var(--text); }
+.progress-summary .state-box { font-size: 15px; font-weight: 400; }

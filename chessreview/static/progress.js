@@ -1,7 +1,7 @@
 // Progress: my last N games vs the N before (chessreview/progress.py), rolling charts,
 // mistake types and weekly training.
 import { lineChart } from './charts.js';
-import { api, el } from './common.js';
+import { api, el, emptyState, guard } from './common.js';
 
 const $ = id => document.getElementById(id);
 const FORMATS = {
@@ -32,6 +32,13 @@ function chart(id, r, key, opts = {}) {
 
 async function load() {
   const r = await api('/api/progress/report');
+  if (!r.games) {
+    $('summary').replaceChildren(emptyState('No analysed games yet', 'Progress compares your recent games with the ' +
+      `ones before (a comparison needs ${r.window + 10} analysed games). Sync your games on Home to begin.`,
+      { href: '/', label: 'Go to Home' }));
+    document.querySelectorAll('main > .stats, main > .insight-grid, main > section.card').forEach(e => { e.hidden = true; });
+    return;
+  }
   $('summary').textContent = r.summary;
   $('progress-scope').textContent = r.baseline
     ? `Your last ${r.window} games compared with the ${r.window} before, measured at your current level` +
@@ -63,4 +70,4 @@ async function load() {
     el('td', {}, pct(w.threat_rate)))) : [el('tr', {}, el('td', { colspan: 5, class: 'muted' }, 'No training yet.'))]));
 }
 
-load();
+guard(document.querySelector('main'), load, 'your progress');

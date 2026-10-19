@@ -2,7 +2,7 @@
 // turn? picked before any engine verdict), then puzzles from the games just synced/uploaded,
 // in game order, then a summary card of what this batch shows.
 import { makeBoard, sound } from './board.js';
-import { api, arrow, el, lastMove, sideToMove, SYMBOLS } from './common.js';
+import { api, arrow, el, guard, lastMove, sideToMove, SYMBOLS } from './common.js';
 import { createPuzzle } from './puzzle.js';
 import { countBar } from './widgets.js';
 
@@ -245,4 +245,4 @@ async function load() {
 
 $('skip-session').addEventListener('click', finish);
 
-load();
+guard(document.querySelector('main'), load, 'your new games');

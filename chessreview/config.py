@@ -11,7 +11,7 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
 
 @dataclass(frozen=True)
 class PlayerConfig:
-    username: str
+    username: str = ""          # chess.com username; the app's Settings can set it instead (db.username)
 
 
 @dataclass(frozen=True)
@@ -88,6 +88,13 @@ class CoachConfig:
 
 
 @dataclass(frozen=True)
+class BackupConfig:
+    daily: int = 7                   # daily copies kept in data/backups (backup.py)
+    weekly: int = 4                  # weekly copies kept
+    other: int = 10                  # copies made by hand or before Delete all, reclassify, migrations...
+
+
+@dataclass(frozen=True)
 class Config:
     player: PlayerConfig
     imports: ImportConfig
@@ -99,6 +106,7 @@ class Config:
     analysis: AnalysisConfig = AnalysisConfig()
     training: TrainingConfig = TrainingConfig()
     coach: CoachConfig = CoachConfig()
+    backup: BackupConfig = BackupConfig()
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
@@ -110,7 +118,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
         db_path = PROJECT_ROOT / db_path
 
     return Config(
-        player=PlayerConfig(**raw["player"]),
+        player=PlayerConfig(**raw.get("player", {})),
         imports=ImportConfig(**raw.get("import", {})),
         engine=EngineConfig(**raw.get("engine", {})),
         classification=ClassificationConfig(**raw.get("classification", {})),
@@ -120,4 +128,5 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
         analysis=AnalysisConfig(**raw.get("analysis", {})),
         training=TrainingConfig(**raw.get("training", {})),
         coach=CoachConfig(**raw.get("coach", {})),
+        backup=BackupConfig(**raw.get("backup", {})),
     )

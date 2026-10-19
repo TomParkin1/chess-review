@@ -1,5 +1,5 @@
 // Practice: browse my mistakes with filters and solve them as puzzles (puzzle.js).
-import { api } from './common.js';
+import { api, emptyState, guard } from './common.js';
 import { createPuzzle } from './puzzle.js';
 
 const $ = id => document.getElementById(id);
@@ -63,7 +63,11 @@ function query() {
   return params.toString();
 }
 
-async function load() {
+function load() {
+  return guard(document.querySelector('main'), loadMistakes, 'your mistakes');
+}
+
+async function loadMistakes() {
   const q = query();
   const data = await api(`/api/mistakes?${q}`);
   if (!optionsLoaded) {
@@ -73,6 +77,10 @@ async function load() {
   }
   items = data.items;
   renderSummary();
+  $('empty').replaceChildren(data.analysed
+    ? 'No mistakes match these filters.'
+    : emptyState('No analysed games yet', 'Sync your chess.com games on Home. Once they are analysed, your ' +
+                 'mistakes appear here as puzzles.', { href: '/', label: 'Go to Home' }));
   $('empty').hidden = items.length > 0;
   $('review').hidden = items.length === 0;
   if (items.length) show(0);

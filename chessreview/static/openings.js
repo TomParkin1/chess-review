@@ -1,7 +1,7 @@
 // Openings: explore my repertoire (built from my games) and drill my lines, Chessly style.
 import { Chess } from 'chess.js';
 import { choosePromotion, createBadge, isPromotion, makeBoard, moveSound, sound } from './board.js';
-import { api, arrow, el, lastMove, legalDests, sideToMove } from './common.js';
+import { api, arrow, el, guard, lastMove, legalDests, sideToMove } from './common.js';
 import { markIcon } from './icons.js';
 
 const $ = id => document.getElementById(id);
@@ -132,7 +132,11 @@ function renderBreadcrumb() {
   $('breadcrumb').replaceChildren(...crumbs);
 }
 
-async function loadOverview() {
+function loadOverview() {
+  return guard(document.querySelector('main'), fetchOverview, 'your openings');
+}
+
+async function fetchOverview() {
   const d = await api(`/api/openings?${params()}`);
   const select = $('family');
   const keep = family;
@@ -145,7 +149,8 @@ async function loadOverview() {
     row.append(el('span', {}, el('strong', {}, p.line), ` · you play ${p.usual_san} (${p.games}×), learn `,
                               el('strong', {}, p.learn_san)));
     return row;
-  }) : [el('p', { class: 'muted small' }, 'None found: your usual moves hold up.')]));
+  }) : [el('p', { class: 'muted small' }, d.families.length ? 'None found: your usual moves hold up.'
+    : `No games as ${color[0].toUpperCase() + color.slice(1)} yet. Your repertoire is built from your own games: sync them on Home.`)]));
   $('drill-stats').replaceChildren(
     el('span', { class: 'chip' }, `${d.positions} positions in your repertoire`),
     el('span', { class: 'chip' }, `${d.stats.seen} practised`),
@@ -320,8 +325,8 @@ document.querySelectorAll('[data-color]').forEach(b => b.addEventListener('click
 $('family').addEventListener('change', () => { family = $('family').value; path = []; loadOverview(); showTab(tab); });
 $('back-btn').addEventListener('click', () => { if (tab === 'explore' && path.length) { path.pop(); loadNode(); } });
 $('reset-btn').addEventListener('click', () => { if (tab === 'explore') { path = []; loadNode(); } });
-$('learn-btn').addEventListener('click', () => startDrill('learn'));
-$('due-btn').addEventListener('click', () => startDrill('due'));
+$('learn-btn').addEventListener('click', () => guard(document.querySelector('main'), () => startDrill('learn'), 'your lines'));
+$('due-btn').addEventListener('click', () => guard(document.querySelector('main'), () => startDrill('due'), 'your lines'));
 $('drill-stop').addEventListener('click', () => finishDrill());
 document.addEventListener('keydown', e => {
   if (e.target.matches('input, select, textarea') || tab !== 'explore') return;

@@ -4,7 +4,8 @@
 through the stdlib zstd decompressor and keeps, for every 100-point rating bucket from 400
 to 3100 and every theme in THEMES, a random sample of SAMPLE_PER_CELL well-tested puzzles
 (popularity, plays and rating deviation filters). Nothing but the sample is stored (~25k
-puzzles, a few MB).
+puzzles, a few MB). A refresh keeps the puzzles I have already tried (attempts and library cards
+refer to them by id) and backs up the database first.
 
 CSV columns: PuzzleId, FEN, Moves, Rating, RatingDeviation, Popularity, NbPlays, Themes,
 GameUrl, OpeningTags (+ DailyDate). FEN is the position *before* the opponent's move; Moves
@@ -26,7 +27,7 @@ from dataclasses import dataclass, field
 
 import chess
 
-from . import db, level, srs
+from . import backup, db, level, srs
 
 URL = "https://database.lichess.org/lichess_db_puzzle.csv.zst"
 BUCKET = 100
@@ -152,7 +153,8 @@ class Sampler:
 
 def fetch(conn: sqlite3.Connection, progress: FetchProgress | None = None, url: str = URL,
           opener=urllib.request.urlopen) -> int:
-    """Download and sample the puzzle database, replacing the stored library. Returns puzzles kept."""
+    """Download and sample the puzzle database, replacing the stored library (puzzles I have
+    tried are kept, see below). Returns the number of puzzles in the new sample."""
     from compression import zstd   # stdlib since Python 3.14
 
     progress = progress or FetchProgress()
@@ -169,10 +171,14 @@ def fetch(conn: sqlite3.Connection, progress: FetchProgress | None = None, url: 
             sampler.offer(row)
             progress.rows += 1
     puzzles = sampler.puzzles()
+    if count(conn):
+        backup.make(conn, "before-library")
     with conn:
-        conn.execute("DELETE FROM puzzles")
+        # Puzzles I have tried stay: their attempts and spaced-repetition cards point at them.
+        conn.execute("""DELETE FROM puzzles WHERE id NOT IN (SELECT puzzle_id FROM puzzle_attempts)
+                        AND id NOT IN (SELECT key FROM cards WHERE kind = 'library')""")
         conn.executemany(
-            """INSERT INTO puzzles (id, fen, moves, rating, deviation, popularity, plays, themes, game_url)
+            """INSERT OR IGNORE INTO puzzles (id, fen, moves, rating, deviation, popularity, plays, themes, game_url)
                VALUES (?,?,?,?,?,?,?,?,?)""",
             [(r[0], r[1], r[2], int(r[3]), int(r[4]), int(r[5]), int(r[6]), f" {r[7]} ", r[8])
              for r in puzzles.values()])

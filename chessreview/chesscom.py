@@ -76,36 +76,46 @@ def months_to_fetch(archives: list[str], last_month: str | None, since: str | No
     return [u for u in archives if month_of(u) >= f"{y:04d}/{m:02d}"]
 
 
+def archives_of(user: str, fetch=fetch_json) -> list[str]:
+    """URLs of a player's monthly archives, oldest first. LookupError if chess.com has no such player."""
+    return fetch(API.format(user=user.strip().lower()))["archives"]
+
+
 def sync(conn: sqlite3.Connection, cfg: Config, since: str | None = None,
          fetch=fetch_json, progress=None) -> SyncResult:
     """Import new games from chess.com as one batch. `fetch` is injectable for tests."""
-    user = cfg.player.username.lower()
-    archives = fetch(API.format(user=user))["archives"]
+    user = db.username(conn, cfg)
+    if not user:
+        raise ValueError("Set your chess.com username first.")
+    archives = archives_of(user, fetch)
     last_month = db.get_meta(conn, LAST_MONTH_KEY)
     urls = months_to_fetch(archives, last_month, since)
 
     result = SyncResult()
     result.batch_id = db.create_batch(conn, "chess.com", f"chess.com sync ({len(urls)} month(s))")
-    for i, url in enumerate(urls):
-        month = "/".join(url.rstrip("/").split("/")[-2:])
-        if progress:
-            progress(i, len(urls), month)
-        for g in fetch(url).get("games", []):
-            if g.get("rules", "chess") != "chess":
-                result.stats.games_seen += 1
-                result.stats.skip(f"variant ({g.get('rules')})")
-                continue
-            game = chess.pgn.read_game(io.StringIO(g.get("pgn", "")))
-            if game is None:
-                continue
-            import_game(conn, game, cfg, source="chess.com", stats=result.stats,
-                        batch_id=result.batch_id, origin="chess.com",
-                        extra={"uuid": g.get("uuid"), "rated": g.get("rated")})
-        conn.commit()
-        result.months.append(month)
-        with conn:
-            db.set_meta(conn, LAST_MONTH_KEY, month)
-    result.games_added = db.finish_batch(conn, result.batch_id)
+    try:
+        for i, url in enumerate(urls):
+            month = "/".join(url.rstrip("/").split("/")[-2:])
+            if progress:
+                progress(i, len(urls), month)
+            for g in fetch(url).get("games", []):
+                if g.get("rules", "chess") != "chess":
+                    result.stats.games_seen += 1
+                    result.stats.skip(f"variant ({g.get('rules')})")
+                    continue
+                game = chess.pgn.read_game(io.StringIO(g.get("pgn", "")))
+                if game is None:
+                    continue
+                import_game(conn, game, cfg, source="chess.com", stats=result.stats,
+                            batch_id=result.batch_id, origin="chess.com",
+                            extra={"uuid": g.get("uuid"), "rated": g.get("rated")})
+            conn.commit()
+            result.months.append(month)
+            with conn:
+                db.set_meta(conn, LAST_MONTH_KEY, month)
+    finally:
+        conn.commit()     # the months imported before a failure are kept; an empty batch is dropped
+        result.games_added = db.finish_batch(conn, result.batch_id)
     if not result.games_added:
         result.batch_id = None
     elif last_month is None:

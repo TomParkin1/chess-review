@@ -1,13 +1,71 @@
 // Helpers shared by the pages.
 
+// A failed API call: `message` says what went wrong (the server's {error}), `status` is the
+// HTTP status (0 when the server can't be reached).
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
+
 export async function api(url, options = {}) {
-  const res = await fetch(url, options);
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch {
+    throw new ApiError("Can't reach Chess Review. Is the server still running?", 0);
+  }
   if (!res.ok) {
-    let message = res.statusText;
+    let message = res.statusText || `HTTP ${res.status}`;
     try { message = (await res.json()).error || message; } catch { /* not JSON */ }
-    throw new Error(message);
+    throw new ApiError(message, res.status);
   }
   return res.json();
+}
+
+// ------------------------------------------------------------ error and empty states
+
+// Loading something failed: what, why, and a way to try again.
+export function errorState(err, retry, what = 'this page') {
+  return el('div', { class: 'state-box error-state', role: 'alert' },
+    el('strong', {}, `Couldn't load ${what}.`),
+    el('p', { class: 'muted' }, err?.message || String(err)),
+    retry ? el('button', { class: 'btn', onclick: retry }, 'Try again') : null);
+}
+
+// Nothing to show yet, and the next step (`action` = {href, label}).
+export function emptyState(title, text, action = null) {
+  return el('div', { class: 'state-box empty-state' },
+    el('strong', {}, title),
+    text ? el('p', { class: 'muted' }, text) : null,
+    action ? el('a', { class: 'btn primary', href: action.href }, action.label) : null);
+}
+
+// Run a loader that draws its own data; if it fails, show why at the top of `where`, with
+// Try again (which runs it again). Returns the loader's result, or undefined after a failure.
+export async function guard(where, load, what) {
+  where.querySelector(':scope > .error-state')?.remove();
+  try {
+    return await load();
+  } catch (err) {
+    console.error(err);
+    const box = errorState(err, () => { box.remove(); guard(where, load, what); }, what);
+    where.prepend(box);
+    return undefined;
+  }
+}
+
+// The data a page can't work without. If it fails to load, show why at the top of `where`
+// (Try again reloads the page) and never resolve, so the page's script stops there quietly.
+export async function need(where, url, what) {
+  try {
+    return await api(url);
+  } catch (err) {
+    console.error(err);
+    where.prepend(errorState(err, () => location.reload(), what));
+    return new Promise(() => {});
+  }
 }
 
 export const SYMBOLS = { inaccuracy: '?!', mistake: '?', blunder: '??' };

@@ -7,7 +7,7 @@ import { Chess } from 'chess.js';
 import { createAnalysis } from './analysis.js';
 import { choosePromotion, isPromotion, makeBoard, moveSound, sound } from './board.js';
 import { lineChart } from './charts.js';
-import { api, arrow, el, lastMove, legalDests, sideToMove, winChance } from './common.js';
+import { api, arrow, el, errorState, lastMove, legalDests, sideToMove, winChance } from './common.js';
 import { createEvalBar } from './evalbar.js';
 
 const $ = id => document.getElementById(id);
@@ -36,7 +36,9 @@ async function loadOverview() {
   $('games-note').textContent = overview.positions.length
     ? `The first position in each game where you were clearly winning (+${pawns} or more at your level) ` +
       'and still were a move later. Games you didn\'t win come first.'
-    : 'No clearly winning positions in your analysed games yet.';
+    : overview.analysed ? 'No clearly winning positions in your analysed games yet.'
+      : 'No analysed games yet: sync your chess.com games on Home, and the positions you won (or should have) appear here. ' +
+        'The essential endgames are ready now.';
   $('games-list').replaceChildren(...overview.positions.map(p => el('button', {
     class: 'convert-row', onclick: () => start(p.key, overview.positions), onmouseenter: () => preview(p),
   },
@@ -91,7 +93,13 @@ function backToList() {
 // `resume` = {moves, evals}: continue from part-way through an earlier attempt (it then
 // counts as solved with help at best).
 async function start(key, from, resume = null) {
-  const task = await api(`/api/convert/task?key=${encodeURIComponent(key)}`);
+  let task;
+  try {
+    task = await api(`/api/convert/task?key=${encodeURIComponent(key)}`);
+  } catch (err) {
+    document.querySelector('main').prepend(errorState(err, () => location.reload(), 'this position'));
+    return;
+  }
   list = from || [];
   const previousTab = tab === 'play' ? (task.kind === 'endgame' ? 'endgames' : 'games') : (play?.returnTab || tab);
   const replayed = replay(task.fen, resume?.moves || []);
@@ -157,6 +165,7 @@ async function onMove(orig, dest) {
   p.phase = 'waiting';
   const piece = new Chess(p.fen).get(orig);
   const promotion = isPromotion(piece, dest) ? await choosePromotion($('board'), p.task.color, dest, p.task.color) : '';
+  if (play !== p || p.phase !== 'waiting') return;     // gave up while choosing the piece
   const uci = orig + dest + promotion;
   board.setAutoShapes([]);
   board.set({ movable: { color: p.task.color, dests: new Map() } });   // premoves still allowed
@@ -164,11 +173,13 @@ async function onMove(orig, dest) {
   try {
     r = await post('/api/play/move', { key: p.task.key, moves: p.moves, uci, streak: p.streak });
   } catch (err) {
+    if (play !== p || p.phase !== 'waiting') return;
     showFeedback('bad', `Couldn't play that (${err.message}).`);
     p.phase = 'mine';
     return setMyTurn();
   }
-  if (play !== p) return;
+  // Gave up (or left) while Stockfish was replying: the attempt is over, ignore the reply.
+  if (play !== p || p.phase !== 'waiting') return;
   moveSound(r.san);
   p.moves.push(uci);
   p.sans.push(r.san);
@@ -182,7 +193,7 @@ async function onMove(orig, dest) {
   p.last = lastMove(r.reply_uci || uci);
   renderMoves();
   setTimeout(() => {
-    if (play !== p) return;
+    if (play !== p || p.phase !== 'waiting') return;
     if (r.reply_uci) moveSound(r.reply_san);
     if (r.status === 'playing') {
       p.phase = 'mine';
@@ -391,7 +402,12 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'h') hint();
 });
 
-await loadOverview();
+try {
+  await loadOverview();
+} catch (err) {
+  document.querySelector('main').prepend(errorState(err, () => location.reload(), 'your positions'));
+  await new Promise(() => {});    // nothing to show: stop here quietly
+}
 const key = new URLSearchParams(location.search).get('key');
 if (key) start(key, key.startsWith('endgame/') ? overview.endgames.filter(x => x.unlocked) : overview.positions);
 else if (overview.positions.length) preview(overview.positions[0]);

@@ -9,6 +9,8 @@
     python -m chessreview serve [--port 8000]
     python -m chessreview puzzles
     python -m chessreview reset [--yes]
+    python -m chessreview backup [--list]
+    python -m chessreview restore NAME_OR_FILE
 """
 
 import argparse
@@ -18,7 +20,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import db
+from . import backup, db
 from .classify import ensure_classified
 from .config import effective_workers, load_config
 from .engine import AnalysisJob, count_pending
@@ -27,8 +29,11 @@ from .pgn_import import import_paths
 
 def cmd_sync(conn: sqlite3.Connection, cfg, args) -> None:
     from . import chesscom
+    user = db.username(conn, cfg)
+    if not user:
+        sys.exit("Set your chess.com username first (in the web app, or [player] username in config.toml).")
     last = db.get_meta(conn, chesscom.LAST_MONTH_KEY)
-    print(f"Syncing chess.com games of {cfg.player.username} "
+    print(f"Syncing chess.com games of {user} "
           f"({'since ' + last if last else 'first sync: ' + args.since})...")
     result = chesscom.sync(conn, cfg, since=args.since,
                            progress=lambda i, n, month: print(f"  {month} ({i + 1}/{n})"))
@@ -75,7 +80,7 @@ def cmd_summary(conn: sqlite3.Connection, cfg, args) -> None:
     if not total[0]:
         print("No games imported yet. Run: python -m chessreview import <files>")
         return
-    print(f"Player: {cfg.player.username}")
+    print(f"Player: {db.username(conn, cfg)}")
     print(f"Games:  {total[0]}  ({total[1]} to {total[2]})")
     _wdl_table(_wdl_query(conn, "'all'"), "Overall")
     _wdl_table(_wdl_query(conn, "my_color"), "By colour")
@@ -197,9 +202,11 @@ def cmd_serve(conn: sqlite3.Connection, cfg, args) -> None:
     ensure_classified(conn, cfg)
     print(f"Open http://127.0.0.1:{args.port} in your browser (Ctrl+C to stop).")
     app = create_app(cfg)
+    daily = backup.DailyBackups(cfg.db_path, cfg.backup).start()   # today's copy, then hourly checks
     try:
         app.run(host="127.0.0.1", port=args.port, threaded=True)
     finally:
+        daily.stop()
         app.extensions["live"].close()  # stop Stockfish so Python can exit
 
 
@@ -211,6 +218,36 @@ def cmd_reset(conn: sqlite3.Connection, cfg, args) -> None:
             print("Nothing deleted.")
             return
     print(f"Deleted {db.delete_all_games(conn)} games.")
+
+
+def cmd_backup(conn: sqlite3.Connection, cfg, args) -> None:
+    folder = backup.folder_for(cfg.db_path)
+    if not args.list:
+        print(f"Backed up to {backup.make(conn, 'manual', folder)}")
+        backup.rotate(folder, cfg.backup)
+    for b in backup.files(folder):
+        info = b.as_dict()
+        print(f"  {b.path.name:<44} {b.label:<34} {info['games'] or 0:>5} games  {info['size'] / 1e6:5.1f} MB")
+
+
+def cmd_restore(conn: sqlite3.Connection, cfg, args) -> None:
+    """Restore a copy from the backups folder (by name) or any file. The current data is backed up first."""
+    source = Path(args.source)
+    if not source.is_file():
+        source = backup.folder_for(cfg.db_path) / args.source
+    if not source.is_file():
+        sys.exit(f"No such backup: {args.source} (see: python -m chessreview backup --list)")
+    if not args.yes:
+        answer = input(f"Replace all your data with {source.name}? The current data is backed up first. [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            print("Nothing restored.")
+            return
+    try:
+        before = db.restore(conn, source)
+    except ValueError as exc:
+        sys.exit(str(exc))
+    games = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+    print(f"Restored {source.name} ({games} games). Your previous data is in {before}.")
 
 
 def cmd_puzzles(conn: sqlite3.Connection, cfg, args) -> None:
@@ -269,9 +306,23 @@ def main() -> None:
     p.add_argument("--yes", action="store_true", help="don't ask for confirmation")
     p.set_defaults(func=cmd_reset)
 
+    p = sub.add_parser("backup", help="back up the database to data/backups (and list the copies)")
+    p.add_argument("--list", action="store_true", help="only list the copies")
+    p.set_defaults(func=cmd_backup)
+
+    p = sub.add_parser("restore", help="replace all data with a backup (the current data is backed up first)")
+    p.add_argument("source", help="a file name from 'backup --list', or the path of an exported copy")
+    p.add_argument("--yes", action="store_true", help="don't ask for confirmation")
+    p.set_defaults(func=cmd_restore)
+
     args = parser.parse_args()
     cfg = load_config(args.config) if args.config else load_config()
-    conn = db.connect(cfg.db_path)
+    if args.func is cmd_restore:    # no schema work first: the database may be what is broken
+        Path(cfg.db_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(cfg.db_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+    else:
+        conn = db.connect(cfg.db_path)
     try:
         args.func(conn, cfg, args)
     finally:

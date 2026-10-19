@@ -1,4 +1,5 @@
 """v3 milestone 2: the Today workout (coach.py) and the progress report (progress.py)."""
+import json
 from dataclasses import replace
 from datetime import date
 
@@ -20,6 +21,13 @@ def cfg():
 @pytest.fixture
 def conn(tmp_path):
     c = db.connect(tmp_path / "t.db")
+    fill(c)
+    yield c
+    c.close()
+
+
+def fill(c):
+    """One analysed game: five hanging-piece blunders with due/new cards, and calm positions."""
     batch = c.execute("INSERT INTO imports (source, games_added, session_done_at) VALUES ('upload', 1, '2026-10-01')").lastrowid
     c.execute("""INSERT INTO games (id, dedupe_key, white, black, white_elo, black_elo, my_color, my_result, date,
                      moves_uci, num_plies, pgn, batch_id, analysed_at, end_time, time_class, rated)
@@ -34,12 +42,16 @@ def conn(tmp_path):
                      VALUES (1, ?, 'good', 0, 'middlegame', 1, 'good')""", (ply,))
         c.execute("""INSERT INTO positions (game_id, ply, fen, score_cp, threat_cp, threat_uci, threat_pv)
                      VALUES (1, ?, '7r/8/8/8/7N/8/8/K6k w - - 0 1', 0, ?, 'h8h4', 'h8h4')""", (ply, threat_cp))
+    for ply in range(1, 20):        # every analysed move has the positions before and after it
+        c.execute("""INSERT OR IGNORE INTO positions (game_id, ply, fen, score_cp)
+                     VALUES (1, ?, '7r/8/8/8/7N/8/8/K6k w - - 0 1', 0)""", (ply,))
     c.commit()
     srs.ensure_cards(c, load_config())
     c.execute("UPDATE cards SET due_on = ?, box = 1, introduced_on = '2026-10-01' WHERE ply = 2", (DAY.isoformat(),))
     c.commit()
-    yield c
-    c.close()
+
+
+WEAKNESS = {"title": "Hanging pieces", "detail": "5 of your mistakes", "train": {"kind": "hanging_piece"}}
 
 
 def test_plan_blocks_and_progress(conn, cfg, monkeypatch):
@@ -77,3 +89,92 @@ def test_report_needs_enough_games_for_a_baseline(conn, cfg):
     assert r["games"] == 1 and r["baseline"] is None
     assert "more to see a trend" in r["summary"]
     assert r["current"]["blunders"] == 5 and r["current"]["threats_missed"] == 0   # no threat data on blunders
+
+
+# ------------------------------------------------------------ M1: plans that can't break (B1, B6)
+
+def test_plan_on_an_empty_database(tmp_path, cfg):
+    """B1: no analysed game yet -> insights.compute has no "weaknesses"; Today used to crash (500)."""
+    c = db.connect(tmp_path / "empty.db")
+    plan = coach.today_plan(c, cfg, DAY)
+    assert plan["blocks"] == [] and plan["total"] == 0 and not plan["stale"]
+    c.close()
+
+
+def test_empty_plan_is_rebuilt_once_games_are_analysed(tmp_path, cfg, monkeypatch):
+    """B6: the plan was frozen at the first page load of the day, e.g. before any game was analysed."""
+    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [WEAKNESS]})
+    c = db.connect(tmp_path / "first.db")
+    assert coach.today_plan(c, cfg, DAY)["total"] == 0
+    fill(c)                                   # the first sync's games are analysed
+    plan = coach.today_plan(c, cfg, DAY)
+    assert plan["total"] > 0 and not plan["stale"]
+    c.close()
+
+
+def test_plan_rebuilt_when_its_positions_vanish(conn, cfg, monkeypatch):
+    """B6: after Delete all games the old plan listed 27 items that could never be served."""
+    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [WEAKNESS]})
+    assert coach.today_plan(conn, cfg, DAY)["total"] > 0
+    db.delete_all_games(conn)
+    plan = coach.today_plan(conn, cfg, DAY)
+    assert plan["total"] == 0 and plan["blocks"] == [] and plan["complete"]
+
+
+def test_new_games_mark_a_started_plan_stale_and_refresh_keeps_progress(conn, cfg, monkeypatch):
+    """B6: games analysed later in the day never reached the plan. A plan I have started stays
+    (no reshuffle mid-workout) but says it's stale; Refresh rebuilds it and keeps what I did."""
+    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [WEAKNESS]})
+    plan = coach.today_plan(conn, cfg, DAY)
+    conn.execute("INSERT INTO review_results (game_id, ply, result) VALUES (1, 2, 'solved')")
+    conn.execute("""INSERT INTO games (id, dedupe_key, my_color, my_result, moves_uci, num_plies, pgn, analysed_at)
+                    VALUES (2, 'k2', 'white', 'win', 'e2e4', 1, '', '2026-10-19')""")
+    conn.commit()
+    stale = coach.today_plan(conn, cfg, DAY)
+    assert stale["stale"] and stale["new_games"] == 1
+    assert [b["items"] for b in stale["blocks"]] == [b["items"] for b in plan["blocks"]]
+    fresh = coach.today_plan(conn, cfg, DAY, refresh=True)
+    assert not fresh["stale"] and fresh["finished"] == 1
+    reviews = next(b for b in fresh["blocks"] if b["id"] == "reviews")["items"]
+    assert reviews == [[1, 2, "due"]]                      # kept, and the block is still its usual size
+
+
+def test_refreshing_a_finished_day_adds_no_second_workout(conn, cfg, monkeypatch):
+    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [WEAKNESS]})
+    conn.execute("INSERT INTO cards (kind, key, box, due_on) VALUES ('line', 'white:x', 1, ?)", (DAY.isoformat(),))
+    conn.commit()
+    plan = coach.today_plan(conn, cfg, DAY)
+    assert "opening" in [b["id"] for b in plan["blocks"]]
+    for block in plan["blocks"]:
+        for g, p, _ in block["items"]:
+            conn.execute("INSERT INTO review_results (game_id, ply, result) VALUES (?, ?, 'solved')", (g, p))
+    srs.record_line(conn, "white:x", "solved", DAY)          # drilled: no longer due today
+    conn.commit()
+    assert coach.today_plan(conn, cfg, DAY)["complete"]
+    again = coach.today_plan(conn, cfg, DAY, refresh=True)
+    assert again["complete"] and again["total"] == plan["total"]
+    assert [b["id"] for b in again["blocks"]] == [b["id"] for b in plan["blocks"]]   # the drilled block stays
+
+
+def test_a_plan_from_before_the_basis_existed_can_go_stale(conn, cfg, monkeypatch):
+    """Plans stored by the previous version have no basis: the first look records one."""
+    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [WEAKNESS]})
+    plan = coach.build_plan(conn, cfg, DAY)
+    conn.execute("INSERT INTO review_results (game_id, ply, result) VALUES (1, 2, 'solved')")
+    db.set_meta(conn, coach.PLAN_KEY, json.dumps(plan))
+    conn.commit()
+    assert not coach.today_plan(conn, cfg, DAY)["stale"]
+    conn.execute("""INSERT INTO games (id, dedupe_key, my_color, my_result, moves_uci, num_plies, pgn, analysed_at)
+                    VALUES (2, 'k2', 'white', 'win', 'e2e4', 1, '', '2026-10-19')""")
+    conn.commit()
+    assert coach.today_plan(conn, cfg, DAY)["stale"]
+
+
+def test_untouched_plan_follows_new_games(conn, cfg, monkeypatch):
+    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [WEAKNESS]})
+    coach.today_plan(conn, cfg, DAY)
+    conn.execute("""INSERT INTO games (id, dedupe_key, my_color, my_result, moves_uci, num_plies, pgn, analysed_at)
+                    VALUES (2, 'k2', 'white', 'win', 'e2e4', 1, '', '2026-10-19')""")
+    conn.commit()
+    plan = coach.today_plan(conn, cfg, DAY)
+    assert not plan["stale"] and plan["basis"] == 2

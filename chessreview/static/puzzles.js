@@ -1,6 +1,6 @@
 // Puzzle library (chessreview/library.py): Lichess puzzles around my puzzle rating, optionally
 // by theme. If the library isn't downloaded yet, offer the download with a progress bar.
-import { api } from './common.js';
+import { api, guard } from './common.js';
 import { createPuzzle } from './puzzle.js';
 
 const $ = id => document.getElementById(id);
@@ -72,7 +72,7 @@ $('fetch-btn').addEventListener('click', async () => {
   await api('/api/library/fetch', { method: 'POST' });
   pollFetch();
 });
-$('theme').addEventListener('change', load);
+$('theme').addEventListener('change', () => guard(document.querySelector('main'), load, 'puzzles'));
 
 async function start() {
   const s = await refreshRating();
@@ -81,4 +81,4 @@ async function start() {
   else if (s.progress.state === 'running') { $('fetch-btn').disabled = true; pollFetch(); }
 }
 
-start();
+guard(document.querySelector('main'), start, 'the puzzle library');

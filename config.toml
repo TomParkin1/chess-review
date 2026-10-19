@@ -1,7 +1,7 @@
 # Chess review configuration. Edit freely; restart the app after changes.
 
 [player]
-username = "sampleplayer"
+username = "sampleplayer"   # optional: the app asks for it on first run (Settings can change it)
 
 [import]
 min_plies = 10            # skip games shorter than this (aborted / instant resignations)
@@ -60,3 +60,10 @@ self_review_games = 5     # New-games session: games where you find the turning 
 
 [database]
 path = "data/chess.db"
+
+[backup]
+# Copies of the database in data/backups (made with SQLite's backup API, safe while the app runs).
+daily = 7                 # one a day while the app is running
+weekly = 4                # the first daily copy of each week
+other = 10                # "Back up now" and the copies made before Delete all, reclassifying,
+                          # database upgrades, puzzle-library updates and restores

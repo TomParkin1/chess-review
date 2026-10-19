@@ -65,6 +65,20 @@ def test_quiet_threats_need_a_piece_in_danger(cfg, fen, uci, real):
     assert threat_of(row, chess.WHITE, thresholds_for(1500, cfg, True)).real is real
 
 
+@pytest.mark.parametrize("fen,real", [
+    ("8/8/8/6k1/4N3/3P4/8/4K3 w - - 0 40", False),   # B4: the king can't take a defended knight
+    ("8/8/8/6k1/4N3/8/8/4K3 w - - 0 40", True),      # ...but it can take an undefended one
+])
+def test_a_king_among_the_attackers(cfg, fen, real):
+    """B4: a king attacking a piece used to crash the threat check (no king in PIECE_VALUES), and
+    with it Practice, Today and Progress, once the threat's gain reached the mistake threshold."""
+    th = thresholds_for(None, cfg, False)
+    row = {"fen": fen, "score_cp": 300, "score_mate": None, "threat_cp": -300, "threat_mate": None,
+           "threat_uci": "g5f5", "threat_pv": "g5f5 e1e2"}
+    threat = threat_of(row, chess.WHITE, th)
+    assert threat.gain >= th.mistake and threat.real is real
+
+
 @pytest.mark.parametrize("fen,threat,real", [
     # Black's pawn on d5 attacks the white knight on e4: if White passed, dxe4.
     ("r3k3/p7/8/3p4/4N3/8/P7/R3K3 w - - 0 1", "d5e4", True),
@@ -144,12 +158,6 @@ def test_calm_positions_mix_threats_and_quiet(conn, cfg):
     assert (1, 6) in picks                                    # the one threatened position
     assert len(picks) == 2 and set(picks) <= {(1, 6), (1, 8), (1, 10)}
     assert srs.calm_positions(conn, cfg, 2, "seed") == picks  # same deck all day
-
-
-def test_real_game_deck_mixes_calm_positions(conn, cfg):
-    deck = srs.real_game_deck(conn, replace(cfg, coach=replace(cfg.coach, calm_ratio=0.5)), DAY)
-    tags = [tag for _, tag in deck]
-    assert tags.count("new") == 1 and tags.count("calm") == 1
 
 
 def test_calm_cards_only_when_failed(conn, cfg):

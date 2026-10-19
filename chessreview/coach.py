@@ -11,6 +11,11 @@ Blocks (sizes in config [coach]):
 
 The plan is frozen for the day the first time it is built (stored in meta), so finishing
 items doesn't reshuffle it. An item counts as done once it has a review result today.
+It is rebuilt the same day only when it has to be (`today_plan`): on request ("Refresh plan"),
+when some of its positions or puzzles no longer exist (Delete all games, a restore), or when
+more games have been analysed since it was built and nothing in it has been tried yet (the
+first sync). Otherwise new games mark it `stale`, and the Today page offers a refresh.
+Items already tried today are carried over into a rebuilt plan, so no progress is lost.
 """
 
 import json
@@ -24,17 +29,67 @@ PLAN_KEY = "today_plan"
 FOCUS_JUDGEMENTS = ("mistake", "blunder")
 
 
-def today_plan(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> dict:
-    """Today's plan with progress: {day, blocks: [{id, title, ..., items: [[game_id, ply, tag]], done}]}."""
+BLOCK_ORDER = ["reviews", "real", "focus", "convert", "opening"]
+
+
+def today_plan(conn: sqlite3.Connection, cfg: Config, on: date | None = None, refresh: bool = False) -> dict:
+    """Today's plan with progress: {day, blocks: [{id, title, ..., items: [[game_id, ply, tag]], done}],
+    basis, stale, new_games}. `refresh` rebuilds it (keeping what was already tried today)."""
     on = on or srs.today()
     day = on.isoformat()
+    basis = analysed_games(conn)
     stored = db.get_meta(conn, PLAN_KEY)
     plan = json.loads(stored) if stored else None
     if not plan or plan.get("day") != day:
-        plan = build_plan(conn, cfg, on)
-        with conn:
-            db.set_meta(conn, PLAN_KEY, json.dumps(plan))
+        plan = _save(conn, build_plan(conn, cfg, on), basis)
+    else:
+        if "basis" not in plan:                # a plan stored before plans had a basis
+            plan = _save(conn, plan, basis)
+        items = [i for b in plan["blocks"] for i in b["items"]]
+        attempted = attempted_today(conn, on)
+        vanished = len(_servable(conn, items)) < len({_key(i) for i in items})
+        untouched = not any(_key(i) in attempted for i in items)
+        if refresh or vanished or (plan["basis"] != basis and untouched):
+            plan = _save(conn, _rebuild(conn, cfg, on, plan, attempted), basis)
+    plan["new_games"] = max(0, basis - plan["basis"])
+    plan["stale"] = plan["new_games"] > 0
     return with_progress(conn, plan, on)
+
+
+def analysed_games(conn: sqlite3.Connection) -> int:
+    """What a plan was built from: the number of analysed games (more = the plan may be stale)."""
+    return conn.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NOT NULL").fetchone()[0]
+
+
+def _save(conn: sqlite3.Connection, plan: dict, basis: int) -> dict:
+    plan["basis"] = basis
+    with conn:
+        db.set_meta(conn, PLAN_KEY, json.dumps(plan))
+    return plan
+
+
+def _rebuild(conn: sqlite3.Connection, cfg: Config, on: date, old: dict, attempted: set[tuple]) -> dict:
+    """A fresh plan for the same day, with the items of `old` already tried today kept in their
+    blocks (first), so the day's progress stays. They count towards each block's usual size, so
+    a rebuild never adds a second workout to a day."""
+    plan = build_plan(conn, cfg, on)
+    sizes = {"reviews": cfg.coach.due_cap, "real": cfg.coach.real_game, "focus": cfg.coach.focus}
+    tried = [i for b in old["blocks"] for i in b["items"] if _key(i) in attempted]
+    still_there = _servable(conn, tried)
+    kept = {_key(i) for i in tried if _key(i) in still_there}
+    blocks = {b["id"]: b for b in plan["blocks"]}
+    for old_block in old["blocks"]:
+        done_elsewhere = old_block["id"] in ("opening", "convert") and _played_today(conn, old_block["id"], on)
+        if old_block["id"] not in blocks and (done_elsewhere or any(_key(i) in kept for i in old_block["items"])):
+            blocks[old_block["id"]] = {**old_block, "items": []}
+    for block_id, b in blocks.items():
+        old_block = next((o for o in old["blocks"] if o["id"] == block_id), {"items": []})
+        carried = [i for i in old_block["items"] if _key(i) in kept]
+        fresh = [i for i in b["items"] if _key(i) not in kept]
+        b["items"] = carried + fresh[:max(0, sizes.get(block_id, len(fresh)) - len(carried))]
+    plan["blocks"] = sorted((b for b in blocks.values() if b["items"] or b["id"] in ("opening", "convert")),
+                            key=lambda b: BLOCK_ORDER.index(b["id"]) if b["id"] in BLOCK_ORDER else 99)
+    return plan
 
 
 def build_plan(conn: sqlite3.Connection, cfg: Config, on: date) -> dict:
@@ -42,7 +97,8 @@ def build_plan(conn: sqlite3.Connection, cfg: Config, on: date) -> dict:
     q = srs.queue(conn, cfg, on)
     reviews = [[g, p, "due"] for g, p in q["due"][: c.due_cap]]
     due_library = conn.execute("""SELECT key FROM cards WHERE kind = 'library' AND mastered_on IS NULL
-                                  AND due_on IS NOT NULL AND due_on <= ? ORDER BY due_on, box""",
+                                  AND due_on IS NOT NULL AND due_on <= ? AND key IN (SELECT id FROM puzzles)
+                                  ORDER BY due_on, box""",
                                (on.isoformat(),)).fetchall()
     reviews += [["lib", r["key"], "due"] for r in due_library][: max(0, c.due_cap - len(reviews))]
 
@@ -71,20 +127,45 @@ def build_plan(conn: sqlite3.Connection, cfg: Config, on: date) -> dict:
     if lines:
         blocks.append({"id": "opening", "title": "Opening lines", "items": [], "lines_due": lines,
                        "subtitle": f"{lines} position{'s' if lines != 1 else ''} of your repertoire to drill."})
+    servable = _servable(conn, [i for b in blocks for i in b["items"]])
+    for b in blocks:
+        b["items"] = [i for i in b["items"] if _key(i) in servable]
     return {"day": on.isoformat(), "blocks": [b for b in blocks if b["items"] or b["id"] in ("opening", "convert")]}
+
+
+def _key(item: list) -> tuple:
+    """(game_id, ply) of my position or ("lib", puzzle_id) of a plan item [.., .., tag]."""
+    return item[0], item[1]
+
+
+def _servable(conn: sqlite3.Connection, items: list[list]) -> set[tuple]:
+    """Keys of the items that can still be served as puzzles (same rows web._items_for needs):
+    my analysed move with the position after it, or a puzzle still in the library."""
+    mine = list({_key(i) for i in items if i[0] != "lib"})
+    out: set[tuple] = set()
+    for chunk in range(0, len(mine), 400):
+        part = mine[chunk:chunk + 400]
+        rows = conn.execute(f"""
+            SELECT m.game_id, m.ply FROM mistakes m
+            JOIN positions p ON p.game_id = m.game_id AND p.ply = m.ply
+            JOIN positions p2 ON p2.game_id = m.game_id AND p2.ply = m.ply + 1
+            WHERE m.is_mine = 1 AND (m.game_id, m.ply) IN (VALUES {",".join("(?, ?)" for _ in part)})""",
+            [v for k in part for v in k])
+        out |= {(r["game_id"], r["ply"]) for r in rows}
+    lib = list({i[1] for i in items if i[0] == "lib"})
+    if lib:
+        rows = conn.execute(f"SELECT id FROM puzzles WHERE id IN ({','.join('?' * len(lib))})", lib)
+        out |= {("lib", r["id"]) for r in rows}
+    return out
 
 
 def with_progress(conn: sqlite3.Connection, plan: dict, on: date) -> dict:
     """Mark items and blocks done from today's review results (and today's line drills)."""
-    day = on.isoformat()
     attempted = attempted_today(conn, on)
     total = done = 0
     for block in plan["blocks"]:
         if block["id"] in ("opening", "convert"):
-            kind = "line" if block["id"] == "opening" else "convert"
-            played = conn.execute("SELECT COUNT(*) FROM cards WHERE kind = ? AND last_on = ?",
-                                  (kind, day)).fetchone()[0]
-            block["done"] = played > 0
+            block["done"] = _played_today(conn, block["id"], on)
             block["count"], block["finished"] = 1, int(block["done"])
         else:
             block["count"] = len(block["items"])
@@ -95,6 +176,13 @@ def with_progress(conn: sqlite3.Connection, plan: dict, on: date) -> dict:
     plan["total"], plan["finished"] = total, done
     plan["complete"] = all(b["done"] for b in plan["blocks"])
     return plan
+
+
+def _played_today(conn: sqlite3.Connection, block_id: str, on: date) -> bool:
+    """A block played on its own page (opening lines, convert) counts once something was played today."""
+    kind = "line" if block_id == "opening" else "convert"
+    return conn.execute("SELECT 1 FROM cards WHERE kind = ? AND last_on = ? LIMIT 1",
+                        (kind, on.isoformat())).fetchone() is not None
 
 
 def attempted_today(conn: sqlite3.Connection, on: date) -> set[tuple]:
@@ -119,7 +207,7 @@ def _focus_items(conn: sqlite3.Connection, cfg: Config, size: int, taken: set[tu
     """My #1 weakness that has puzzles, and up to `size` of them: my own mistakes of that kind
     (unsolved first, best lessons first) and, with the library loaded, themed library puzzles."""
     has_library = library.count(conn) > 0
-    for weakness in insights.compute(conn, last=100)["weaknesses"]:
+    for weakness in insights.compute(conn, last=100).get("weaknesses", []):   # none before any analysis
         train = weakness.get("train") or {}
         own = _matching_mistakes(conn, train, taken)
         themes = library.themes_for(train) if has_library else []

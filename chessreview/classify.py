@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass
 
 import chess
 
-from . import db, explain, openings, phases, report
+from . import backup, db, explain, openings, phases, report
 from .config import Config
 
 CP_CAP = 1000          # Lichess caps evals at +-10 pawns for win chances
@@ -264,6 +264,8 @@ def ensure_classified(conn: sqlite3.Connection, cfg: Config, force: bool = False
     fingerprint = settings_fingerprint(cfg, adaptive)
     rebuild_all = force or db.get_meta(conn, SETTINGS_KEY) != fingerprint
     if rebuild_all:
+        if conn.execute("SELECT 1 FROM mistakes LIMIT 1").fetchone():
+            backup.make(conn, "before-reclassify")    # every judgement is about to be rewritten
         sql = "SELECT id FROM games WHERE analysed_at IS NOT NULL"
     else:
         sql = """SELECT id FROM games g WHERE analysed_at IS NOT NULL

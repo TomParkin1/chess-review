@@ -9,15 +9,25 @@ Tables:
   imports    one row per upload / chess.com sync ("batch"); games.batch_id points here
   cards      spaced-repetition state per position to learn (srs.py): mistakes, calm positions
              I failed in real-game mode, opening lines
-  meta       key/value store (e.g. hash of the classification settings)
+  meta       key/value store (e.g. hash of the classification settings, my username)
 
 SCHEMA is the original (version 0) layout; MIGRATIONS upgrade any database to the
-current version, tracked with PRAGMA user_version.
+current version, tracked with PRAGMA user_version. An existing database is backed up
+(backup.py) before migrations run, and before Delete all games.
 """
 
 import hashlib
 import sqlite3
+import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from . import backup
+
+if TYPE_CHECKING:
+    from .config import Config
+
+USERNAME_KEY = "player_username"   # chess.com username set in the app (overrides config.toml)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
@@ -235,12 +245,19 @@ def _migrate_7(conn: sqlite3.Connection) -> None:
 MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5, _migrate_6, _migrate_7]   # index i upgrades user_version i -> i + 1
 
 
+_schema_lock = threading.Lock()     # requests opening a new database at once must not both set it up
+
+
 def migrate(conn: sqlite3.Connection) -> None:
-    version = conn.execute("PRAGMA user_version").fetchone()[0]
-    for i, step in enumerate(MIGRATIONS[version:], start=version):
-        with conn:
-            step(conn)
-            conn.execute(f"PRAGMA user_version = {i + 1}")
+    with _schema_lock:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version < len(MIGRATIONS) and (
+                version > 0 or conn.execute("SELECT 1 FROM games LIMIT 1").fetchone()):
+            backup.make(conn, "before-migration")    # an existing database is about to change
+        for i, step in enumerate(MIGRATIONS[version:], start=version):
+            with conn:
+                step(conn)
+                conn.execute(f"PRAGMA user_version = {i + 1}")
 
 
 def connect(db_path: Path | str) -> sqlite3.Connection:
@@ -249,8 +266,9 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.executescript(SCHEMA)
+    with _schema_lock:      # switching a new file to WAL fails at once ("locked") if two try together
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.executescript(SCHEMA)
     migrate(conn)
     return conn
 
@@ -285,10 +303,25 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
+def restore(conn: sqlite3.Connection, source: Path) -> Path | None:
+    """Replace the database with a backup (after backing up the current data), upgraded to the
+    current schema. Raises ValueError for a file that isn't an intact Chess Review database."""
+    before = backup.restore(conn, source, len(MIGRATIONS))
+    migrate(conn)
+    return before
+
+
+def username(conn: sqlite3.Connection, cfg: "Config") -> str:
+    """My chess.com username: set in the app (Settings / first run), else from config.toml."""
+    return get_meta(conn, USERNAME_KEY) or cfg.player.username
+
+
 def delete_all_games(conn: sqlite3.Connection) -> int:
-    """Delete every game with its analysis and classification. Returns games deleted."""
+    """Delete every game with its analysis and classification (after a backup). Returns games deleted."""
+    n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+    if n:
+        backup.make(conn, "before-delete")
     with conn:
-        n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
         conn.execute("DELETE FROM cards")
         conn.execute("DELETE FROM review_results")
         conn.execute("DELETE FROM self_reviews")
