@@ -2,6 +2,7 @@
 import io
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -199,6 +200,7 @@ def test_game_accuracy_perfect_and_blunder():
 
 
 def test_later_sync_with_new_games_opens_a_session(conn, cfg):
+    cfg = replace(cfg, coach=replace(cfg.coach, history_days=3650))   # the test games count as recent
     first_two = {"games": MONTH["games"][:2]}
     chesscom.sync(conn, cfg, fetch=lambda u: fake_fetch(u) if u.endswith("archives") else
                   (first_two if u.endswith("/2026/10") else {"games": []}))

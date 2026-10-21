@@ -1,7 +1,7 @@
 // Openings: explore my repertoire (built from my games) and drill my lines, Chessly style.
 import { Chess } from 'chess.js';
 import { choosePromotion, createBadge, isPromotion, makeBoard, moveSound, sound } from './board.js';
-import { api, arrow, el, guard, lastMove, legalDests, sideToMove } from './common.js';
+import { api, arrow, busy, el, guard, lastMove, legalDests, sideToMove } from './common.js';
 import { markIcon } from './icons.js';
 
 const $ = id => document.getElementById(id);
@@ -162,25 +162,35 @@ async function fetchOverview() {
 
 // ------------------------------------------------------------ drill
 
-let drill = null;   // { lines, line, step, chess, tally, failedStep }
+let drill = null;   // { lines, colors, line, step, chess, tally, recorded, failedStep }
 
+// mode 'learn' (random lines), 'due' (due positions of this colour) or 'today' (the lines
+// planned in Today's opening block, both colours: `colors` says which side each line is for).
 async function startDrill(mode) {
   const d = await api(`/api/openings/drill?${params()}&mode=${mode}`);
   if (!d.lines.length) {
     $('drill-done').hidden = false;
     $('drill-done').replaceChildren(el('p', { class: 'muted' },
-      mode === 'due' ? 'Nothing due right now.' : 'No lines yet: you need at least two games in a line to drill it.'));
+      mode === 'today' ? "Today's lines are done." : mode === 'due' ? 'Nothing due right now.'
+        : 'No lines yet: you need at least two games in a line to drill it.'));
     return;
   }
-  drill = { lines: d.lines, line: 0, step: 0, chess: null, tally: { solved: 0, failed: 0 }, failedStep: false };
+  drill = { lines: d.lines, colors: d.colors || null, line: 0, step: 0, chess: null,
+            tally: { solved: 0, failed: 0 }, recorded: new Set(), failedStep: false };
   $('drill-start').hidden = true;
   $('drill-done').hidden = true;
   $('drill-run').hidden = false;
   startLine();
 }
 
+function setColor(side) {
+  color = side;
+  document.querySelectorAll('[data-color]').forEach(x => x.classList.toggle('active', x.dataset.color === side));
+}
+
 function startLine() {
   const dr = drill;
+  if (dr.colors) setColor(dr.colors[dr.line]);
   dr.step = 0;
   dr.failedStep = false;
   dr.chess = new Chess();
@@ -249,7 +259,7 @@ async function drillMove(orig, dest) {
     sound.correct();
     board.setAutoShapes([]);   // clear the hint arrow from a wrong try
     badge.show(dest, 'best');
-    if (!dr.failedStep) { dr.tally.solved += 1; record(step.key, 'solved'); }
+    if (!dr.failedStep) score(step, 'solved');
     fb.className = 'feedback ok';
     fb.replaceChildren(el('strong', {}, '✓ Correct. '), step.fix ? 'This is the engine\'s improvement on your usual move.' : '');
     playStep(step);
@@ -260,7 +270,7 @@ async function drillMove(orig, dest) {
   } else {
     sound.wrong();
     badge.show(dest, 'mistake');
-    if (!dr.failedStep) { dr.failedStep = true; dr.tally.failed += 1; record(step.key, 'failed'); }
+    if (!dr.failedStep) { dr.failedStep = true; score(step, 'failed'); }
     fb.className = 'feedback bad';
     fb.replaceChildren(el('strong', {}, '✗ Not your line. '), `Your repertoire move is ${step.san}`,
       step.fix ? ' (an improvement on what you usually play)' : '', '. Play it to continue.');
@@ -298,6 +308,16 @@ function finishDrill() {
   loadOverview();
 }
 
+// Each position counts once per drill: "Learn my lines" passes the same first moves in every
+// line, and used to record (and promote) them once per line (B3).
+function score(step, result) {
+  const dr = drill;
+  if (dr.recorded.has(step.key)) return;
+  dr.recorded.add(step.key);
+  dr.tally[result] += 1;
+  record(step.key, result);
+}
+
 function record(key, result) {
   api('/api/openings/result', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ key, result }) }).catch(() => {});
@@ -325,8 +345,11 @@ document.querySelectorAll('[data-color]').forEach(b => b.addEventListener('click
 $('family').addEventListener('change', () => { family = $('family').value; path = []; loadOverview(); showTab(tab); });
 $('back-btn').addEventListener('click', () => { if (tab === 'explore' && path.length) { path.pop(); loadNode(); } });
 $('reset-btn').addEventListener('click', () => { if (tab === 'explore') { path = []; loadNode(); } });
-$('learn-btn').addEventListener('click', () => guard(document.querySelector('main'), () => startDrill('learn'), 'your lines'));
-$('due-btn').addEventListener('click', () => guard(document.querySelector('main'), () => startDrill('due'), 'your lines'));
+// Busy: a double click used to start two drills at once (B12).
+const begin = busy(mode => guard(document.querySelector('main'), () => startDrill(mode), 'your lines'));
+$('learn-btn').addEventListener('click', () => begin('learn'));
+$('due-btn').addEventListener('click', () => begin('due'));
+$('today-btn').addEventListener('click', () => begin('today'));
 $('drill-stop').addEventListener('click', () => finishDrill());
 document.addEventListener('keydown', e => {
   if (e.target.matches('input, select, textarea') || tab !== 'explore') return;
@@ -334,6 +357,8 @@ document.addEventListener('keydown', e => {
 });
 
 const FROM_TODAY = new URLSearchParams(location.search).get('from') === 'today';
+$('today-btn').hidden = !FROM_TODAY;
+$('learn-btn').classList.toggle('primary', !FROM_TODAY);
 loadOverview();
 if (location.hash === '#drill') showTab('drill');   // from Today's "Opening lines" block
 else loadNode();

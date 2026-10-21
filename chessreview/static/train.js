@@ -1,6 +1,6 @@
 // Today: the daily workout (chessreview/coach.py). A checklist of blocks; each block runs its
 // puzzles in the shared puzzle component. Puzzles failed in a block come back once at its end.
-import { api, el, guard } from './common.js';
+import { api, busy, el, guard } from './common.js';
 import { createPuzzle } from './puzzle.js';
 import { showTodayBadge } from './shell.js';
 import { progressRing } from './widgets.js';
@@ -66,6 +66,19 @@ async function refreshPlan() {
   $('refresh-btn').disabled = false;
 }
 
+// The time budget: the plan is rebuilt for it (what's done today is kept and counts).
+const setBudget = busy(minutes => guard($('plan-view'), async () => render(await api('/api/today/budget', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ minutes }),
+})), 'your plan'));
+
+function renderBudget(data) {
+  $('budget-row').hidden = !data.plan.total && !data.plan.blocks.length;
+  $('budget').replaceChildren(...data.budgets.map(m => el('button', {
+    class: m === data.plan.budget ? 'active' : '', title: `Plan about ${m} minutes of training a day`,
+    onclick: () => { if (m !== plan.budget) setBudget(m); },
+  }, `${m} min`)));
+}
+
 // While the first games are being analysed there is no plan yet: look again every few seconds.
 let waitTimer = null;
 function waitForGames(games) {
@@ -86,7 +99,7 @@ function render(data) {
                                          plan.complete ? 'done' : 'to do'));
   $('streak').replaceChildren(el('div', { class: 'flame' }, '🔥'), el('div', { class: 'streak-n' }, data.streak),
                               el('div', { class: 'muted small' }, 'day streak'));
-  const minutes = Math.max(5, Math.round(left * 1.2));
+  const minutes = Math.max(1, plan.minutes_left);
   const { total: games, analysed } = data.games;
   const firstRun = !games || !analysed;
   $('train-sub').textContent =
@@ -112,6 +125,7 @@ function render(data) {
     el('span', { class: 'muted small' }, " (what you've done today is kept)"));
   $('plan-card').hidden = firstRun && !plan.blocks.length;
   $('blocks').replaceChildren(...plan.blocks.map(renderBlock));
+  renderBudget(data);
   waitForGames(data.games);
 }
 
@@ -122,7 +136,8 @@ function renderBlock(b) {
     ? el('a', { class: `btn ${b.done ? '' : 'primary'}`, href: elsewhere[0] }, b.done ? elsewhere[2] : elsewhere[1])
     : b.done ? el('span', { class: 'chip solved' }, 'Done')
       : el('button', { class: 'btn', onclick: () => startBlock(b) }, b.finished ? 'Continue' : 'Start');
-  const count = b.id === 'opening' ? `${b.lines_due} due` : b.id === 'convert' ? (b.done ? '1 / 1' : '0 / 1')
+  const count = b.id === 'opening' ? (b.done ? 'done' : `${b.lines_left ?? b.lines_due} to drill`)
+    : b.id === 'convert' ? (b.done ? '1 / 1' : '0 / 1')
     : `${b.finished} / ${b.count}`;
   return el('li', { class: `block-row ${b.done ? 'done' : ''}` },
     el('span', { class: 'block-icon' }, status),
@@ -144,7 +159,8 @@ function goTo(b) {
 
 // ------------------------------------------------------------ playing a block
 
-async function startBlock(b) {
+// Busy: a double click on Start/Continue/Next used to fetch and start the block twice (B12).
+const startBlock = busy(async b => {
   let data;
   try {
     data = await api(`/api/today/${b.id}${b.id === 'reviews' ? blindParam() : ''}`);
@@ -164,7 +180,7 @@ async function startBlock(b) {
   $('block-done').hidden = true;
   $('review').hidden = false;
   showCurrent();
-}
+});
 
 function updateBar() {
   const total = queue.length;

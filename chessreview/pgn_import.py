@@ -18,7 +18,7 @@ from pathlib import Path
 import chess
 import chess.pgn
 
-from . import db, openings
+from . import db, openings, session
 from .config import Config
 
 # Words that end the "family" part of an opening name,
@@ -239,7 +239,7 @@ def import_paths(conn: sqlite3.Connection, paths: list[Path], cfg: Config) -> Im
                 text = f.read_text(encoding="utf-8", errors="replace")
                 total.merge(import_pgn_text(conn, text, cfg, source=f.name, batch_id=batch_id))
     finally:
-        db.finish_batch(conn, batch_id)     # an empty batch is dropped, even after an error
+        session.finish_import(conn, cfg, batch_id)     # an empty batch is dropped, even after an error
     return total
 
 

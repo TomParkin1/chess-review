@@ -11,6 +11,7 @@
     python -m chessreview reset [--yes]
     python -m chessreview backup [--list]
     python -m chessreview restore NAME_OR_FILE
+    python -m chessreview simulate [--days 90] [--budget 10|20|30] [--skip 0.15] [--seed 1]
 """
 
 import argparse
@@ -265,6 +266,14 @@ def cmd_puzzles(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"\nKept {library.count(conn):,} puzzles. Your puzzle rating: {library.rating(conn)}.")
 
 
+def cmd_simulate(conn: sqlite3.Connection, cfg, args) -> None:
+    from . import simulate
+    print(f"Simulating {args.days} days of Today at {args.budget} minutes on a copy of the database "
+          "(your data is not changed)...")
+    result = simulate.simulate_copy(conn, cfg, days=args.days, budget=args.budget, skip=args.skip, seed=args.seed)
+    print(simulate.table(result))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="chessreview", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -314,6 +323,13 @@ def main() -> None:
     p.add_argument("source", help="a file name from 'backup --list', or the path of an exported copy")
     p.add_argument("--yes", action="store_true", help="don't ask for confirmation")
     p.set_defaults(func=cmd_restore)
+
+    p = sub.add_parser("simulate", help="simulate daily training on a copy of the database (load check)")
+    p.add_argument("--days", type=int, default=90)
+    p.add_argument("--budget", type=int, default=20, choices=[10, 20, 30], help="minutes a day")
+    p.add_argument("--skip", type=float, default=0.15, help="share of days without training")
+    p.add_argument("--seed", type=int, default=1)
+    p.set_defaults(func=cmd_simulate)
 
     args = parser.parse_args()
     cfg = load_config(args.config) if args.config else load_config()

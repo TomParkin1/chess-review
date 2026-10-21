@@ -19,7 +19,7 @@ from datetime import date
 
 import chess.pgn
 
-from . import db
+from . import db, session
 from .config import Config
 from .pgn_import import ImportStats, import_game
 
@@ -115,7 +115,7 @@ def sync(conn: sqlite3.Connection, cfg: Config, since: str | None = None,
                 db.set_meta(conn, LAST_MONTH_KEY, month)
     finally:
         conn.commit()     # the months imported before a failure are kept; an empty batch is dropped
-        result.games_added = db.finish_batch(conn, result.batch_id)
+        result.games_added = session.finish_import(conn, cfg, result.batch_id)
     if not result.games_added:
         result.batch_id = None
     elif last_month is None:

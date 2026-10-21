@@ -96,11 +96,13 @@ def endgame_overview(conn: sqlite3.Connection) -> list[dict]:
 
 
 def _status(card: sqlite3.Row | None) -> str:
+    """new / solved / failed / mastered. A retry solved the same day counts as solved (it unlocks
+    the next level), although only the day's first attempt moves the card (srs.next_state)."""
     if card is None:
         return "new"
     if card["mastered_on"]:
         return "mastered"
-    return "solved" if card["box"] >= 1 else "failed"
+    return "solved" if card["box"] >= 1 or card["last_result"] in srs.SOLVED else "failed"
 
 
 # ------------------------------------------------------------ won positions from my games

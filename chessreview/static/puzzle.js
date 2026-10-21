@@ -78,6 +78,8 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     puzzle = {
       item: m, fen: m.fen, last: lastMove(m.prev_move_uci), step: 0,
       attempts: 0, hints: 0, hintLevel: 0, phase: blind && m.threat ? 'threat' : 'solving', recorded: false,
+      leaving: false,   // Next was pressed: ignore further Next/Skip until the host shows the next one
+      shownAt: Date.now(),
       onLine: true,     // all moves so far followed the engine's best line
       blind, lib, threatResult: null, threatShapes: [],
     };
@@ -430,6 +432,16 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     }, delay);
   }
 
+  // Next, Skip and Enter move on once per puzzle: the second click of a double click (or a held
+  // Enter) used to skip the following puzzle unseen and unrecorded (B12).
+  const SETTLE_MS = 400;
+  const tooSoon = e => !puzzle || puzzle.leaving || e?.detail > 1 || e?.repeat || Date.now() - puzzle.shownAt < SETTLE_MS;
+  function advance(e) {
+    if (tooSoon(e)) return;
+    puzzle.leaving = true;
+    onNext();
+  }
+
   function record(p, result) {
     if (p.recorded) return;
     p.recorded = true;
@@ -526,13 +538,13 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     $('feedback').hidden = true;
     startSolving(puzzle, 0);
   });
-  $('skip-btn').addEventListener('click', () => {
-    if (!puzzle || puzzle.phase === 'done') return;
+  $('skip-btn').addEventListener('click', e => {
+    if (tooSoon(e) || puzzle.phase === 'done') return;
     record(puzzle, 'skipped');
-    onNext();
+    advance(e);
   });
-  $('next-btn').addEventListener('click', () => onNext());
-  $('prev-btn').addEventListener('click', () => onPrev?.());
+  $('next-btn').addEventListener('click', advance);
+  $('prev-btn').addEventListener('click', e => { if (!tooSoon(e)) onPrev?.(); });
   $('retry-btn').addEventListener('click', () => show(puzzle.item));
   $('sol-prev').addEventListener('click', () => showSolutionStep(solIndex - 1));
   $('sol-next').addEventListener('click', () => showSolutionStep(solIndex + 1));
@@ -545,16 +557,16 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
       if (e.key === 'ArrowLeft') { e.preventDefault(); analysis.back(); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); analysis.forward(); }
       else if (e.key === 'Escape' || e.key === 'a') { stopAnalysis(); showSolutionStep(solIndex); }
-      else if (e.key === 'Enter') { e.preventDefault(); onNext(); }
+      else if (e.key === 'Enter') { e.preventDefault(); advance(e); }
       return;
     }
     if (e.key === 'a' && done) startAnalysis();
-    else if (e.key === 'Enter' && done) { e.preventDefault(); onNext(); }
+    else if (e.key === 'Enter' && done) { e.preventDefault(); advance(e); }
     else if (e.key === 'ArrowLeft' && done) { e.preventDefault(); showSolutionStep(solIndex - 1); }
     else if (e.key === 'ArrowRight' && done) { e.preventDefault(); showSolutionStep(solIndex + 1); }
     else if (e.key === 'n' && puzzle.phase === 'threat') checkThreat(puzzle, null);
     else if (e.key === 'h') giveHint();
-    else if (e.key === 's') $('skip-btn').click();
+    else if (e.key === 's' && !e.repeat) $('skip-btn').click();
   });
 
   return {

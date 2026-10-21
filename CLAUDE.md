@@ -10,7 +10,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - Stockfish: `/opt/homebrew/bin/stockfish` (configurable in `config.toml`).
 - CLI: `.venv/bin/python -m chessreview sync [--since all|3m|1m]`, `import <files|dirs>`, `summary`,
   `analyse [--limit N]`, `reclassify`, `mistakes [--limit N]`, `serve [--port 8000]`, `puzzles`, `reset [--yes]`,
-  `backup [--list]`, `restore NAME|FILE [--yes]` (opens the DB without migrating first: the way back from a broken DB).
+  `backup [--list]`, `restore NAME|FILE [--yes]` (opens the DB without migrating first: the way back from a broken DB),
+  `simulate [--days 90] [--budget 10|20|30] [--skip 0.15]` (Today's daily load, on a temp copy of the DB).
   Port 5000 is taken by macOS AirPlay Receiver, hence 8000.
 - Tests: `.venv/bin/pytest`.
 
@@ -20,7 +21,7 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - `chessreview/config.py`: loads config into dataclasses.
 - `chessreview/db.py`: SQLite schema + numbered `MIGRATIONS` (PRAGMA user_version; add a function, never edit
   old ones). Tables: `games`, `positions`, `mistakes` (every move, both sides; `is_mine`, `mark`, `accuracy`),
-  `review_results`, `imports` (batches), `meta`. DB lives in `data/` (gitignored). `db.username(conn, cfg)` = meta
+  `review_results`, `imports` (batches), `cards`, `training_log` (line/Convert/endgame attempts), `meta`. DB lives in `data/` (gitignored). `db.username(conn, cfg)` = meta
   `player_username` (set from Home/Settings, survives Delete all) else config. `_schema_lock` serialises WAL switch,
   schema and migrations when requests open a new DB at once. `db.restore()` = `backup.restore()` + `migrate()`.
 - `chessreview/backup.py` (Finish M1): copies with SQLite's backup API (never a file copy: WAL), switched to a
@@ -32,10 +33,18 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   (header, quick_check, games+meta, user_version) and backs up the current data first.
 - `chessreview/chesscom.py`: sync via the public API (archives -> months >= last synced month), one batch per sync.
   Dedupe across sources = `link` OR `content_hash` (players|date|moves). API games carry clocks (`games.clocks_ms`).
-- `chessreview/srs.py`: Leitner spaced repetition over `cards` (one per my mistake/blunder); every attempt
-  (`/api/review/result`) updates the card. Daily queue = due + `training.new_per_day` new (not from open sessions).
-- `chessreview/session.py`: "new games" session = open import batches (session_done_at NULL). The first chess.com
-  sync is a history import (marked done). Summary: results, accuracy, mistake kinds, clock left at blunders.
+- `chessreview/srs.py`: Leitner spaced repetition over `cards` (one per my mistake/blunder). Every attempt goes
+  through `_apply`/`next_state` (Finish M2, B3): only the first attempt of a training day moves a card (Retry, "Again",
+  repeated drill lines don't), and before a card is due only a failure counts. `due_cards()` = most overdue relative
+  to the box interval first (library cards included); `new_cards()` (not from open sessions).
+  Training day = 04:00 to 04:00 (B13): `srs.today()` and, in SQL, `srs.day_sql("at")`; never `date.today()` or
+  `date(at, 'localtime')` for training days. Streak = `training_days()` over review_results, puzzle_attempts,
+  self_reviews and training_log (B9; Progress weeks too).
+- `chessreview/session.py`: "new games" session = open import batches (session_done_at NULL). Every import ends in
+  `session.finish_import` (B5): the first import, or one whose games mostly ended > `coach.history_days` ago, is
+  history (marked done, label "(history)"); the first chess.com sync is always history. `session.expire` closes
+  sessions after `coach.session_days`. Only a session's mistakes wait for it (calm positions don't).
+  Summary: results, accuracy, mistake kinds, clock left at blunders.
 - `chessreview/insights.py`: per-game trends, phase accuracy, mistake kinds, clock buckets, openings, colours and
   heuristic `weaknesses()` (each with a Practice filter). `static/charts.js`: SVG line/bar charts with hover
   (dataviz rules: one axis, 2px lines, rounded bar ends, validated colours `--series-you/--series-opp`).
@@ -82,14 +91,16 @@ and lets me review them across all games. chess.com username: `sampleplayer`
     first (`/api/threat/check`); Today's real-game block mixes in `srs.calm_positions()` (`coach.calm_ratio`; good moves,
     half with a real threat). Failed calm positions become `cards.kind='position'`. `review_results.mode/threat_result` record it.
 - v3 Today + Progress (Milestone 2):
-  - `coach.py`: `today_plan()` builds the day's blocks (reviews capped at `coach.due_cap`, real-game = new cards + calm
-    positions, focus = my #1 weakness from `insights.weaknesses(last=100)`, opening lines) and freezes it in meta
-    `today_plan`; an item is done once it has a review result today (`attempted_today`), lines via `cards.last_on`.
+  - `coach.py`: `today_plan()` builds the day's blocks (reviews, real-game = new cards + calm positions, focus = my
+    #1 weakness from `insights.weaknesses(last=100)`, convert, opening lines) and freezes it in meta `today_plan`; an
+    item is done once it has a review result today (`attempted_today`); the opening block once its planned `keys`
+    were drilled today or aren't due (`pending_lines`), served by `/api/openings/drill?mode=today` (both colours).
     API `/api/today`, `/api/today/<block>`; the Train page (`/train`, sidebar "Today") is the block checklist + runner.
     Same-day rebuilds (Finish M1, B6): plan `basis` = analysed-game count; rebuilt on `refresh` (POST
-    `/api/today/refresh`), when an item can't be served (`_servable`: Delete all, restore, missing puzzle) or when the
-    basis changed and nothing was tried yet; otherwise `stale`/`new_games` -> "Refresh plan" prompt. `_rebuild` keeps
-    today's tried items (they count towards each block's usual size) and done opening/convert blocks.
+    `/api/today/refresh`, or a new budget), when the plan has no `budget` yet, when an item can't be served
+    (`_servable`: Delete all, restore, missing puzzle) or when the basis changed and nothing was tried yet; otherwise
+    `stale`/`new_games` -> "Refresh plan" prompt. `_rebuild` keeps today's tried items (their time counts against the
+    budget) and done opening/convert blocks.
   - `progress.py`: last N games vs the N before (`coach.progress_window`, game windows not weeks), metrics at my current
     level (`level.winning_chance` bands for conversion), rolling series, kinds per game, weekly training. `/progress`,
     `/api/progress/report`, summary sentence on Home. (Route fn for `/api/progress` is `analysis_progress`.)
@@ -124,6 +135,15 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   - `analysis.start(fen, {history})`: moves that led to the position (greyed, ◀ steps back through them).
   - Convert after a failure: biggest win-chance drop of my moves + Stockfish's move there, "Try again from there"
     (counts as solved_with_help at best), "Watch Stockfish play it" (hint + play/move loop, nothing recorded).
+- Today's time budget (Finish M2, F4; `build_plan`): 10/20/30 min (meta `today_budget`, POST `/api/today/budget`,
+  default `coach.budget_minutes`). Opening lines (15 s each, <= 15% of the budget) and Convert (3 min, budgets >= 20,
+  not while reviews wait) first; the rest = puzzle slots at `coach.pace()` (my time per attempt x attempts per puzzle,
+  last 200). Reviews <= `review_share` of the slots, all of them when more is due than fits; new cards only while due
+  < `new_share` of the slots (focus mistakes never studied count too); rest half real-game, half focus; what focus
+  can't fill goes to waiting reviews, then calm positions. A rebuild counts tried items' time as spent.
+  `chessreview/simulate.py` runs the real planner day by day on a copy (`simulate` CLI; test in
+  `tests/test_training_integrity.py`). Double clicks (B12): puzzle.js `advance()` (once per puzzle, 400 ms settle) and
+  `common.js` `busy()` for start buttons.
 - Design rule: nothing is tuned to one rating. Derive from the engine, the current rating's band, or my rolling data.
 - Chessground `events.after` passes (orig, dest, metadata): always wrap handlers as `(o, d) => fn(o, d)`.
 - `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump
@@ -181,7 +201,7 @@ Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--conf
 
 ## Finish roadmap (audit of 19 Oct 2026: bugs B1–B18, features F1–F17; one milestone at a time)
 1. [x] M1 Safe & solid: backups (F2), B1 B2 B4 B6 B7 B8 B11 B18, first run (F6). Regression test per bug.
-2. [ ] M2 Training integrity: one promotion per card per day (B3), load budget (F4), streak (B9), 04:00 day (B13),
+2. [x] M2 Training integrity: one promotion per card per day (B3), load budget (F4), streak (B9), 04:00 day (B13),
    double-click guards (B12), sessions never block Today (B5)
 3. [ ] M3 Correct lessons: explanation rules P1–P10, P13; lines through the gain; deeper re-check of card positions
 4. [ ] M4 Endgames that teach: finish rules (P11), Vancura tip (P12), Convert lesson board (B14)

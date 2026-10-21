@@ -111,6 +111,16 @@ export function legalDests(chess) {
   return dests;
 }
 
+// Wrap an async click handler so clicks while it runs are ignored (double clicks, B12).
+export function busy(fn) {
+  let running = false;
+  return async (...args) => {
+    if (running) return undefined;
+    running = true;
+    try { return await fn(...args); } finally { running = false; }
+  };
+}
+
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {

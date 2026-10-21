@@ -9,13 +9,15 @@ from chessreview import coach, db, progress, srs
 from chessreview.config import load_config
 from chessreview.progress import GameStats, window_metrics
 
-DAY = date.today()   # review results are stamped with the real date
+DAY = srs.today()    # review results are stamped with the real time (training day from 04:00)
 
 
 @pytest.fixture
 def cfg():
+    """10 minutes at the default 60 s a puzzle: 10 puzzle slots, no Convert."""
     base = load_config()
-    return replace(base, coach=replace(base.coach, real_game=4, calm_ratio=0.5, focus=3, due_cap=1))
+    return replace(base, coach=replace(base.coach, calm_ratio=0.5, budget_minutes=10, seconds_per_puzzle=60),
+                   training=replace(base.training, new_per_day=10))
 
 
 @pytest.fixture
@@ -59,11 +61,14 @@ def test_plan_blocks_and_progress(conn, cfg, monkeypatch):
     monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [weakness]})
     plan = coach.today_plan(conn, cfg, DAY)
     blocks = {b["id"]: b for b in plan["blocks"]}
-    assert [g_p[:2] for g_p in blocks["reviews"]["items"]] == [[1, 2]]           # due card, capped at 1
+    assert [g_p[:2] for g_p in blocks["reviews"]["items"]] == [[1, 2]]           # the one due card
+    # 9 fresh slots: 5 real-game (3 new + 2 calm) and 4 focus, of which only one can be filled;
+    # nothing else is due, so the 3 spare go to calm positions (all 4 there are).
     real_tags = [tag for *_, tag in blocks["real"]["items"]]
-    assert real_tags.count("new") == 2 and real_tags.count("calm") == 2
+    assert real_tags.count("new") == 3 and real_tags.count("calm") == 4
     focus = blocks["focus"]["items"]
-    assert blocks["focus"]["title"] == "Focus: Hanging pieces" and 0 < len(focus) <= 3
+    assert blocks["focus"]["title"] == "Focus: Hanging pieces" and focus == [[1, 10, "focus"]]   # the last blunder
+    assert plan["budget"] == 10 and plan["pace"] == 60 and plan["minutes_left"] == 9
     used = [tuple(i[:2]) for b in plan["blocks"] for i in b["items"]]
     assert len(used) == len(set(used))                                         # no position twice
     assert plan["finished"] == 0 and not plan["complete"]
@@ -141,6 +146,7 @@ def test_new_games_mark_a_started_plan_stale_and_refresh_keeps_progress(conn, cf
 
 def test_refreshing_a_finished_day_adds_no_second_workout(conn, cfg, monkeypatch):
     monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [WEAKNESS]})
+    monkeypatch.setattr(coach, "_due_line_keys", lambda c, on: [k for k in ["white:x"] if srs.due_lines(c, "white", on)])
     conn.execute("INSERT INTO cards (kind, key, box, due_on) VALUES ('line', 'white:x', 1, ?)", (DAY.isoformat(),))
     conn.commit()
     plan = coach.today_plan(conn, cfg, DAY)
@@ -168,6 +174,18 @@ def test_a_plan_from_before_the_basis_existed_can_go_stale(conn, cfg, monkeypatc
                     VALUES (2, 'k2', 'white', 'win', 'e2e4', 1, '', '2026-10-19')""")
     conn.commit()
     assert coach.today_plan(conn, cfg, DAY)["stale"]
+
+
+def test_a_plan_from_before_the_budget_is_resized_keeping_progress(conn, cfg, monkeypatch):
+    """M2: a plan stored by the previous version (fixed sizes, no budget) is rebuilt once."""
+    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [WEAKNESS]})
+    plan = coach.build_plan(conn, cfg, DAY)
+    del plan["budget"]
+    conn.execute("INSERT INTO review_results (game_id, ply, result) VALUES (1, 2, 'solved')")
+    db.set_meta(conn, coach.PLAN_KEY, json.dumps({**plan, "basis": coach.analysed_games(conn)}))
+    conn.commit()
+    resized = coach.today_plan(conn, cfg, DAY)
+    assert resized["budget"] == 10 and resized["finished"] == 1
 
 
 def test_untouched_plan_follows_new_games(conn, cfg, monkeypatch):

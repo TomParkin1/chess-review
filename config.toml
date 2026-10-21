@@ -52,9 +52,13 @@ blind = true              # Train shows positions as in a real game: no "you blu
 [coach]
 calm_ratio = 0.3          # share of real-game positions where you played well (so there isn't always a trick)
 recent_games = 100        # those calm positions come from your last N games
-due_cap = 15              # Today: at most this many due reviews per day (the rest roll over)
-real_game = 6             # Today: real-game positions (new mistakes + positions you played well)
-focus = 5                 # Today: puzzles on your #1 weakness (from Insights)
+budget_minutes = 20       # Today: default time budget, 10, 20 or 30 (the Today page can change it)
+seconds_per_puzzle = 60   # Today: time per puzzle until your own pace is known (after 30 puzzles)
+review_share = 0.8        # Today: due reviews take at most this share of the puzzles (all of them
+                          # when more is due than fits in a day, so a backlog clears)
+new_share = 0.7           # Today: new cards only while due reviews fill less than this share
+session_days = 3          # an unfinished new-games session joins daily training after this many days
+history_days = 14         # an import whose games are mostly older than this is history, not a session
 progress_window = 25      # Progress: your last N games compared with the N before
 self_review_games = 5     # New-games session: games where you find the turning point yourself first
 

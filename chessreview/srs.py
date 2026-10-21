@@ -8,7 +8,13 @@ After passing the longest interval the card is mastered and retired.
     box after a clean solve:  1    2    3     4     5     6 -> mastered
     next review in (days):    1    3    7    14    30    60
 
-The daily queue is every due card plus a few new ones (config training.new_per_day).
+Only the first attempt of a training day moves a card (Retry, Today's "Again" and repeated
+drill lines are practice), and before a card is due only a failure counts: solving it early
+doesn't skip ahead. So no card can be mastered in fewer than sum(INTERVALS) days.
+The training day starts at DAY_START_HOUR (04:00, as in Anki): a late workout stays "today".
+
+The daily queue is every due card plus a few new ones (coach.py sizes both from the time
+budget). Due cards come most overdue first, relative to their interval (`_review_order`).
 Mistakes from a "new games" session that hasn't been done yet are left to that session.
 New cards come best-lesson first (`PUZZLE_VALUE`), and "decided" positions are left out.
 
@@ -21,7 +27,7 @@ into the real-game block, so a puzzle never gives away that there is a trick.
 
 import random
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import chess
 
@@ -40,18 +46,26 @@ PUZZLE_VALUE = """(m.win_drop * (CASE WHEN m.kind IN ('positional', 'missed_oppo
                    + 0.5 * MIN(COALESCE(m.sharpness, 0), 0.5))"""
 
 
-def today() -> date:
-    return date.today()
+DAY_START_HOUR = 4     # the training day runs from 04:00 to 04:00
+
+
+def today(now: datetime | None = None) -> date:
+    """The training day: before 04:00 it is still the day before."""
+    return ((now or datetime.now()) - timedelta(hours=DAY_START_HOUR)).date()
+
+
+def day_sql(column: str) -> str:
+    """SQL for the training day of a timestamp column (stored in UTC by CURRENT_TIMESTAMP)."""
+    return f"date({column}, 'localtime', '-{DAY_START_HOUR} hours')"
 
 
 def ensure_cards(conn: sqlite3.Connection, cfg: Config) -> int:
     """Create a card for every one of my mistakes that doesn't have one. Returns new cards."""
-    judgements = ("'mistake', 'blunder'" + (", 'inaccuracy'" if cfg.training.include_inaccuracies else ""))
     with conn:
         cur = conn.execute(f"""
             INSERT OR IGNORE INTO cards (kind, game_id, ply)
             SELECT 'mistake', m.game_id, m.ply FROM mistakes m
-            WHERE m.is_mine = 1 AND m.judgement IN ({judgements})
+            WHERE m.is_mine = 1 AND m.judgement IN ({_judgements(cfg)})
         """)
     return cur.rowcount
 
@@ -68,6 +82,32 @@ def schedule(box: int, result: str, on: date) -> tuple[int, str | None, str | No
     return 0, (on + timedelta(days=1)).isoformat(), None      # failed / skipped
 
 
+def next_state(card: sqlite3.Row, result: str, on: date) -> tuple[int, str | None, str | None] | None:
+    """The card's next (box, due_on, mastered_on) after an attempt, or None when the attempt
+    doesn't change its schedule: it was already practised today (the first attempt of the day
+    decides), or it isn't due yet and wasn't failed (early practice never promotes)."""
+    day = on.isoformat()
+    if card["last_on"] == day:
+        return None
+    not_due = card["mastered_on"] is not None or (card["due_on"] is not None and card["due_on"] > day)
+    if not_due and result != "failed":
+        return None
+    return schedule(card["box"], result, on)
+
+
+def _apply(conn: sqlite3.Connection, card: sqlite3.Row, result: str, on: date) -> None:
+    """Store an attempt on a card: its schedule (see next_state) and the bookkeeping."""
+    day = on.isoformat()
+    state = next_state(card, result, on)
+    box, due_on, mastered_on = state or (card["box"], card["due_on"], card["mastered_on"])
+    lapse = int(state is not None and result not in SOLVED)
+    with conn:
+        conn.execute(
+            """UPDATE cards SET box = ?, due_on = ?, mastered_on = ?, last_result = ?, reps = reps + 1,
+                   lapses = lapses + ?, introduced_on = COALESCE(introduced_on, ?), last_on = ? WHERE id = ?""",
+            (box, due_on, mastered_on, result, lapse, day, day, card["id"]))
+
+
 def record(conn: sqlite3.Connection, game_id: int, ply: int, result: str, on: date | None = None,
            kind: str = "mistake") -> None:
     """Update the card of a position after an attempt, creating it if needed. A calm position
@@ -80,43 +120,74 @@ def record(conn: sqlite3.Connection, game_id: int, ply: int, result: str, on: da
         with conn:
             conn.execute("INSERT INTO cards (kind, game_id, ply) VALUES (?, ?, ?)", (kind, game_id, ply))
         card = conn.execute("SELECT * FROM cards WHERE game_id = ? AND ply = ?", (game_id, ply)).fetchone()
-    box, due_on, mastered_on = schedule(card["box"], result, on)
-    with conn:
-        conn.execute(
-            """UPDATE cards SET box = ?, due_on = ?, mastered_on = ?, last_result = ?, reps = reps + 1,
-                   lapses = lapses + ?, introduced_on = COALESCE(introduced_on, ?), last_on = ? WHERE id = ?""",
-            (box, due_on, mastered_on, result, int(result not in SOLVED), on.isoformat(), on.isoformat(), card["id"]))
+    _apply(conn, card, result, on)
 
 
-def _open_session_games() -> str:
-    """SQL for games whose 'new games' session hasn't been done (their mistakes wait for it)."""
-    return """SELECT g.id FROM games g JOIN imports i ON i.id = g.batch_id WHERE i.session_done_at IS NULL"""
+# SQL for games whose "new games" session isn't done (their mistakes wait for it; session.expire
+# closes sessions after coach.session_days).
+OPEN_SESSION_GAMES = """SELECT g.id FROM games g JOIN imports i ON i.id = g.batch_id WHERE i.session_done_at IS NULL"""
 
 
-def queue(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> dict:
-    """Today's training: due cards first (oldest due), then new cards (worst mistakes first)."""
+def queue(conn: sqlite3.Connection, cfg: Config, on: date | None = None, new_limit: int | None = None) -> dict:
+    """Today's training: due cards ("due", see due_cards) and new cards ("new", best lessons
+    first): at most `new_limit`, or what is left of training.new_per_day today."""
     on = on or today()
+    if new_limit is None:
+        new_limit = cfg.training.new_per_day - introduced_on(conn, on)
+    return {"due": due_cards(conn, cfg, on), "new": new_cards(conn, cfg, new_limit)}
+
+
+def _judgements(cfg: Config) -> str:
+    return "'mistake', 'blunder'" + (", 'inaccuracy'" if cfg.training.include_inaccuracies else "")
+
+
+def due_cards(conn: sqlite3.Connection, cfg: Config, on: date) -> list[tuple]:
+    """Due cards, most overdue first: (game_id, ply) of my positions, ("lib", puzzle_id) of
+    library puzzles. Mistake cards only while the move is still a mistake under the current
+    thresholds (they can change); calm-position cards always; library cards while the puzzle
+    is still in the library."""
     ensure_cards(conn, cfg)
     day = on.isoformat()
-    judgements = ("'mistake', 'blunder'" + (", 'inaccuracy'" if cfg.training.include_inaccuracies else ""))
-    # Mistake cards only while the move is still a mistake under the current thresholds (they
-    # can change); calm-position cards always.
-    due = conn.execute(f"""
-        SELECT c.game_id, c.ply FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
+    mine = conn.execute(f"""
+        SELECT c.id, c.game_id, c.ply, c.box, c.due_on, {PUZZLE_VALUE} AS value
+        FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
         WHERE c.mastered_on IS NULL AND c.due_on IS NOT NULL AND c.due_on <= ?
-          AND ((c.kind = 'mistake' AND m.judgement IN ({judgements})) OR c.kind = 'position')
-        ORDER BY c.due_on, c.box, c.id""", (day,)).fetchall()
-    introduced_today = conn.execute(
-        "SELECT COUNT(*) FROM cards WHERE introduced_on = ?", (day,)).fetchone()[0]
-    new_slots = max(0, cfg.training.new_per_day - introduced_today)
-    new = conn.execute(f"""
+          AND ((c.kind = 'mistake' AND m.judgement IN ({_judgements(cfg)})) OR c.kind = 'position')""",
+        (day,)).fetchall()
+    library = conn.execute("""
+        SELECT id, 'lib' AS game_id, key AS ply, box, due_on, 0 AS value FROM cards
+        WHERE kind = 'library' AND mastered_on IS NULL AND due_on IS NOT NULL AND due_on <= ?
+          AND key IN (SELECT id FROM puzzles)""", (day,)).fetchall()
+    return [(r["game_id"], r["ply"]) for r in _review_order(mine + library, on)]
+
+
+def new_cards(conn: sqlite3.Connection, cfg: Config, limit: int, exclude: set | frozenset = frozenset()) -> list[tuple]:
+    """Up to `limit` mistakes never studied, best lessons first (not from an open session)."""
+    if limit <= 0:
+        return []
+    ensure_cards(conn, cfg)
+    rows = conn.execute(f"""
         SELECT c.game_id, c.ply FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
         WHERE c.kind = 'mistake' AND c.due_on IS NULL AND c.mastered_on IS NULL
-          AND m.judgement IN ({judgements}) AND m.decided = 0
-          AND c.game_id NOT IN ({_open_session_games()})
-        ORDER BY {PUZZLE_VALUE} DESC LIMIT ?""", (new_slots,)).fetchall()
-    return {"due": [(r["game_id"], r["ply"]) for r in due],
-            "new": [(r["game_id"], r["ply"]) for r in new]}
+          AND m.judgement IN ({_judgements(cfg)}) AND m.decided = 0
+          AND c.game_id NOT IN ({OPEN_SESSION_GAMES})
+        ORDER BY {PUZZLE_VALUE} DESC LIMIT ?""", (limit + len(exclude),)).fetchall()
+    return [k for k in ((r["game_id"], r["ply"]) for r in rows) if k not in exclude][:limit]
+
+
+def _review_order(rows: list[sqlite3.Row], on: date) -> list[sqlite3.Row]:
+    """Due cards by value: the most overdue relative to their interval first (a box-1 card a
+    day late before a box-5 card three days late, and nothing waits for ever), then the
+    bigger lesson, then the oldest."""
+    def key(r):
+        late = (on - date.fromisoformat(r["due_on"])).days + 1
+        return -late / INTERVALS[max(r["box"], 1) - 1], -(r["value"] or 0), r["due_on"], r["id"]
+    return sorted(rows, key=key)
+
+
+def introduced_on(conn: sqlite3.Connection, on: date) -> int:
+    """Cards studied for the first time on day `on` (all kinds)."""
+    return conn.execute("SELECT COUNT(*) FROM cards WHERE introduced_on = ?", (on.isoformat(),)).fetchone()[0]
 
 
 def stats(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> dict:
@@ -128,15 +199,17 @@ def stats(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> dict
                SUM(due_on IS NULL AND mastered_on IS NULL) AS unseen
         FROM cards WHERE kind IN ('mistake', 'position')""").fetchone()
     done_today = conn.execute(
-        "SELECT COUNT(*) FROM review_results WHERE date(at, 'localtime') = ?", (on.isoformat(),)).fetchone()[0]
+        f"SELECT COUNT(*) FROM review_results WHERE {day_sql('at')} = ?", (on.isoformat(),)).fetchone()[0]
     return {"due": len(q["due"]), "new": len(q["new"]), "done_today": done_today,
             "mastered": row["mastered"] or 0, "learning": row["learning"] or 0, "unseen": row["unseen"] or 0,
             "streak": streak(conn, on)}
 
 
-def calm_positions(conn: sqlite3.Connection, cfg: Config, count: int, seed: str) -> list[tuple[int, int]]:
+def calm_positions(conn: sqlite3.Connection, cfg: Config, count: int, seed: str,
+                   exclude: set | frozenset = frozenset()) -> list[tuple[int, int]]:
     """`count` positions from my recent games where I played a good move: half where the
-    opponent had a real threat (I defended it), half quiet. Deterministic per `seed` (the day)."""
+    opponent had a real threat (I defended it), half quiet. Deterministic per `seed` (the day).
+    Games of an open new-games session count too: only their mistakes wait for the session."""
     if count <= 0:
         return []
     th = current_thresholds(conn, cfg)
@@ -150,11 +223,12 @@ def calm_positions(conn: sqlite3.Connection, cfg: Config, count: int, seed: str)
           AND COALESCE(m.mark, '') NOT IN ('book', 'forced')
           AND m.game_id IN (SELECT id FROM games WHERE analysed_at IS NOT NULL
                             ORDER BY end_time DESC, id DESC LIMIT ?)
-          AND m.game_id NOT IN ({_open_session_games()})
           AND NOT EXISTS (SELECT 1 FROM cards c WHERE c.game_id = m.game_id AND c.ply = m.ply)
         ORDER BY m.game_id, m.ply""", (cfg.coach.recent_games,)).fetchall()
     threatened, quiet = [], []
     for r in rows:
+        if (r["game_id"], r["ply"]) in exclude:
+            continue
         # Mid-exchange positions are left out: taking back is no test.
         threat = training_threat(r, chess.WHITE if r["my_color"] == "white" else chess.BLACK, th)
         if threat is not None:
@@ -174,11 +248,21 @@ def spread(cards: list, calm: list) -> list:
     return [c for _, c in sorted(slots, key=lambda s: s[0])]
 
 
+# Everything that counts as training, with its timestamp column.
+TRAINING_SOURCES = ("review_results", "puzzle_attempts", "self_reviews", "training_log")
+
+
+def training_days(conn: sqlite3.Connection) -> set[date]:
+    """Training days with any training: positions (Today, Practice, sessions), library puzzles,
+    self-reviews, opening drills and Convert/endgames (training_log)."""
+    union = " UNION ".join(f"SELECT DISTINCT {day_sql('at')} FROM {t}" for t in TRAINING_SOURCES)
+    return {date.fromisoformat(r[0]) for r in conn.execute(union) if r[0]}
+
+
 def streak(conn: sqlite3.Connection, on: date | None = None) -> int:
-    """Consecutive days with at least one attempt, ending today (or yesterday)."""
+    """Consecutive training days with any training, ending today (or yesterday)."""
     on = on or today()
-    days = {date.fromisoformat(r[0]) for r in conn.execute(
-        "SELECT DISTINCT date(at, 'localtime') FROM review_results")}
+    days = training_days(conn)
     day = on if on in days else on - timedelta(days=1)
     count = 0
     while day in days:
@@ -195,17 +279,15 @@ def record_line(conn: sqlite3.Connection, key: str, result: str, on: date | None
 
 
 def record_key(conn: sqlite3.Connection, kind: str, key: str, result: str, on: date | None = None) -> None:
-    """Update (or create) a keyed card: 'line', 'convert' or 'endgame'."""
+    """Update (or create) a keyed card: 'line', 'convert', 'endgame' or 'library'. Lines,
+    Convert and endgames are also logged in training_log (they have no attempts table)."""
     on = on or today()
     with conn:
         conn.execute("INSERT OR IGNORE INTO cards (kind, key) VALUES (?, ?)", (kind, key))
+        if kind != "library":
+            conn.execute("INSERT INTO training_log (kind, key, result) VALUES (?, ?, ?)", (kind, key, result))
     card = conn.execute("SELECT * FROM cards WHERE kind = ? AND key = ?", (kind, key)).fetchone()
-    box, due_on, mastered_on = schedule(card["box"], result, on)
-    with conn:
-        conn.execute(
-            """UPDATE cards SET box = ?, due_on = ?, mastered_on = ?, last_result = ?, reps = reps + 1,
-                   lapses = lapses + ?, introduced_on = COALESCE(introduced_on, ?), last_on = ? WHERE id = ?""",
-            (box, due_on, mastered_on, result, int(result not in SOLVED), on.isoformat(), on.isoformat(), card["id"]))
+    _apply(conn, card, result, on)
 
 
 def due_lines(conn: sqlite3.Connection, color: str, on: date | None = None) -> list[str]:

@@ -9,6 +9,7 @@ Tables:
   imports    one row per upload / chess.com sync ("batch"); games.batch_id points here
   cards      spaced-repetition state per position to learn (srs.py): mistakes, calm positions
              I failed in real-game mode, opening lines
+  training_log  attempts at opening lines, Convert and endgames (for the streak; srs.record_key)
   meta       key/value store (e.g. hash of the classification settings, my username)
 
 SCHEMA is the original (version 0) layout; MIGRATIONS upgrade any database to the
@@ -19,6 +20,7 @@ current version, tracked with PRAGMA user_version. An existing database is backe
 import hashlib
 import sqlite3
 import threading
+from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -242,7 +244,34 @@ def _migrate_7(conn: sqlite3.Connection) -> None:
     """)
 
 
-MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5, _migrate_6, _migrate_7]   # index i upgrades user_version i -> i + 1
+def _migrate_8(conn: sqlite3.Connection) -> None:
+    """Training integrity (Finish M2): a log of line/Convert/endgame attempts (the streak counts
+    them), and cards promoted faster than the Leitner intervals allow (repeats on one day, B3)
+    put back to the highest box they could have reached, due again after its interval."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS training_log (
+            id      INTEGER PRIMARY KEY,
+            at      TEXT DEFAULT CURRENT_TIMESTAMP,
+            kind    TEXT NOT NULL,              -- 'line' | 'convert' | 'endgame'
+            key     TEXT NOT NULL,
+            result  TEXT NOT NULL
+        );
+    """)
+    intervals = [1, 3, 7, 14, 30, 60]          # srs.INTERVALS when this migration was written
+    reach = [sum(intervals[:i]) for i in range(len(intervals) + 1)]   # days to reach box i + 1
+    for card in conn.execute("SELECT * FROM cards WHERE introduced_on IS NOT NULL").fetchall():
+        last = card["mastered_on"] or card["last_on"] or card["introduced_on"]
+        days = (date.fromisoformat(last) - date.fromisoformat(card["introduced_on"])).days
+        allowed = max(i + 1 for i, d in enumerate(reach) if d <= days)      # len(intervals) + 1 = mastered
+        box = len(intervals) + 1 if card["mastered_on"] else card["box"]
+        if box > allowed:
+            due = date.fromisoformat(last) + timedelta(days=intervals[allowed - 1])
+            conn.execute("UPDATE cards SET box = ?, due_on = ?, mastered_on = NULL WHERE id = ?",
+                         (allowed, due.isoformat(), card["id"]))
+
+
+MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5, _migrate_6, _migrate_7,
+              _migrate_8]   # index i upgrades user_version i -> i + 1
 
 
 _schema_lock = threading.Lock()     # requests opening a new database at once must not both set it up
@@ -325,6 +354,7 @@ def delete_all_games(conn: sqlite3.Connection) -> int:
         conn.execute("DELETE FROM cards")
         conn.execute("DELETE FROM review_results")
         conn.execute("DELETE FROM self_reviews")
+        conn.execute("DELETE FROM training_log")
         conn.execute("DELETE FROM mistakes")
         conn.execute("DELETE FROM positions")
         conn.execute("DELETE FROM games")

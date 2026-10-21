@@ -7,7 +7,7 @@ import { Chess } from 'chess.js';
 import { createAnalysis } from './analysis.js';
 import { choosePromotion, isPromotion, makeBoard, moveSound, sound } from './board.js';
 import { lineChart } from './charts.js';
-import { api, arrow, el, errorState, lastMove, legalDests, sideToMove, winChance } from './common.js';
+import { api, arrow, busy, el, errorState, lastMove, legalDests, sideToMove, winChance } from './common.js';
 import { createEvalBar } from './evalbar.js';
 
 const $ = id => document.getElementById(id);
@@ -92,7 +92,7 @@ function backToList() {
 
 // `resume` = {moves, evals}: continue from part-way through an earlier attempt (it then
 // counts as solved with help at best).
-async function start(key, from, resume = null) {
+async function startTask(key, from, resume = null) {
   let task;
   try {
     task = await api(`/api/convert/task?key=${encodeURIComponent(key)}`);
@@ -134,6 +134,8 @@ async function start(key, from, resume = null) {
   board.setShapes([]);
   setMyTurn();
 }
+// Busy: a double click on a position used to load and start it twice (B12).
+const start = busy(startTask);
 
 // UCI moves from a FEN -> the position, SANs and last move (stops at an illegal move).
 function replay(fen, ucis) {

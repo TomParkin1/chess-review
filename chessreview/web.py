@@ -111,12 +111,12 @@ def create_app(cfg: Config | None = None) -> Flask:
     def _account(c: sqlite3.Connection) -> dict:
         """Who I am and how far the first run has got."""
         name = db.username(c, cfg)
-        first_import = c.execute("SELECT MIN(date(at, 'localtime')) FROM imports").fetchone()[0]
+        first_import = c.execute(f"SELECT MIN({srs.day_sql('at')}) FROM imports").fetchone()[0]
         return {"username": name, "username_source": "app" if db.get_meta(c, db.USERNAME_KEY) else
                 ("config" if name else None),
                 "games": c.execute("SELECT COUNT(*) FROM games").fetchone()[0],
                 "synced": db.get_meta(c, chesscom.LAST_MONTH_KEY) is not None,
-                "returning": first_import is not None and first_import < date.today().isoformat()}
+                "returning": first_import is not None and first_import < srs.today().isoformat()}
 
     @app.get("/api/account")
     def account():
@@ -175,7 +175,7 @@ def create_app(cfg: Config | None = None) -> Flask:
                     total.merge(import_pgn_text(c, text, cfg, source=f.filename or "upload",
                                                 batch_id=batch_id))
             finally:
-                db.finish_batch(c, batch_id)     # an empty batch is dropped, even after an error
+                session.finish_import(c, cfg, batch_id)     # an empty batch is dropped, even after an error
         finally:
             import_lock.release()
         _start_job()
@@ -411,8 +411,21 @@ def create_app(cfg: Config | None = None) -> Flask:
         c = conn()
         ensure_classified(c, cfg)
         color = request.args.get("color", "white")
+        mode = request.args.get("mode")
+        if mode == "today":
+            # Today's opening block: the planned lines not drilled yet, both colours.
+            block = next((b for b in coach.today_plan(c, cfg)["blocks"] if b["id"] == "opening"), {})
+            pending = coach.pending_lines(c, block.get("keys", []), srs.today())
+            lines, colors = [], []
+            for side in ("white", "black"):
+                keys = [k for k in pending if k.startswith(f"{side}:")]
+                if keys:
+                    found = repertoire.due_exercises(repertoire.build(c, side), side, keys)
+                    lines += found
+                    colors += [side] * len(found)
+            return jsonify(lines=lines, colors=colors)
         tree = _tree(color)
-        if request.args.get("mode") == "due":
+        if mode == "due":
             lines = repertoire.due_exercises(tree, color, srs.due_lines(c, color))
         else:
             lines = repertoire.drill_lines(tree, color, count=request.args.get("count", 6, type=int))
@@ -458,11 +471,24 @@ def create_app(cfg: Config | None = None) -> Flask:
         ensure_classified(c, cfg)
         return _today_json(c, coach.today_plan(c, cfg, refresh=True))
 
+    @app.post("/api/today/budget")
+    def today_budget():
+        """Body: {minutes: 10 | 20 | 30}. Today's plan is rebuilt for the new budget, keeping what
+        was already tried today (its time counts)."""
+        c = conn()
+        try:
+            coach.set_budget(c, int((request.get_json(force=True) or {}).get("minutes", 0)))
+        except (TypeError, ValueError) as exc:
+            return jsonify(error=str(exc)), 400
+        ensure_classified(c, cfg)
+        return _today_json(c, coach.today_plan(c, cfg, refresh=True))
+
     def _today_json(c: sqlite3.Connection, plan: dict):
         for block in plan["blocks"]:
             del block["items"]      # the keys are internal; /api/today/<block> serves the puzzles
+            block.pop("keys", None)
         games = c.execute("SELECT COUNT(*) AS total, SUM(analysed_at IS NOT NULL) AS analysed FROM games").fetchone()
-        return jsonify(plan=plan, streak=srs.streak(c), blind=cfg.training.blind,
+        return jsonify(plan=plan, streak=srs.streak(c), blind=cfg.training.blind, budgets=coach.BUDGETS,
                        session=session.status(c, cfg), username=db.username(c, cfg),
                        games={"total": games["total"], "analysed": games["analysed"] or 0})
 

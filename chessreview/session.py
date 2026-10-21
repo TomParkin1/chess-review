@@ -7,16 +7,48 @@ seeing any engine verdict. The turning point is my move with the biggest win-cha
 what counts scales with my level through the judgement thresholds); a pick within
 SELF_REVIEW_TOLERANCE plies counts. Then come the puzzles (my mistakes and blunders, in game
 order); when finished the batches are marked done and the summary shows what they taught me.
+
+A session never holds training back for long: an import of mostly old games (my history, e.g.
+a full PGN export) or the first import is no session at all (`finish_import`), and a session
+not done within coach.session_days expires (`expire`). Either way its mistakes join daily
+training as new cards, at the pace Today's budget allows.
 """
 
 import sqlite3
 from collections import Counter
+from datetime import datetime, timedelta
 
-from . import report
+from . import db, report
 from .config import Config
 
 CLOCK_BUCKETS = [(180_000, "over 3 min"), (60_000, "1–3 min"), (20_000, "20–60 s"), (0, "under 20 s")]
 SELF_REVIEW_TOLERANCE = 2      # plies: my move right before or after the turning point also counts
+
+
+def finish_import(conn: sqlite3.Connection, cfg: Config, batch_id: int, now: datetime | None = None) -> int:
+    """Finish an import batch (db.finish_batch) and decide what it is. The first import, or one
+    whose games mostly ended more than coach.history_days ago, is history: no session, its
+    mistakes go to daily training. Returns the number of games it added."""
+    n = db.finish_batch(conn, batch_id)
+    if not n:
+        return 0
+    cutoff = ((now or datetime.now()) - timedelta(days=cfg.coach.history_days)).strftime("%Y-%m-%d %H:%M:%S")
+    old = conn.execute("SELECT COUNT(*) FROM games WHERE batch_id = ? AND end_time < ?",
+                       (batch_id, cutoff)).fetchone()[0]
+    first = conn.execute("SELECT 1 FROM imports WHERE id != ? AND games_added > 0", (batch_id,)).fetchone() is None
+    if first or 2 * old > n:
+        with conn:
+            conn.execute("""UPDATE imports SET session_done_at = CURRENT_TIMESTAMP,
+                                label = label || ' (history)' WHERE id = ?""", (batch_id,))
+    return n
+
+
+def expire(conn: sqlite3.Connection, cfg: Config) -> int:
+    """Close sessions not done within coach.session_days: their mistakes join daily training."""
+    with conn:
+        return conn.execute("""UPDATE imports SET session_done_at = CURRENT_TIMESTAMP
+                               WHERE session_done_at IS NULL AND at < datetime('now', ?)""",
+                            (f"-{cfg.coach.session_days} days",)).rowcount
 
 
 def open_batches(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -25,6 +57,7 @@ def open_batches(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def status(conn: sqlite3.Connection, cfg: Config) -> dict:
+    expire(conn, cfg)
     batches = open_batches(conn)
     ids = [b["id"] for b in batches]
     if not ids:

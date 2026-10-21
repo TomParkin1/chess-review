@@ -1,7 +1,7 @@
-"""The "Today" workout: a short, structured daily plan built from my own data.
+"""The "Today" workout: a short daily plan built from my own data, sized to a time budget.
 
-Blocks (sizes in config [coach]):
-  reviews   due spaced-repetition cards, at most `due_cap` (the rest roll over to tomorrow)
+Blocks:
+  reviews   due spaced-repetition cards, most overdue first (srs.due_cards)
   real      real-game positions: today's new mistake cards plus calm positions I played well
   focus     puzzles on my #1 weakness (insights.weaknesses over my last 100 games), recomputed
             daily, so the focus moves as I improve: half my own mistakes of that kind, half
@@ -9,34 +9,65 @@ Blocks (sizes in config [coach]):
   convert   one won position from my games to win against Stockfish (played on the Convert page)
   opening   due opening-line drills (played on the Openings page)
 
-The plan is frozen for the day the first time it is built (stored in meta), so finishing
-items doesn't reshuffle it. An item counts as done once it has a review result today.
-It is rebuilt the same day only when it has to be (`today_plan`): on request ("Refresh plan"),
-when some of its positions or puzzles no longer exist (Delete all games, a restore), or when
-more games have been analysed since it was built and nothing in it has been tried yet (the
-first sync). Otherwise new games mark it `stale`, and the Today page offers a refresh.
-Items already tried today are carried over into a rebuilt plan, so no progress is lost.
+Sizing (`build_plan`). The budget is 10, 20 or 30 minutes (meta `today_budget`, default
+coach.budget_minutes). Opening lines (LINE_SECONDS each, at most OPENING_SHARE of the budget)
+and a Convert game (CONVERT_SECONDS, from CONVERT_MIN_BUDGET minutes, not while reviews are
+waiting) come off first; the rest
+is puzzles at my own pace (`pace`: my time per attempt in a sitting, times my attempts per
+puzzle, so retries of failed puzzles fit in the budget too).
+  - Reviews come first: at most coach.review_share of the puzzles, or all of them when more is
+    due than the day holds, so a backlog shrinks instead of growing.
+  - New cards only while the due reviews fill less than coach.new_share of the puzzles (and at
+    most training.new_per_day a day, focus mistakes never studied included). Each new card is
+    reviewed for months, so this is what keeps tomorrow's load inside the budget too
+    (`python -m chessreview simulate` runs it for 90 days).
+  - The rest: real-game positions (new cards + calm positions) and the focus block, half each.
+    Places the focus block can't fill go to waiting reviews, then to calm positions.
+
+The plan is frozen for the day (the training day, from 04:00: srs.today) the first time it is
+built (stored in meta), so finishing items doesn't reshuffle it. An item counts as done once
+it has a review result today; the opening block once its planned lines were drilled today or
+are no longer due. The plan is rebuilt the same day only when it has to be (`today_plan`): on
+request ("Refresh plan", a new budget), when some of its positions or puzzles no longer exist
+(Delete all games, a restore), when it was stored before plans had a budget, or when more games have been analysed since it was built and
+nothing in it has been tried yet (the first sync). Otherwise new games mark it `stale`, and the
+Today page offers a refresh. Items already tried today are carried over into a rebuilt plan
+(their time counts against the budget), so no progress is lost.
 """
 
 import json
 import sqlite3
-from datetime import date
+from datetime import date, datetime
+from statistics import mean
 
-from . import convert, db, insights, library, report, srs
+from . import convert, db, insights, library, report, repertoire, session, srs
 from .config import Config
 
 PLAN_KEY = "today_plan"
+BUDGET_KEY = "today_budget"
+BUDGETS = (10, 20, 30)          # minutes offered on the Today page
 FOCUS_JUDGEMENTS = ("mistake", "blunder")
+
+LINE_SECONDS = 15               # one opening position (the moves before it play themselves)
+OPENING_SHARE = 0.15            # opening lines take at most this share of the budget
+CONVERT_SECONDS = 180           # one Convert game
+CONVERT_MIN_BUDGET = 20         # minutes: shorter budgets leave Convert out
+SITTING_GAP = 300               # seconds: a longer pause between two attempts is a break
+MIN_GAPS = 30                   # attempts needed before my own pace replaces coach.seconds_per_puzzle
+PACE_RANGE = (20.0, 180.0)      # seconds per puzzle, whatever the data says
 
 
 BLOCK_ORDER = ["reviews", "real", "focus", "convert", "opening"]
+ELSEWHERE = ("opening", "convert")      # blocks played on their own page
 
 
 def today_plan(conn: sqlite3.Connection, cfg: Config, on: date | None = None, refresh: bool = False) -> dict:
     """Today's plan with progress: {day, blocks: [{id, title, ..., items: [[game_id, ply, tag]], done}],
-    basis, stale, new_games}. `refresh` rebuilds it (keeping what was already tried today)."""
+    budget, pace, minutes_left, basis, stale, new_games}. `refresh` rebuilds it (keeping what was
+    already tried today)."""
     on = on or srs.today()
     day = on.isoformat()
+    session.expire(conn, cfg)
     basis = analysed_games(conn)
     stored = db.get_meta(conn, PLAN_KEY)
     plan = json.loads(stored) if stored else None
@@ -49,7 +80,8 @@ def today_plan(conn: sqlite3.Connection, cfg: Config, on: date | None = None, re
         attempted = attempted_today(conn, on)
         vanished = len(_servable(conn, items)) < len({_key(i) for i in items})
         untouched = not any(_key(i) in attempted for i in items)
-        if refresh or vanished or (plan["basis"] != basis and untouched):
+        unsized = "budget" not in plan         # a plan stored before the time budget existed
+        if refresh or vanished or unsized or (plan["basis"] != basis and untouched):
             plan = _save(conn, _rebuild(conn, cfg, on, plan, attempted), basis)
     plan["new_games"] = max(0, basis - plan["basis"])
     plan["stale"] = plan["new_games"] > 0
@@ -61,6 +93,43 @@ def analysed_games(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NOT NULL").fetchone()[0]
 
 
+def budget(conn: sqlite3.Connection, cfg: Config) -> int:
+    """Today's time budget in minutes (chosen on the Today page, else coach.budget_minutes)."""
+    stored = db.get_meta(conn, BUDGET_KEY)
+    return int(stored) if stored else cfg.coach.budget_minutes
+
+
+def set_budget(conn: sqlite3.Connection, minutes: int) -> None:
+    if minutes not in BUDGETS:
+        raise ValueError(f"budget must be one of {BUDGETS} minutes")
+    with conn:
+        db.set_meta(conn, BUDGET_KEY, str(minutes))
+
+
+def pace(conn: sqlite3.Connection, cfg: Config) -> float:
+    """Seconds a puzzle of the plan takes me: my time per attempt (`attempt_seconds`) times my
+    attempts per puzzle (a retry, Today's "Again"), both over my last 200 attempts."""
+    rows = _recent_attempts(conn)
+    per_puzzle = len(rows) / len({(key, at[:10]) for key, at in rows}) if rows else 1.0
+    return min(max(attempt_seconds(conn, cfg) * per_puzzle, PACE_RANGE[0]), PACE_RANGE[1])
+
+
+def attempt_seconds(conn: sqlite3.Connection, cfg: Config) -> float:
+    """My average time between two attempts in one sitting (positions and library puzzles, my last
+    200), or coach.seconds_per_puzzle until there are MIN_GAPS such gaps."""
+    stamps = sorted(datetime.fromisoformat(at) for _, at in _recent_attempts(conn))
+    gaps = [g for g in ((b - a).total_seconds() for a, b in zip(stamps, stamps[1:])) if 0 < g <= SITTING_GAP]
+    return mean(gaps) if len(gaps) >= MIN_GAPS else cfg.coach.seconds_per_puzzle
+
+
+def _recent_attempts(conn: sqlite3.Connection, n: int = 200) -> list[tuple[str, str]]:
+    """(what was tried, when) for my last `n` attempts."""
+    return [(r[0], r[1]) for r in conn.execute(
+        """SELECT key, at FROM (SELECT game_id || ':' || ply AS key, at FROM review_results
+                                UNION ALL SELECT puzzle_id, at FROM puzzle_attempts)
+           WHERE at IS NOT NULL ORDER BY at DESC LIMIT ?""", (n,))]
+
+
 def _save(conn: sqlite3.Connection, plan: dict, basis: int) -> dict:
     plan["basis"] = basis
     with conn:
@@ -70,67 +139,113 @@ def _save(conn: sqlite3.Connection, plan: dict, basis: int) -> dict:
 
 def _rebuild(conn: sqlite3.Connection, cfg: Config, on: date, old: dict, attempted: set[tuple]) -> dict:
     """A fresh plan for the same day, with the items of `old` already tried today kept in their
-    blocks (first), so the day's progress stays. They count towards each block's usual size, so
-    a rebuild never adds a second workout to a day."""
-    plan = build_plan(conn, cfg, on)
-    sizes = {"reviews": cfg.coach.due_cap, "real": cfg.coach.real_game, "focus": cfg.coach.focus}
+    blocks (first), so the day's progress stays. Their time, and that of an opening or Convert
+    block already played, comes off the budget, so a rebuild never adds a second workout."""
     tried = [i for b in old["blocks"] for i in b["items"] if _key(i) in attempted]
     still_there = _servable(conn, tried)
     kept = {_key(i) for i in tried if _key(i) in still_there}
-    blocks = {b["id"]: b for b in plan["blocks"]}
+    played = {b["id"]: b for b in old["blocks"] if b["id"] in ELSEWHERE and _block_done(conn, b, on)}
+    spent = len(kept) * pace(conn, cfg) + sum(_elsewhere_seconds(b) for b in played.values())
+    plan = build_plan(conn, cfg, on, spent=spent, exclude=kept, skip=set(played))
+    blocks = {b["id"]: b for b in plan["blocks"]} | played
     for old_block in old["blocks"]:
-        done_elsewhere = old_block["id"] in ("opening", "convert") and _played_today(conn, old_block["id"], on)
-        if old_block["id"] not in blocks and (done_elsewhere or any(_key(i) in kept for i in old_block["items"])):
-            blocks[old_block["id"]] = {**old_block, "items": []}
-    for block_id, b in blocks.items():
-        old_block = next((o for o in old["blocks"] if o["id"] == block_id), {"items": []})
         carried = [i for i in old_block["items"] if _key(i) in kept]
-        fresh = [i for i in b["items"] if _key(i) not in kept]
-        b["items"] = carried + fresh[:max(0, sizes.get(block_id, len(fresh)) - len(carried))]
-    plan["blocks"] = sorted((b for b in blocks.values() if b["items"] or b["id"] in ("opening", "convert")),
+        if not carried:
+            continue
+        block = blocks.setdefault(old_block["id"], {**old_block, "items": []})
+        block["items"] = carried + [i for i in block["items"] if _key(i) not in kept]
+    plan["blocks"] = sorted((b for b in blocks.values() if b["items"] or b["id"] in ELSEWHERE),
                             key=lambda b: BLOCK_ORDER.index(b["id"]) if b["id"] in BLOCK_ORDER else 99)
     return plan
 
 
-def build_plan(conn: sqlite3.Connection, cfg: Config, on: date) -> dict:
+def build_plan(conn: sqlite3.Connection, cfg: Config, on: date, spent: float = 0.0,
+               exclude: set | frozenset = frozenset(), skip: set | frozenset = frozenset()) -> dict:
+    """Today's blocks, sized to the budget (see the module docstring). For a rebuild, `spent`
+    seconds of the budget are already used by the items in `exclude` and the blocks in `skip`."""
     c = cfg.coach
-    q = srs.queue(conn, cfg, on)
-    reviews = [[g, p, "due"] for g, p in q["due"][: c.due_cap]]
-    due_library = conn.execute("""SELECT key FROM cards WHERE kind = 'library' AND mastered_on IS NULL
-                                  AND due_on IS NOT NULL AND due_on <= ? AND key IN (SELECT id FROM puzzles)
-                                  ORDER BY due_on, box""",
-                               (on.isoformat(),)).fetchall()
-    reviews += [["lib", r["key"], "due"] for r in due_library][: max(0, c.due_cap - len(reviews))]
+    minutes = budget(conn, cfg)
+    seconds = minutes * 60 - spent
+    pace_s = pace(conn, cfg)
 
-    n_calm = round(c.real_game * min(max(c.calm_ratio, 0.0), 0.8))
-    new = [[g, p, "new"] for g, p in q["new"][: max(0, c.real_game - n_calm)]]
-    calm = [[g, p, "calm"] for g, p in srs.calm_positions(conn, cfg, c.real_game - len(new), on.isoformat())]
-    real = srs.spread(new, calm)
+    lines = [] if "opening" in skip else _due_line_keys(conn, on)
+    lines = lines[: max(0, int(min(minutes * 60 * OPENING_SHARE, seconds) // LINE_SECONDS))]
+    seconds -= len(lines) * LINE_SECONDS
+    due = [k for k in srs.due_cards(conn, cfg, on) if k not in exclude]
+    # Convert needs a long enough budget, and waits while more reviews are due than the day holds.
+    key = None
+    if "convert" not in skip and minutes >= CONVERT_MIN_BUDGET and len(due) <= (seconds - CONVERT_SECONDS) // pace_s:
+        key = convert.next_convert(conn, on)
+    task = convert.task_for(conn, key) if key else None
+    if task:
+        seconds -= CONVERT_SECONDS
+    slots = max(0, int(seconds // pace_s))
 
-    taken = {(g, p) for g, p, _ in reviews + real}
-    weakness, focus = _focus_items(conn, cfg, c.focus, taken, on)
+    reviews = due[: slots if len(due) > slots else round(slots * c.review_share)]
+    fresh = slots - len(reviews)
+    allowance = max(0, min(round(slots * c.new_share) - len(due), fresh,
+                           cfg.training.new_per_day - srs.introduced_on(conn, on)))
+    real_size = (fresh + 1) // 2
+    calm_min = round(real_size * min(max(c.calm_ratio, 0.0), 0.8))
+    new = srs.new_cards(conn, cfg, min(allowance, real_size - calm_min), exclude)
+    taken = set(due) | set(new) | set(exclude)
+    weakness, focus = _focus_items(conn, cfg, fresh - real_size, taken, on, allowance - len(new))
+    # Places the focus block can't fill go to waiting reviews first, then to calm positions.
+    spare = fresh - real_size - len(focus)
+    extra = min(spare, len(due) - len(reviews))
+    reviews = due[: len(reviews) + extra]
+    calm = srs.calm_positions(conn, cfg, real_size - len(new) + spare - extra, on.isoformat(), exclude)
+    real = srs.spread([[g, p, "new"] for g, p in new], [[g, p, "calm"] for g, p in calm])
+    waiting = len(due) - len(reviews)
 
     blocks = [
-        {"id": "reviews", "title": "Review", "items": reviews,
-         "subtitle": "Positions you got wrong before, back at the right time."},
+        {"id": "reviews", "title": "Review", "items": [[g, p, "due"] for g, p in reviews],
+         "subtitle": "Positions you got wrong before, back at the right time."
+                     + (f" {waiting} more {'is' if waiting == 1 else 'are'} waiting: they come first tomorrow."
+                        if waiting else "")},
         {"id": "real", "title": "Real-game positions", "items": real,
          "subtitle": "Spot the threat, then play your move. Not every position hides a mistake."},
         {"id": "focus", "title": f"Focus: {weakness['title']}" if weakness else "Focus", "items": focus,
          "subtitle": weakness["detail"] if weakness else "", "train": weakness["train"] if weakness else None},
     ]
-    key = convert.next_convert(conn, on)
-    task = convert.task_for(conn, key) if key else None
     if task:
         blocks.append({"id": "convert", "title": "Convert a won position", "items": [], "key": key,
                        "subtitle": f"{task.title} ({task.start_eval}): win it against Stockfish. {task.subtitle}."})
-    lines = len(srs.due_lines(conn, "white", on)) + len(srs.due_lines(conn, "black", on))
     if lines:
-        blocks.append({"id": "opening", "title": "Opening lines", "items": [], "lines_due": lines,
-                       "subtitle": f"{lines} position{'s' if lines != 1 else ''} of your repertoire to drill."})
+        blocks.append({"id": "opening", "title": "Opening lines", "items": [], "keys": lines,
+                       "lines_due": len(lines),
+                       "subtitle": f"{len(lines)} position{'s' if len(lines) != 1 else ''} of your repertoire to drill."})
     servable = _servable(conn, [i for b in blocks for i in b["items"]])
     for b in blocks:
         b["items"] = [i for i in b["items"] if _key(i) in servable]
-    return {"day": on.isoformat(), "blocks": [b for b in blocks if b["items"] or b["id"] in ("opening", "convert")]}
+    return {"day": on.isoformat(), "budget": minutes, "pace": round(pace_s, 1),
+            "blocks": [b for b in blocks if b["items"] or b["id"] in ELSEWHERE]}
+
+
+def _due_line_keys(conn: sqlite3.Connection, on: date) -> list[str]:
+    """Due opening-line cards that can be drilled (their position is still in my repertoire),
+    the longest due first."""
+    drillable: set[str] = set()
+    for color in ("white", "black"):
+        due = srs.due_lines(conn, color, on)
+        if due:
+            tree = repertoire.build(conn, color)
+            drillable |= {line[-1]["key"] for line in repertoire.due_exercises(tree, color, due)}
+    return [r["key"] for r in conn.execute(
+        """SELECT key FROM cards WHERE kind = 'line' AND mastered_on IS NULL AND due_on IS NOT NULL
+           AND due_on <= ? ORDER BY due_on, box, id""", (on.isoformat(),)) if r["key"] in drillable]
+
+
+def pending_lines(conn: sqlite3.Connection, keys: list[str], on: date) -> list[str]:
+    """The planned opening lines not drilled yet today that are still due."""
+    if not keys:
+        return []
+    day = on.isoformat()
+    rows = conn.execute(f"""SELECT key FROM cards WHERE kind = 'line' AND key IN ({",".join("?" * len(keys))})
+                            AND mastered_on IS NULL AND due_on <= ? AND COALESCE(last_on, '') != ?""",
+                        [*keys, day, day])
+    pending = {r["key"] for r in rows}
+    return [k for k in keys if k in pending]
 
 
 def _key(item: list) -> tuple:
@@ -160,38 +275,57 @@ def _servable(conn: sqlite3.Connection, items: list[list]) -> set[tuple]:
 
 
 def with_progress(conn: sqlite3.Connection, plan: dict, on: date) -> dict:
-    """Mark items and blocks done from today's review results (and today's line drills)."""
+    """Mark items and blocks done from today's review results (and today's drills and Convert),
+    with the minutes left at my pace."""
     attempted = attempted_today(conn, on)
+    pace_s = plan.get("pace") or PACE_RANGE[1] / 2
     total = done = 0
+    seconds_left = 0.0
     for block in plan["blocks"]:
-        if block["id"] in ("opening", "convert"):
-            block["done"] = _played_today(conn, block["id"], on)
+        if block["id"] in ELSEWHERE:
+            block["done"] = _block_done(conn, block, on)
             block["count"], block["finished"] = 1, int(block["done"])
+            if block["id"] == "opening" and "keys" in block:
+                block["lines_left"] = len(pending_lines(conn, block["keys"], on))
+            seconds_left += 0 if block["done"] else _elsewhere_seconds(block, conn, on)
         else:
             block["count"] = len(block["items"])
             block["finished"] = sum((g, p) in attempted for g, p, _ in block["items"])
             block["done"] = block["finished"] == block["count"]
+            seconds_left += (block["count"] - block["finished"]) * pace_s
         total += block["count"]
         done += block["finished"]
     plan["total"], plan["finished"] = total, done
     plan["complete"] = all(b["done"] for b in plan["blocks"])
+    plan["minutes_left"] = round(seconds_left / 60)
     return plan
 
 
-def _played_today(conn: sqlite3.Connection, block_id: str, on: date) -> bool:
-    """A block played on its own page (opening lines, convert) counts once something was played today."""
-    kind = "line" if block_id == "opening" else "convert"
+def _block_done(conn: sqlite3.Connection, block: dict, on: date) -> bool:
+    """An opening block is done when its planned lines were drilled today or are no longer due;
+    a Convert block once a won position was played today."""
+    if block["id"] == "opening" and "keys" in block:
+        return not pending_lines(conn, block["keys"], on)
+    kind = "line" if block["id"] == "opening" else "convert"
     return conn.execute("SELECT 1 FROM cards WHERE kind = ? AND last_on = ? LIMIT 1",
                         (kind, on.isoformat())).fetchone() is not None
+
+
+def _elsewhere_seconds(block: dict, conn: sqlite3.Connection | None = None, on: date | None = None) -> float:
+    """Planned time of an opening or Convert block (what is left of it, given `conn` and `on`)."""
+    if block["id"] == "convert":
+        return CONVERT_SECONDS
+    keys = block.get("keys", [])
+    return LINE_SECONDS * (len(pending_lines(conn, keys, on)) if conn is not None else len(keys))
 
 
 def attempted_today(conn: sqlite3.Connection, on: date) -> set[tuple]:
     """(game_id, ply) of my positions and ("lib", puzzle_id) of library puzzles tried today."""
     day = on.isoformat()
     mine = {(r["game_id"], r["ply"]) for r in conn.execute(
-        "SELECT game_id, ply FROM review_results WHERE date(at, 'localtime') = ?", (day,))}
+        f"SELECT game_id, ply FROM review_results WHERE {srs.day_sql('at')} = ?", (day,))}
     return mine | {("lib", r["puzzle_id"]) for r in conn.execute(
-        "SELECT puzzle_id FROM puzzle_attempts WHERE date(at, 'localtime') = ?", (day,))}
+        f"SELECT puzzle_id FROM puzzle_attempts WHERE {srs.day_sql('at')} = ?", (day,))}
 
 
 def block_items(plan: dict, block_id: str) -> list[tuple[tuple[int, int], str]]:
@@ -203,13 +337,16 @@ def block_items(plan: dict, block_id: str) -> list[tuple[tuple[int, int], str]]:
 # ------------------------------------------------------------ focus block
 
 def _focus_items(conn: sqlite3.Connection, cfg: Config, size: int, taken: set[tuple],
-                 on: date) -> tuple[dict | None, list[list]]:
+                 on: date, new_left: int) -> tuple[dict | None, list[list]]:
     """My #1 weakness that has puzzles, and up to `size` of them: my own mistakes of that kind
-    (unsolved first, best lessons first) and, with the library loaded, themed library puzzles."""
+    (unsolved first, best lessons first; at most `new_left` never studied, as they become new
+    cards) and, with the library loaded, themed library puzzles."""
+    if size <= 0:
+        return None, []
     has_library = library.count(conn) > 0
     for weakness in insights.compute(conn, last=100).get("weaknesses", []):   # none before any analysis
         train = weakness.get("train") or {}
-        own = _matching_mistakes(conn, train, taken)
+        own = _matching_mistakes(conn, train, taken, new_left)
         themes = library.themes_for(train) if has_library else []
         if not own and not themes:
             continue
@@ -221,12 +358,15 @@ def _focus_items(conn: sqlite3.Connection, cfg: Config, size: int, taken: set[tu
     return None, []
 
 
-def _matching_mistakes(conn: sqlite3.Connection, train: dict, taken: set[tuple[int, int]]) -> list[tuple[int, int]]:
-    """My mistakes matching a weakness' Practice filter (see insights.weaknesses)."""
+def _matching_mistakes(conn: sqlite3.Connection, train: dict, taken: set[tuple],
+                       new_left: int) -> list[tuple[int, int]]:
+    """My mistakes matching a weakness' Practice filter (see insights.weaknesses), at most
+    `new_left` of them never studied. Mistakes of an open new-games session wait for it."""
     if not train:
         return []    # e.g. "moving too fast" has no position-level filter
     where = ["m.is_mine = 1", "m.judgement IN ('mistake', 'blunder')", "m.decided = 0",
              "g.id IN (SELECT id FROM games ORDER BY end_time DESC, id DESC LIMIT 100)",
+             f"g.id NOT IN ({srs.OPEN_SESSION_GAMES})",
              "NOT EXISTS (SELECT 1 FROM cards c WHERE c.game_id = m.game_id AND c.ply = m.ply"
              " AND c.mastered_on IS NOT NULL)"]
     params: list = []
@@ -238,7 +378,9 @@ def _matching_mistakes(conn: sqlite3.Connection, train: dict, taken: set[tuple[i
     rows = conn.execute(f"""
         SELECT m.game_id, m.ply, g.clocks_ms, g.time_control,
                (SELECT r.result FROM review_results r WHERE r.game_id = m.game_id AND r.ply = m.ply
-                ORDER BY r.id DESC LIMIT 1) AS status
+                ORDER BY r.id DESC LIMIT 1) AS status,
+               COALESCE((SELECT c.due_on IS NULL FROM cards c WHERE c.game_id = m.game_id AND c.ply = m.ply), 1)
+                   AS unseen
         FROM mistakes m JOIN games g ON g.id = m.game_id
         WHERE {' AND '.join(where)}
         ORDER BY (status IN ('solved', 'solved_with_help')), {srs.PUZZLE_VALUE} DESC""", params).fetchall()
@@ -248,6 +390,10 @@ def _matching_mistakes(conn: sqlite3.Connection, train: dict, taken: set[tuple[i
             continue
         if train.get("low_clock") and not _low_clock(r):
             continue
+        if r["unseen"]:
+            if new_left <= 0:
+                continue
+            new_left -= 1
         out.append((r["game_id"], r["ply"]))
     return out
 

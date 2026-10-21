@@ -80,9 +80,12 @@ class TrainingConfig:
 class CoachConfig:
     calm_ratio: float = 0.3          # share of the real-game deck that is positions I handled well
     recent_games: int = 100          # calm positions come from my last N games
-    due_cap: int = 15                # Today: at most this many due reviews (the rest roll over)
-    real_game: int = 6               # Today: real-game positions (new mistakes + calm positions)
-    focus: int = 5                   # Today: puzzles on my #1 weakness
+    budget_minutes: int = 20         # Today: default time budget (10, 20 or 30; the Today page changes it)
+    seconds_per_puzzle: float = 60   # Today: time per puzzle until my own pace can be measured
+    review_share: float = 0.8        # Today: due reviews fill at most this share of the puzzles...
+    new_share: float = 0.7           # ...and new cards come only while they fill less than this share
+    session_days: int = 3            # an unfinished new-games session joins daily training after this
+    history_days: int = 14           # an import of games mostly older than this is history, not a session
     progress_window: int = 25        # Progress: compare my last N games with the N before
     self_review_games: int = 5       # New-games session: games to self-review before the engine
 

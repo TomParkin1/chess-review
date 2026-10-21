@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 import chess
 
-from . import level, session
+from . import level, session, srs
 from .config import Config
 from .insights import KIND_LABELS, my_accuracy, my_elo
 from .threats import training_threat
@@ -179,16 +179,23 @@ def summary_line(window: int, total: int, cur: dict, base: dict | None, kinds: l
 
 
 def training_weeks(conn: sqlite3.Connection, weeks: int = 12) -> list[dict]:
-    """Training per week (the last `weeks` weeks with any activity): attempts, solve rate, threat hits."""
-    rows = conn.execute("""
-        SELECT strftime('%Y-%W', at, 'localtime') AS week, MIN(date(at, 'localtime')) AS first_day,
-               COUNT(*) AS attempts,
+    """Training per week (the last `weeks` weeks with any training): days trained (any kind of
+    training, srs.training_days), attempts at my positions, their solve rate and threat hits."""
+    stats = {r["week"]: r for r in conn.execute(f"""
+        SELECT strftime('%Y-%W', {srs.day_sql('at')}) AS week, COUNT(*) AS attempts,
                SUM(result IN ('solved', 'solved_with_help')) AS solved,
                SUM(threat_result = 'correct') AS threat_ok,
-               SUM(threat_result IN ('correct', 'wrong')) AS threat_tries,
-               COUNT(DISTINCT date(at, 'localtime')) AS days
-        FROM review_results GROUP BY week ORDER BY week DESC LIMIT ?""", (weeks,)).fetchall()
-    return [{"week": r["week"], "from": r["first_day"], "attempts": r["attempts"], "days": r["days"],
-             "solve_rate": 100 * r["solved"] / r["attempts"] if r["attempts"] else None,
-             "threat_rate": 100 * r["threat_ok"] / r["threat_tries"] if r["threat_tries"] else None}
-            for r in reversed(rows)]
+               SUM(threat_result IN ('correct', 'wrong')) AS threat_tries
+        FROM review_results GROUP BY week""")}
+    days: dict[str, list] = {}
+    for day in srs.training_days(conn):
+        days.setdefault(day.strftime("%Y-%W"), []).append(day)     # %W as in SQLite: weeks from Monday
+    out = []
+    for week in sorted(days)[-weeks:]:
+        r = stats.get(week)
+        attempts = r["attempts"] if r else 0
+        out.append({"week": week, "from": min(days[week]).isoformat(), "attempts": attempts,
+                    "days": len(days[week]),
+                    "solve_rate": 100 * r["solved"] / attempts if attempts else None,
+                    "threat_rate": 100 * r["threat_ok"] / r["threat_tries"] if r and r["threat_tries"] else None})
+    return out

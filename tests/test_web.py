@@ -303,7 +303,7 @@ def test_pages_work_on_an_empty_and_an_unanalysed_database(client, tmp_path):
     assert c.get("/api/today").get_json()["games"] == {"total": 3, "analysed": 0}
 
 
-def test_two_uploads_of_the_same_games_at_once(client):
+def test_two_uploads_of_the_same_games_at_once(client, tmp_path):
     """B8: the second upload failed with a 500 (UNIQUE constraint failed: games.dedupe_key) and left
     an empty batch behind, although the first did import the games."""
     _c, app = client
@@ -323,7 +323,8 @@ def test_two_uploads_of_the_same_games_at_once(client):
     c = app.test_client()
     wait_for_analysis(c)
     assert len(c.get("/api/games").get_json()) == 3
-    assert len(c.get("/api/session").get_json()["batch_ids"]) == 1     # the empty second batch was dropped
+    batches = db.connect(tmp_path / "web.db").execute("SELECT COUNT(*) FROM imports").fetchone()[0]
+    assert batches == 1      # the empty second batch was dropped
 
 
 def test_api_errors_are_json_and_pages_say_what_went_wrong(client, monkeypatch):
@@ -419,3 +420,15 @@ def test_today_refresh_api(client):
     wait_for_analysis(c)
     today = c.post("/api/today/refresh").get_json()
     assert today["games"] == {"total": 3, "analysed": 3} and not today["plan"]["stale"]
+
+
+def test_today_budget_and_todays_opening_lines(client):
+    """F4: the Today page sets the time budget; the plan is rebuilt for it."""
+    c, _app = client
+    r = c.post("/api/today/budget", json={"minutes": 30})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["plan"]["budget"] == 30 and body["budgets"] == [10, 20, 30] and "minutes_left" in body["plan"]
+    assert c.get("/api/today").get_json()["plan"]["budget"] == 30
+    assert c.post("/api/today/budget", json={"minutes": 15}).status_code == 400
+    assert c.get("/api/openings/drill?mode=today").get_json() == {"lines": [], "colors": []}
