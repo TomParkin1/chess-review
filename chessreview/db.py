@@ -270,8 +270,17 @@ def _migrate_8(conn: sqlite3.Connection) -> None:
                          (allowed, due.isoformat(), card["id"]))
 
 
+def _migrate_9(conn: sqlite3.Connection) -> None:
+    """Endgames that teach (Finish M4): these endgames now end at a milestone (promotion, a bare
+    king) or start from a new position (Vancura), so a "solved" from the old three-move rule says
+    nothing. Their cards start again as new; training_log keeps the attempts (streak)."""
+    changed = ("kp_front", "square", "lucena", "rook_pawn_cutoff", "outside_passer", "q_vs_pawn", "q_vs_r",
+               "vancura")
+    conn.execute(f"DELETE FROM cards WHERE kind = 'endgame' AND key IN ({','.join('?' * len(changed))})", changed)
+
+
 MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5, _migrate_6, _migrate_7,
-              _migrate_8]   # index i upgrades user_version i -> i + 1
+              _migrate_8, _migrate_9]   # index i upgrades user_version i -> i + 1
 
 
 _schema_lock = threading.Lock()     # requests opening a new database at once must not both set it up

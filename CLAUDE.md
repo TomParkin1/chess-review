@@ -13,7 +13,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   `backup [--list]`, `restore NAME|FILE [--yes]` (opens the DB without migrating first: the way back from a broken DB),
   `simulate [--days 90] [--budget 10|20|30] [--skip 0.15]` (Today's daily load, on a temp copy of the DB).
   Port 5000 is taken by macOS AirPlay Receiver, hence 8000.
-- Tests: `.venv/bin/pytest`.
+- Tests: `.venv/bin/pytest`. Endgame acceptance (real Stockfish, minutes, opt-in):
+  `CHESSREVIEW_PLAYOUTS=1 .venv/bin/pytest tests/test_endgame_playouts.py`.
 
 ## Layout
 - `config.toml`: all tunables (engine time/workers, classification thresholds, phase rules, DB path, backup
@@ -116,9 +117,13 @@ and lets me review them across all games. chess.com username: `sampleplayer`
     `/api/progress/report`, summary sentence on Home. (Route fn for `/api/progress` is `analysis_progress`.)
 - v3 Convert (Milestone 3): `convert.py` + `data/endgames.toml` (15 Stockfish-checked endgames, 3 levels; a level
   unlocks when the one before is solved). Won positions = first position per game at/above `level.winning_cp` (by
-  rating band) held on my next move; lost games first. `state()` decides won/failed per move (checkmate; Stockfish
-  resigns at mate <= 5 or +7 for 3 of my moves; any draw fails a win goal; convert fails below 40% of the bar; draw
-  goals hold for 15 moves). Playouts are stateless: the client sends all moves (`/api/play/move`, `/api/play/hint`),
+  rating band) held on my next move; lost games first. `state()` decides won/failed per move. A win ends at its
+  milestone, `Task.finish` (Finish M4, P11; a high eval alone never does): `mate`, `promote` (I promoted and am still
+  at +7 or mating after the reply), `bare_king` (Stockfish had more at the start, now only its king; I keep a Q/R); all
+  but `mate` also end at mate <= 5. Converts (`resign`): those, or `Task.resign_cp` = max(+7, raw start cp + 3 pawns;
+  None for a mate start: `as_cp` caps at +10) on 3 of my moves in a row. Any draw fails a win goal; convert fails
+  below 40% of the bar; draw goals (`hold`) hold for 15 moves. `finish_text()` is shown under the prompt.
+  `tests/test_endgame_playouts.py`: strong moves win/hold all 15, three merely safe moves finish none. Playouts are stateless: the client sends all moves (`/api/play/move`, `/api/play/hint`),
   Stockfish = `LiveEngine.analyse` at full strength. Cards: `srs.record_key(kind 'convert'|'endgame', key)`.
   Page `/convert` (`static/convert.js`, eval hidden until the end); Today gets a "Convert" block.
 - v3 puzzle library (Milestone 4): `library.py` streams the Lichess puzzle DB (`lichess_db_puzzle.csv.zst`, ~300 MB,
@@ -143,8 +148,9 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   - Sidebar badge (`shell.js` `showTodayBadge`) = items left in today's plan, gone when complete.
   - Today continues into Convert/Openings (`?from=today` -> "Back to Today" there).
   - `analysis.start(fen, {history})`: moves that led to the position (greyed, ◀ steps back through them).
-  - Convert after a failure: biggest win-chance drop of my moves + Stockfish's move there, "Try again from there"
-    (counts as solved_with_help at best), "Watch Stockfish play it" (hint + play/move loop, nothing recorded).
+  - Convert after a failure: biggest win-chance drop of my moves + Stockfish's move there, drawn on the position
+    before that move (B14; "Final position" toggles), "Try again from there" (counts as solved_with_help at best;
+    the prompt gives the eval there), "Watch Stockfish play it" (hint + play/move loop, nothing recorded).
 - Today's time budget (Finish M2, F4; `build_plan`): 10/20/30 min (meta `today_budget`, POST `/api/today/budget`,
   default `coach.budget_minutes`). Opening lines (15 s each, <= 15% of the budget) and Convert (3 min, budgets >= 20,
   not while reviews wait) first; the rest = puzzle slots at `coach.pace()` (my time per attempt x attempts per puzzle,
@@ -218,5 +224,7 @@ Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--conf
 3. [x] M3 Correct lessons: explanation rules P1–P10, P13 MIN_LOSS by band; lines through the gain. Deep check (scratchpad,
    Stockfish 1.5 s/4 threads/MultiPV 3): wrong reasons 13/40 -> 0, held-out 2/20 -> 0. Deeper re-check of card positions
    deferred (user's choice): it would fix best moves the 0.3 s search gets wrong (e.g. game 203 ply 29).
-4. [ ] M4 Endgames that teach: finish rules (P11), Vancura tip (P12), Convert lesson board (B14)
+4. [x] M4 Endgames that teach: finish rules (P11: promote / bare_king / mate / hold, converts resign 3 pawns above
+   the start), real Vancura position + tip (P12), Convert lesson on the slip position + resumed prompt (B14).
+   Migration 9 reset the endgame cards "solved" under the old 3-move rule.
 5. [ ] M5 Polish: layout 1024–1440 (B10), Practice sessions (B16), scoring (B15), answer panel, clock vs time control

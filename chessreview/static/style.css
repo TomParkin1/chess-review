@@ -465,6 +465,7 @@ table.op-moves tr.clickable:hover { background: var(--panel-2); }
 table.op-moves td.op-move { font-weight: 700; display: flex; align-items: center; gap: 6px; }
 table.op-moves td { padding: 6px; }
 .solution-moves .sm.mine { color: var(--green); }
+.solution-moves .sm.slip { background: var(--blunder); color: #fff; }   /* Convert: where it slipped */
 a.chip { text-decoration: none; }
 #drill-done.summary-card { padding: 20px 0 0; }
 

@@ -1,11 +1,17 @@
 # Essential endgames, played against Stockfish (chessreview/convert.py).
 # Every position was checked with Stockfish: "win" positions are won, "draw" positions hold.
 #   goal    win | draw          (the side to move is me)
-#   finish  mate  = I must deliver checkmate (basic mates)
-#           resign = Stockfish resigns once it is clearly lost (e.g. after promotion)
+#   finish  the milestone that ends it (Finish M4, P11; a high eval alone never does):
+#           mate      = I must deliver checkmate (basic mates)
+#           promote   = promote and still be clearly winning after Stockfish's reply
+#           bare_king = leave Stockfish with only its king while keeping a queen or rook
+#           hold      = draw goals: a draw by rule, or holding for convert.HOLD_MOVES moves
+#           (promote and bare_king also end when Stockfish is mated in <= 5)
 #   level   1 beginner, 2 intermediate, 3 advanced (a level unlocks when the one before is solved)
 # A drawn result (stalemate, repetition, 50-move rule, no mating material) fails a "win" goal,
 # so the technique has to be right, not just the eval.
+# Acceptance: CHESSREVIEW_PLAYOUTS=1 .venv/bin/pytest tests/test_endgame_playouts.py (strong moves
+# win or hold every one; three merely safe moves finish none).
 
 [[endgame]]
 id = "kq_k"
@@ -40,7 +46,7 @@ level = 1
 title = "King in front of the pawn"
 fen = "4k3/8/4K3/4P3/8/8/8/8 w - - 0 1"
 goal = "win"
-finish = "resign"
+finish = "promote"
 tip = "With your king on the 6th rank in front of the pawn, the pawn queens. Keep the king ahead of it."
 
 [[endgame]]
@@ -49,7 +55,7 @@ level = 1
 title = "Rule of the square"
 fen = "8/8/8/8/1P6/8/5k2/7K w - - 0 1"
 goal = "win"
-finish = "resign"
+finish = "promote"
 tip = "Can the king get inside the pawn's square? Count before you move."
 
 [[endgame]]
@@ -58,7 +64,7 @@ level = 1
 title = "Hold the draw against king and pawn"
 fen = "8/8/4k3/8/8/4K3/4P3/8 b - - 0 1"
 goal = "draw"
-finish = "resign"
+finish = "hold"
 tip = "Stay in front of the pawn and take the opposition when the enemy king comes close."
 
 [[endgame]]
@@ -67,7 +73,7 @@ level = 2
 title = "Lucena: build a bridge"
 fen = "1K1k4/1P6/8/8/8/8/r7/2R5 w - - 0 1"
 goal = "win"
-finish = "resign"
+finish = "promote"
 tip = "Check the king away, lift your rook to the 4th rank, then shelter your king behind it."
 
 [[endgame]]
@@ -76,7 +82,7 @@ level = 2
 title = "Philidor: the third-rank defence"
 fen = "3k4/R7/8/3KP3/8/8/8/5r2 b - - 0 1"
 goal = "draw"
-finish = "resign"
+finish = "hold"
 tip = "Keep your rook on your third rank until the pawn advances, then check from behind."
 
 [[endgame]]
@@ -85,7 +91,7 @@ level = 2
 title = "Rook and pawn against the king"
 fen = "8/8/8/8/4k3/8/R3P3/4K3 w - - 0 1"
 goal = "win"
-finish = "resign"
+finish = "promote"
 tip = "Don't let the king near the pawn: keep it cut off with the rook, then escort the pawn."
 
 [[endgame]]
@@ -94,7 +100,7 @@ level = 2
 title = "The outside passed pawn"
 fen = "8/5kp1/8/8/8/8/P4KP1/8 w - - 0 1"
 goal = "win"
-finish = "resign"
+finish = "promote"
 tip = "Push the a-pawn as a decoy: while their king chases it, yours eats the kingside."
 
 [[endgame]]
@@ -103,7 +109,7 @@ level = 2
 title = "Queen against a pawn on the 7th"
 fen = "K7/8/8/8/8/8/1p3Q2/1k6 w - - 0 1"
 goal = "win"
-finish = "resign"
+finish = "bare_king"
 tip = "Check and pin until their king has to stand in front of the pawn, then bring your king one step closer."
 
 [[endgame]]
@@ -122,7 +128,7 @@ level = 3
 title = "Queen against rook"
 fen = "8/8/8/3k4/8/2r5/8/K5Q1 w - - 0 1"
 goal = "win"
-finish = "resign"
+finish = "bare_king"
 max_plies = 130
 tip = "Avoid skewers and forks; reach Philidor's position where the rook must leave its king, then win it."
 
@@ -130,10 +136,13 @@ tip = "Avoid skewers and forks; reach Philidor's position where the rook must le
 id = "vancura"
 level = 3
 title = "Vancura: defend against the a-pawn"
-fen = "8/8/R7/P5k1/8/8/6K1/r7 b - - 0 1"
+# Vancura's set-up (P12): pawn on a6, rook in front on a8. Stockfish, 1.5 s a move: the rook moves
+# that head for the side of the pawn hold (...Rf1-f6, ...Ra4-f4-f6, ...Re1+-e6, ...Rb1/Rc1/Rd1);
+# king moves, ...Ra2/Ra3/Ra5 and ...Rg1/Rh1 lose (-5 to -7).
+fen = "R7/6k1/P7/8/8/4K3/8/r7 b - - 0 1"
 goal = "draw"
-finish = "resign"
-tip = "Attack the pawn from the side (the f-file rook), so their rook is tied to it and your king stays safe."
+finish = "hold"
+tip = "Get your rook to the side of the pawn on the 6th rank (…Rf1–f6) so it attacks a6: their rook must stay on a8 to guard it, and your king stays on g7/h7. When their king comes close, check it from behind; if the pawn reaches a7, put your rook behind it."
 
 [[endgame]]
 id = "rook_vs_bishop"
@@ -141,5 +150,5 @@ level = 3
 title = "Rook against bishop: the right corner"
 fen = "8/8/8/4k3/8/3b4/8/R3K3 b - - 0 1"
 goal = "draw"
-finish = "resign"
+finish = "hold"
 tip = "Run your king to the corner the bishop does not control."
