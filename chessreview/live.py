@@ -17,7 +17,7 @@ import chess
 import chess.engine
 
 from . import explain
-from .classify import Eval, Thresholds, judge
+from .classify import Eval, Thresholds, judge, keeps_long_mate
 from .config import Config
 from .engine import open_engine
 
@@ -109,11 +109,12 @@ class LiveEngine:
         return result
 
     def judge(self, fen: str, uci: str, before: PositionAnalysis | None = None,
-              thresholds: Thresholds | None = None) -> Judgement:
+              thresholds: Thresholds | None = None, prev_capture: chess.Square | None = None) -> Judgement:
         """Judge my move `uci` in `fen` and work out the opponent's best reply.
 
         `before` lets the caller pass the stored analysis of the position (so the
-        first move of a review puzzle is judged against the same eval as the game).
+        first move of a review puzzle is judged against the same eval as the game),
+        and `prev_capture` where the opponent's last move captured, if known.
         Raises ValueError for an illegal move.
         """
         board = chess.Board(fen)
@@ -131,8 +132,8 @@ class LiveEngine:
         before_eval, after_eval = before.for_side(me), after.for_side(me)
         verdict, drop, _ = judge(before_eval, after_eval, self.cfg, thresholds)
         is_best = before.best is not None and move == before.best
-        if is_best:
-            verdict = "good"
+        if is_best or keeps_long_mate(before_eval, after_eval):
+            verdict = "good"   # (a long mate the 0.35 s search after the move can't see is still a mate)
 
         result = Judgement(
             uci=uci, san=san, judgement=verdict, is_best=is_best,
@@ -143,7 +144,8 @@ class LiveEngine:
         if verdict != "good":
             result.kind, result.explanation = explain.explain(explain.MoveContext(
                 board=board, move=move, best=before.best, best_line=list(before.pv),
-                reply_line=list(after.pv), before=before_eval, after=after_eval),
+                reply_line=list(after.pv), before=before_eval, after=after_eval, prev_capture=prev_capture,
+                min_loss=thresholds.min_loss if thresholds else explain.MIN_LOSS),
                 reveal_best=False)  # an attempt at a puzzle: don't give the answer away
         if after.best is not None and not result.game_over:
             result.reply_uci = after.best.uci()

@@ -62,6 +62,16 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   automatically when config thresholds or `explain.VERSION` change (fingerprint in `meta`). Forced moves and the engine's
   own best move are always "good".
 - `chessreview/explain.py`: ordered list of rule functions (`RULES`), first match wins. Bump `VERSION` when changing output.
+  v7 (Finish M3, P1–P10): stored lines are 0.3 s PVs, so material claims are checked against the eval
+  (`_gain_ok`/`_loss_ok`, `SLACK` 150 cp; `_understated`: eval far above the line's material -> no amount, or "It keeps
+  you at +x"). `play_line` settles a trailing capture with a static exchange (`exchange()`), or drops it when it loses on
+  the spot (PV-tail noise). `MoveContext.prev_capture` (opponent's last capture square) + `recapture` (also: best captures
+  on the same square) count losses from after my capture. The bigger half leads: `bigger_miss` (best wins >= what I lose)
+  before the loss rules, `_also_missed` adds the other half; `_you_lose` adds the eval drop when material explains
+  < half of it. Lines run through the capture that completes the claim (`LineResult.plies`, max 12). `missed_fork`
+  (my first two moves, forker safe), `exposed_king` only when my king must move or is checked again, `_why_loose`
+  (moved piece was shielding/guarding). `MoveContext.min_loss` = `classify.Thresholds.min_loss` (1 pawn at 2000+, else 2).
+  Regression tests per audit position: `tests/test_explain_report.py` (stored rows embedded).
 - `chessreview/phases.py`: opening/middlegame/endgame.
 - `chessreview/web.py`: Flask app factory `create_app(cfg)`; pages (`/`, `/game/<id>`, `/review`) are thin shells,
   data comes from the JSON API (`/api/upload`, `/api/progress`, `/api/analysis/start|stop`, `/api/games`,
@@ -147,7 +157,9 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - Design rule: nothing is tuned to one rating. Derive from the engine, the current rating's band, or my rolling data.
 - Chessground `events.after` passes (orig, dest, metadata): always wrap handlers as `(o, d) => fn(o, d)`.
 - `classify.judge` applies Lichess' mate rules (lost/allowed forced mate) before win chances; bump
-  `CLASSIFY_VERSION` when judge logic changes.
+  `CLASSIFY_VERSION` when judge logic changes. A lost mate longer than `LONG_MATE` (5) while still >= +7 is an inaccuracy
+  (P8: the 0.3 s search after the move rarely sees the slower mate); `live.judge` counts a try that keeps +10 in a long-mate
+  position as good (`keeps_long_mate`).
 - Review page = Lichess-style "learn from your mistakes" (`static/review.js` state machine: solving → checking →
   wrong (snap back + spoiler-free explanation via `explain(..., reveal_best=False)`) / right (auto-play reply, continue
   for `playout_moves`) → done (explanation, best-line stepper)). Hints: text from `explain.HINTS`, then piece highlight.
@@ -203,6 +215,8 @@ Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--conf
 1. [x] M1 Safe & solid: backups (F2), B1 B2 B4 B6 B7 B8 B11 B18, first run (F6). Regression test per bug.
 2. [x] M2 Training integrity: one promotion per card per day (B3), load budget (F4), streak (B9), 04:00 day (B13),
    double-click guards (B12), sessions never block Today (B5)
-3. [ ] M3 Correct lessons: explanation rules P1–P10, P13; lines through the gain; deeper re-check of card positions
+3. [x] M3 Correct lessons: explanation rules P1–P10, P13 MIN_LOSS by band; lines through the gain. Deep check (scratchpad,
+   Stockfish 1.5 s/4 threads/MultiPV 3): wrong reasons 13/40 -> 0, held-out 2/20 -> 0. Deeper re-check of card positions
+   deferred (user's choice): it would fix best moves the 0.3 s search gets wrong (e.g. game 203 ply 29).
 4. [ ] M4 Endgames that teach: finish rules (P11), Vancura tip (P12), Convert lesson board (B14)
 5. [ ] M5 Polish: layout 1024–1440 (B10), Practice sessions (B16), scoring (B15), answer panel, clock vs time control

@@ -16,7 +16,7 @@ from werkzeug.exceptions import HTTPException
 
 from . import (backup, chesscom, coach, convert, db, insights, level, library, progress, report, repertoire,
                session, srs)
-from .classify import (ADAPTIVE_BANDS, MODE_KEY, Eval, adaptive_enabled, ensure_classified,
+from .classify import (ADAPTIVE_BANDS, MODE_KEY, Eval, adaptive_enabled, capture_square, ensure_classified,
                        thresholds_for)
 from .config import PROJECT_ROOT, Config, effective_workers, load_config
 from .engine import AnalysisJob, count_pending
@@ -793,7 +793,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         fen, uci = data.get("fen"), data.get("uci")
         if not fen or not uci:
             return jsonify(error="fen and uci are required"), 400
-        before = None
+        before = prev_capture = None
         c = conn()
         thresholds = level.current_thresholds(c, cfg)   # tries are judged at my level *now*
         if data.get("game_id") is not None:
@@ -802,8 +802,11 @@ def create_app(cfg: Config | None = None) -> Flask:
                                 (data["game_id"], data.get("ply"))).fetchone()
                 if pos is not None and pos["fen"] == fen:
                     before = _stored_analysis(pos)
+                    prev = c.execute("SELECT fen, move_uci FROM positions WHERE game_id = ? AND ply = ?",
+                                     (data["game_id"], pos["ply"] - 1)).fetchone()
+                    prev_capture = _prev_capture(prev["fen"], prev["move_uci"]) if prev else None
         try:
-            result = live.judge(fen, uci, before, thresholds)
+            result = live.judge(fen, uci, before, thresholds, prev_capture)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         return jsonify(result.as_dict())
@@ -910,6 +913,13 @@ def _query_mistakes(c: sqlite3.Connection, cfg: Config, where: list[str], params
     return [_mistake_json(r, cfg, th) for r in rows]
 
 
+def _prev_capture(prev_fen: str | None, prev_uci: str | None) -> chess.Square | None:
+    """Where the opponent's last move (from the stored position before it) captured, if it did."""
+    if not prev_fen or not prev_uci:
+        return None
+    return capture_square(chess.Board(prev_fen), chess.Move.from_uci(prev_uci))
+
+
 def _stored_analysis(pos: sqlite3.Row) -> PositionAnalysis:
     pv = tuple(chess.Move.from_uci(u) for u in (pos["pv_uci"] or "").split())
     best = chess.Move.from_uci(pos["best_uci"]) if pos["best_uci"] else None
@@ -975,7 +985,8 @@ def _mistake_json(r: sqlite3.Row, cfg: Config, th) -> dict:
     good = r["judgement"] == "good"    # a calm position: I played well in the game
     best_explanation = explain_best(MoveContext(
         board=board, move=chess.Move.from_uci(r["move_uci"]), best=best, best_line=line,
-        reply_line=reply, before=before, after=after), r["kind"]) if best and not good else ""
+        reply_line=reply, before=before, after=after, prev_capture=_prev_capture(r["prev_fen"], r["prev_move_uci"]),
+        min_loss=th.min_loss), r["kind"]) if best and not good else ""
     threat = training_threat(r, me, th)
     return {
         "game_id": r["game_id"], "ply": ply,

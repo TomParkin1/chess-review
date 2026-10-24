@@ -23,7 +23,10 @@ from .config import Config
 CP_CAP = 1000          # Lichess caps evals at +-10 pawns for win chances
 MATE_CP = 1000         # a forced mate counts as the cap
 SETTINGS_KEY = "classification_settings"
-CLASSIFY_VERSION = 5   # bump when judge() logic changes so stored judgements are rebuilt
+CLASSIFY_VERSION = 6   # bump when judge() logic changes so stored judgements are rebuilt
+# A lost mate longer than this (moves) while still >= +7 is at most an inaccuracy: the short search
+# after the move often can't see the slower mate (it is usually still there), and +7 still wins.
+LONG_MATE = 5
 
 JUDGEMENTS = ("good", "inaccuracy", "mistake", "blunder")
 
@@ -59,12 +62,15 @@ class Eval:
 
 def _mate_judgement(before: Eval, after: Eval) -> str | None:
     """Lichess' special cases for forced mates, which win chances barely register
-    (missing a mate in 1 while +7 is only a 0.1 drop)."""
+    (missing a mate in 1 while +7 is only a 0.1 drop). Losing a long mate (LONG_MATE)
+    while still clearly winning is an inaccuracy."""
     had_mate = before.mate is not None and before.mate > 0
     has_mate = after.mate is not None and after.mate > 0
     if had_mate and not has_mate and not (after.mate is not None and after.mate < 0):
         cp = after.as_cp()  # lost a forced mate but still have this much
-        return "inaccuracy" if cp > 999 else "mistake" if cp > 700 else "blunder"
+        if cp > 999 or (cp > 700 and before.mate > LONG_MATE):
+            return "inaccuracy"
+        return "mistake" if cp > 700 else "blunder"
     allowed_mate = after.mate is not None and after.mate < 0
     already_mated = before.mate is not None and before.mate < 0
     if allowed_mate and not already_mated:
@@ -100,9 +106,27 @@ class Thresholds:
         return min(0.95, 0.6 + self.blunder)
 
     @property
+    def min_loss(self) -> int:
+        """Material (pawns) that counts as a tactic at this level: the smallest loss that, from an
+        equal position, is a mistake on its own. 1 pawn at 2000+, 2 below (and with the standard
+        thresholds). Explanations call smaller material swings positional."""
+        for pawns in range(1, 9):
+            if -Eval(-100 * pawns, None).win_chance() >= self.mistake:
+                return pawns
+        return 9
+
+    @property
     def cp_factor(self) -> float:
         """Scale for the centipawn-mode thresholds, relative to Lichess' 0.1."""
         return self.inaccuracy / 0.1
+
+
+def keeps_long_mate(before: Eval, after: Eval) -> bool:
+    """A move in a position with a long forced mate (more than LONG_MATE moves) that keeps a
+    position the search scores at the cap (+10) but without a mate: a short search after the
+    move usually can't see the slower mate, so the move most likely still mates."""
+    return (before.mate is not None and before.mate > LONG_MATE and after.mate is None
+            and after.as_cp() >= CP_CAP)
 
 
 def adaptive_enabled(conn: sqlite3.Connection, cfg: Config) -> bool:
@@ -210,6 +234,8 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config, adaptive:
                 best_line=_line(before_row["pv_uci"]),
                 reply_line=_line(after_row["pv_uci"]),
                 before=before, after=after,
+                prev_capture=capture_square(previous_board, previous_move),
+                min_loss=th.min_loss,
             )
             kind, text = explain.explain(ctx)
             if mover != me:
@@ -232,6 +258,13 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config, adaptive:
         conn.execute("UPDATE games SET accuracy_white = ?, accuracy_black = ? WHERE id = ?",
                      (acc_white, acc_black, game_id))
     return len(rows)
+
+
+def capture_square(board: chess.Board | None, move: chess.Move | None) -> chess.Square | None:
+    """Where `move` (played in `board`) captured, or None if it isn't a capture."""
+    if board is None or move is None or not board.is_capture(move):
+        return None
+    return move.to_square
 
 
 def _is_recapture(board: chess.Board, move: chess.Move, previous_move: chess.Move | None,

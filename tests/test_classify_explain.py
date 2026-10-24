@@ -75,9 +75,15 @@ def test_missed_capture_of_undefended_piece():
 
 
 def test_exposed_king():
-    kind, text = explain(ctx("e4 e5", "f2f3", "g1f3", ["g1f3"], ["d8h4"],
+    kind, text = explain(ctx("e4 e5", "f2f3", "g1f3", ["g1f3"], ["d8h4", "g2g3", "h4e4"],
                              Eval(30, None), Eval(-150, None)))
     assert kind == "king_safety" and "Qh4" in text and "Best was Nf3" in text
+
+
+def test_a_check_that_is_just_blocked_is_not_king_safety():
+    kind, _ = explain(ctx("e4 e5", "f2f3", "g1f3", ["g1f3"], ["d8h4", "g2g3", "h4e7"],
+                          Eval(30, None), Eval(-150, None)))
+    assert kind != "king_safety"
 
 
 def test_positional_when_nothing_forcing():
