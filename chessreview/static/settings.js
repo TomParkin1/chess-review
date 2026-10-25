@@ -161,17 +161,23 @@ async function loadThresholds() {
 }
 
 const radios = document.querySelectorAll('input[name="th-mode"]');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 radios.forEach(radio => radio.addEventListener('change', async () => {
   const out = document.getElementById('th-result');
   out.textContent = 'Reclassifying all your games…';
   radios.forEach(r => { r.disabled = true; });
   try {
-    const r = await api('/api/settings/thresholds', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ adaptive: radio.value === 'adaptive' }),
-    });
-    out.textContent = `Done: ${r.games} games reclassified. You now have ${r.inaccuracies} inaccuracies, ` +
-      `${r.mistakes} mistakes and ${r.blunders} blunders.`;
+    await post('/api/settings/thresholds', { adaptive: radio.value === 'adaptive' });
+    // Every game is reclassified in the background; the rest of the app keeps working meanwhile.
+    let t = await api('/api/settings/thresholds');
+    while (t.rebuild.running) {
+      if (t.rebuild.total) out.textContent = `Reclassifying… ${t.rebuild.done} of ${t.rebuild.total} games`;
+      await sleep(500);
+      t = await api('/api/settings/thresholds');
+    }
+    if (t.rebuild.error) throw new Error(t.rebuild.error);
+    out.textContent = `Done: ${t.rebuild.total} games reclassified. You now have ${t.counts.inaccuracies} inaccuracies, ` +
+      `${t.counts.mistakes} mistakes and ${t.counts.blunders} blunders.`;
   } catch (err) {
     out.textContent = `Failed: ${err.message}`;
   }

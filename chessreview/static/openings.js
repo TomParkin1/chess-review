@@ -64,10 +64,8 @@ async function loadNode() {
   badge.clear();
   setExploreBoard();
   renderBreadcrumb();
-  let node;
-  try {
-    node = await api(`/api/openings/node?${params()}&fen=${encodeURIComponent(currentFen())}`);
-  } catch {
+  const node = await api(`/api/openings/node?${params()}&fen=${encodeURIComponent(currentFen())}`).catch(() => null);
+  if (!node || node.reached === false) {
     $('node-summary').textContent = "You haven't reached this position in your games.";
     $('repertoire-note').replaceChildren();
     $('moves').replaceChildren();
@@ -290,8 +288,9 @@ function endLine() {
   board.setAutoShapes([]);
   $('drill-prompt').textContent = 'Line complete!';
   dr.line += 1;
-  if (dr.line >= dr.lines.length) return setTimeout(finishDrill, 700);
-  setTimeout(startLine, 600);
+  // Unless the drill was stopped (or another started) meanwhile.
+  if (dr.line >= dr.lines.length) return setTimeout(() => { if (drill === dr) finishDrill(); }, 700);
+  setTimeout(() => { if (drill === dr) startLine(); }, 600);
 }
 
 function finishDrill() {

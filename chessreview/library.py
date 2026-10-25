@@ -12,8 +12,11 @@ GameUrl, OpeningTags (+ DailyDate). FEN is the position *before* the opponent's 
 starts with that move, then alternates my solution moves and the opponent's replies.
 
 Puzzle rating: starts at my current chess.com rating and moves with an Elo update against
-each puzzle's rating (K from 40 down to 16 over the first 100 puzzles); new puzzles are picked
-around it, so the difficulty follows me up. Only a clean first-try solve counts as a win.
+each puzzle's rating; new puzzles are picked around it, so the difficulty follows me up. The
+first puzzles count most (K 120 shrinking to 40 by the 5th, like a provisional rating), so a
+seed that is too low or too high corrects itself quickly; then K goes from 40 down to 16 over
+the first 100 puzzles. Only the first try of a puzzle counts: a clean solve scores 1, a solve
+with hints or after a wrong move 1/2 (a hint costs less than a failure), anything else 0.
 """
 
 import csv
@@ -200,16 +203,19 @@ def rating(conn: sqlite3.Connection) -> int:
     return level.current_rating(conn) or DEFAULT_RATING
 
 
+SCORES = {"solved": 1.0, "solved_with_help": 0.5}     # anything else scores 0
+
+
 def k_factor(played: int) -> float:
-    return max(16.0, 40 - 24 * min(played, 100) / 100)
+    return max(16.0, 40 - 24 * min(played, 100) / 100, 120 * 0.8 ** played)
 
 
-def update_rating(conn: sqlite3.Connection, puzzle_rating: int, won: bool) -> tuple[int, int]:
-    """Elo update of my puzzle rating after one puzzle. Returns (before, after)."""
+def update_rating(conn: sqlite3.Connection, puzzle_rating: int, score: float) -> tuple[int, int]:
+    """Elo update of my puzzle rating after one puzzle (score 1, 1/2 or 0). Returns (before, after)."""
     before = rating(conn)
     played = int(db.get_meta(conn, COUNT_KEY) or 0)
     expected = 1 / (1 + math.pow(10, (puzzle_rating - before) / 400))
-    after = before + k_factor(played) * ((1.0 if won else 0.0) - expected)
+    after = before + k_factor(played) * (score - expected)
     with conn:
         db.set_meta(conn, RATING_KEY, str(after))
         db.set_meta(conn, COUNT_KEY, str(played + 1))
@@ -224,7 +230,7 @@ def record(conn: sqlite3.Connection, puzzle_id: str, result: str) -> dict:
         raise LookupError(puzzle_id)
     first = conn.execute("SELECT 1 FROM puzzle_attempts WHERE puzzle_id = ?", (puzzle_id,)).fetchone() is None
     if first:
-        before, after = update_rating(conn, p["rating"], result == "solved")
+        before, after = update_rating(conn, p["rating"], SCORES.get(result, 0.0))
     else:
         before = after = rating(conn)
     with conn:

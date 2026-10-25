@@ -88,3 +88,26 @@ def test_due_exercise_replays_the_path(conn):
     [steps] = repertoire.due_exercises(tree, "white", [key])
     assert [s["uci"] for s in steps[:-1]] == problem["path"] and all(s["setup"] for s in steps[:-1])
     assert steps[-1]["mine"] and steps[-1]["uci"] == "d2d4"
+
+
+def test_tree_is_cached_until_the_games_or_verdicts_change(conn):
+    """F17: the explorer reused to rebuild the whole tree on every click."""
+    tree = repertoire.build(conn, "white")
+    assert repertoire.build(conn, "white") is tree                     # nothing changed: same tree
+    assert repertoire.build(conn, "white", "Sicilian Defense") is not tree
+    # A reclassified game gets fresh mistakes rows (classify_game deletes and inserts).
+    with conn:
+        rows = conn.execute("SELECT * FROM mistakes WHERE game_id = 4").fetchall()
+        conn.execute("DELETE FROM mistakes WHERE game_id = 4")
+        conn.executemany("INSERT INTO mistakes (game_id, ply, judgement, win_drop, is_mine) VALUES (?, ?, ?, ?, ?)",
+                         [(r["game_id"], r["ply"], "good", 0.0, r["is_mine"]) for r in rows])
+    fresh = repertoire.build(conn, "white")
+    assert fresh is not tree
+    assert not repertoire.problems(fresh)                                # Nc3 is no longer judged bad
+    # A new game, and deleting everything, change it too.
+    with conn:
+        conn.execute("""INSERT INTO games (id, dedupe_key, white, black, my_color, my_result, date, moves_uci,
+                            num_plies, pgn) VALUES (7, 'k7', 'me', 'o', 'white', 'win', '2026-01-02', 'g1f3', 1, '')""")
+    assert repertoire.build(conn, "white") is not fresh
+    db.delete_all_games(conn)
+    assert repertoire.node_json(repertoire.build(conn, "white"), repertoire.root_epd()) is None

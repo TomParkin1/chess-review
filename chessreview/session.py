@@ -18,10 +18,9 @@ import sqlite3
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import db, report
+from . import db, insights, report
 from .config import Config
 
-CLOCK_BUCKETS = [(180_000, "over 3 min"), (60_000, "1–3 min"), (20_000, "20–60 s"), (0, "under 20 s")]
 SELF_REVIEW_TOLERANCE = 2      # plies: my move right before or after the turning point also counts
 
 
@@ -166,14 +165,17 @@ def summary(conn: sqlite3.Connection, cfg: Config, batch_ids: list[int]) -> dict
     kinds = Counter(m["kind"] for m in bad if m["kind"])
     phases = Counter(m["phase"] for m in bad)
 
-    # Clock left when I made each blunder (from the API's clock times).
+    # Share of my clock left when I made each blunder (from the API's clock times).
     clock_buckets: Counter = Counter()
+    trouble = 0
     for m in mine:
         if m["judgement"] != "blunder" or not m["clocks_ms"]:
             continue
-        left = _clock_before(m["clocks_ms"], m["time_control"], m["ply"])
-        if left is not None:
-            clock_buckets[next(label for limit, label in CLOCK_BUCKETS if left >= limit)] += 1
+        base, _ = report.parse_time_control(m["time_control"])
+        label = report.clock_bucket(insights.clock_before(m["clocks_ms"].split(), base, m["ply"]), m["time_control"])
+        if label is not None:
+            clock_buckets[label] += 1
+        trouble += insights.in_time_trouble(m["clocks_ms"], m["time_control"], m["ply"])
 
     worst = None
     scored = [(a, g) for g, a in zip(games, [g["accuracy_white"] if g["my_color"] == "white"
@@ -193,20 +195,11 @@ def summary(conn: sqlite3.Connection, cfg: Config, batch_ids: list[int]) -> dict
         "blunders": sum(m["judgement"] == "blunder" for m in mine),
         "top_kinds": kinds.most_common(3),
         "phases": dict(phases),
-        "blunder_clock": [(label, clock_buckets.get(label, 0)) for _, label in CLOCK_BUCKETS],
+        "blunder_clock": [(label, clock_buckets.get(label, 0)) for _, label in report.CLOCK_BUCKETS],
+        "time_trouble_blunders": trouble,
         "worst_game": worst,
         "self_review": self_review_rate(conn, [g["id"] for g in games]),
     }
-
-
-def _clock_before(clocks_ms: str, time_control: str | None, ply: int) -> int | None:
-    """My remaining clock (ms) just before the move at `ply`."""
-    clocks = clocks_ms.split()
-    if ply >= 2:
-        value = clocks[ply - 2] if ply - 2 < len(clocks) else "-"
-        return None if value == "-" else int(value)
-    base, _ = report.parse_time_control(time_control)
-    return base
 
 
 def _judgements(cfg: Config) -> str:

@@ -48,7 +48,7 @@
       {% set items = [('/', 'home', 'Home'), ('/train', 'train', 'Today'), ('/review', 'review', 'Practice'), ('/openings', 'openings', 'Openings'), ('/convert', 'convert', 'Convert'), ('/games', 'games', 'Games'), ('/progress', 'progress', 'Progress'), ('/insights', 'insights', 'Insights'), ('/settings', 'settings', 'Settings')] %}
       {% for href, icon, label in items %}
         {% set active = request.path == href or (href == '/games' and request.path.startswith('/game/')) or (href == '/review' and request.path == '/puzzles') %}
-        <a href="{{ href }}" class="{{ 'active' if active }}" data-section="{{ icon }}">{{ nav_icon(icon) }}<span>{{ label }}</span></a>
+        <a href="{{ href }}" class="{{ 'active' if active }}" data-section="{{ icon }}" title="{{ label }}">{{ nav_icon(icon) }}<span>{{ label }}</span></a>
       {% endfor %}
     </nav>
   </aside>

@@ -45,23 +45,42 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   `session.finish_import` (B5): the first import, or one whose games mostly ended > `coach.history_days` ago, is
   history (marked done, label "(history)"); the first chess.com sync is always history. `session.expire` closes
   sessions after `coach.session_days`. Only a session's mistakes wait for it (calm positions don't).
-  Summary: results, accuracy, mistake kinds, clock left at blunders.
+  Summary: results, accuracy, mistake kinds, share of the clock left at blunders (+ `time_trouble_blunders`).
+  Self-review wording follows the result (session.js `SR_COPY`): losses "where did it turn?", draws "where did it
+  slip?", wins "where was your worst moment?" (same turning point underneath).
 - `chessreview/insights.py`: per-game trends, phase accuracy, mistake kinds, clock buckets, openings, colours and
   heuristic `weaknesses()` (each with a Practice filter). `static/charts.js`: SVG line/bar charts with hover
   (dataviz rules: one axis, 2px lines, rounded bar ends, validated colours `--series-you/--series-opp`).
-  Practice (`/review`) accepts filters in the URL (incl. `low_clock`), overriding saved filters.
+  Practice (`/review`) accepts filters in the URL (incl. `low_clock`), overriding saved filters; the summary line
+  names them ("· in time trouble", "· from one game").
+- Clock rules (Finish M5, F7) live in `report.py`: shares of the estimated game duration `game_budget_ms` = base +
+  40 × increment (none for daily/unknown). Time trouble < 10% (`is_low_clock`; 60 s at 10+0, 18 s at 3+0, 130 s at
+  15+10), a very fast move < 1/120 (5 s at 10+0), buckets `CLOCK_BUCKETS` 30/10/3%. `insights.in_time_trouble(clocks,
+  tc, ply)` is the one check (Insights, weaknesses, session summary, Practice's `low_clock`, Today's focus).
 - `chessreview/repertoire.py`: repertoire tree per colour from my games (EPD-keyed, first MAX_PLY plies);
   repertoire move = my most played (>= 2 games) unless usually judged bad -> engine best ("problem").
   Drill lines + due exercises; line cards are `cards.kind='line'`, key `<colour>:<epd>` (srs.record_line).
-  UI: `/openings` (`static/openings.js`: Explore tab + Drill tab).
+  UI: `/openings` (`static/openings.js`: Explore tab + Drill tab). `build()` is memoised (F17): last `CACHE_SIZE`
+  trees keyed on (database file, colour, family, `_stamp`: games count, max id, max analysed_at, max mistakes rowid);
+  callers must not modify a tree; restore calls `clear_cache()`. `/api/openings/node` answers `{reached: false}`
+  (200) for a position not in my games.
 - `static/puzzle.js` + `templates/_puzzle.html`: the shared puzzle used by Practice (`/review`), Train, Session.
-- `chessreview/report.py`: chess.com-style move marks (documented approximations), Lichess accuracy, time spent.
+  Lean answer panel (Finish M5): result line, then Next/Retry/Analyse/Open game, then one `#explanation` block (what
+  happened in the game: verdict, evals unless the text already quotes them, why; library: themes + rating change),
+  `#best-explanation`, and the best line with the arrow legend in its header. Feedback and status chip hide at the end.
+  `common.js`: `isSolved()` (solved_with_help counts as solved everywhere, B15), `itemKey()` (`lib:<id>` or
+  `<game>:<ply>`, Today's "Again"), `threatCheckPref()`/`setThreatCheckPref()`.
+- `chessreview/report.py`: chess.com-style move marks (documented approximations), Lichess accuracy, time spent,
+  clock rules relative to the time control.
 - `chessreview/pgn_import.py`: PGN parsing, my colour/result, time class, dedupe (Link header, else sha1 of players+date+moves).
 - `chessreview/openings.py` + `chessreview/data/openings.tsv`: names openings from the moves using the Lichess chess-openings DB (CC0), matched by position. My chess.com exports have no ECO/ECOUrl/Link headers.
 - `chessreview/engine.py`: Stockfish analysis (MultiPV 2, `ANALYSIS_VERSION`; older games re-analysed), worker pool, progress, caching. Checkmated positions store score_cp = ±10000 (MATED_CP), no engine call.
 - `chessreview/classify.py`: Lichess win-chance judgement per move (both sides) -> `mistakes` table, plus marks and game accuracy. My-mistake queries must filter `is_mine = 1`. `ensure_classified()` rebuilds
   automatically when config thresholds or `explain.VERSION` change (fingerprint in `meta`). Forced moves and the engine's
-  own best move are always "good".
+  own best move are always "good". `ensure_classified()` is blocking (CLI, tests); web requests and `serve` call
+  `refresh()` (F17): new games are classified on the spot (under `_lock`), but a full rebuild of existing rows runs in a
+  background thread (`start_rebuild`, own connection, progress in `REBUILD`, shown in Settings) while requests keep
+  reading the stored rows (each game is replaced in one transaction). The very first classification stays inline.
 - `chessreview/explain.py`: ordered list of rule functions (`RULES`), first match wins. Bump `VERSION` when changing output.
   v7 (Finish M3, P1–P10): stored lines are 0.3 s PVs, so material claims are checked against the eval
   (`_gain_ok`/`_loss_ok`, `SLACK` 150 cp; `_understated`: eval far above the line's material -> no amount, or "It keeps
@@ -78,6 +97,12 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   data comes from the JSON API (`/api/upload`, `/api/progress`, `/api/analysis/start|stop`, `/api/games`,
   `/api/game/<id>`, `/api/mistakes?filters` incl. `status` & `last`, `/api/judge`, `/api/review/result`,
   `/api/analyse/stream` (SSE), `/api/account`, `/api/backups` (+ `/restore`, `/export`), `/api/today/refresh`).
+  `/api/mistakes?...&limit=N` (Finish M5, B16/F17): `keys` of every match in order ("<game>:<ply>", one light query),
+  `total`, the first N `items`, and `options` = each facet (`FACETS`: opening, phase, result, colour, time, type) with
+  the values that have matches under the *other* filters, with counts (a chosen value with none stays, count 0);
+  without `limit` all items as before. `/api/mistakes/items?keys=` (<= 50) builds the next Practice session.
+  Practice (review.js) = sessions of `SESSION_SIZE` 10 from the key snapshot, a summary card after each, "Next 10",
+  "That's all N" + Start over at the end (no wrap). `/game/<id>` knows an unknown id itself (`GAME_FOUND`).
   Upload auto-starts an `AnalysisJob`. Uploads, syncs and restores share one `import_lock` (B8); `import_game`
   inserts with `ON CONFLICT(dedupe_key) DO NOTHING` (a race counts as a duplicate) and batches finish in `finally`.
 - `chessreview/live.py`: `LiveEngine` = two long-lived Stockfish processes (judging tries, live analysis stream).
@@ -85,7 +110,7 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   `serve` closes it in a finally block, tests close it in fixtures, otherwise Python cannot exit.
 - Adaptive thresholds (default; `classification.adaptive`, overridable from Settings via meta `thresholds_mode`):
   `classify.thresholds_for(rating)` bands by the mover's rating in that game; `/api/judge` uses my rating in the game.
-  Switching mode changes the classification fingerprint, so `ensure_classified` rebuilds everything (seconds).
+  Switching mode changes the classification fingerprint, so everything is rebuilt in the background (`refresh`).
 - `explain.explain_best()`: why the engine's move is better (shown after a puzzle as `best_explanation`).
 - Analysis speed: `effective_workers()` (~2/3 of cores) single-thread engines + `max_depth` cap (benchmarked 2x
   faster than 4x2 threads, same depth on hard positions). Live judging uses 4 threads.
@@ -98,7 +123,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   - `level.py`: `current_rating()` / `current_thresholds()`. `/api/judge`, threats and calm positions use my level *now*.
   - `mistakes.sharpness` (best vs second-best gap) and `decided` (band-scaled, `Thresholds.decided`); new cards are
     ordered by `srs.PUZZLE_VALUE`, decided ones skipped. Missed mates are never "decided".
-  - Real-game mode (`item.mode = 'blind'`, Train default `training.blind`, Practice checkbox): no badge/arrow; threat step
+  - Real-game mode (`item.mode = 'blind'`; the toggle is "Threat check first" in Practice and Today's reviews, one
+    localStorage preference `threat-check`; Today's default `training.blind`): no badge/arrow; threat step
     first (`/api/threat/check`); Today's real-game block mixes in `srs.calm_positions()` (`coach.calm_ratio`; good moves,
     half with a real threat). Failed calm positions become `cards.kind='position'`. `review_results.mode/threat_result` record it.
 - v3 Today + Progress (Milestone 2):
@@ -129,7 +155,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - v3 puzzle library (Milestone 4): `library.py` streams the Lichess puzzle DB (`lichess_db_puzzle.csv.zst`, ~300 MB,
   stdlib `compression.zstd`) and keeps a reservoir sample per (100-point bucket, theme in `THEMES`), 400-3100, well-tested
   only (~19k puzzles) in `puzzles`; attempts in `puzzle_attempts`. Puzzle rating (meta) starts at my chess.com rating,
-  Elo update with K 40 -> 16, first try only; `pick()` chooses unseen puzzles around it. Failed puzzles become
+  Elo update, first try only: score 1 clean, 1/2 solved with help (hint or a wrong try), 0 otherwise (`SCORES`);
+  K = max(40 -> 16 over 100 puzzles, 120 × 0.8^n) so the first puzzles correct a bad seed (provisional rating); `pick()` chooses unseen puzzles around it. Failed puzzles become
   `cards.kind='library'` (due ones join Today's Review). `KIND_THEMES` maps my mistake kinds to themes; Today's Focus
   = half my mistakes, half themed library puzzles. puzzle.js `mode: 'library'` judges locally against the solution
   (any mate counts). UI: `/puzzles` (Practice switch), Settings card, CLI `puzzles`. Block items for the library are
@@ -170,10 +197,19 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   wrong (snap back + spoiler-free explanation via `explain(..., reveal_best=False)`) / right (auto-play reply, continue
   for `playout_moves`) → done (explanation, best-line stepper)). Hints: text from `explain.HINTS`, then piece highlight.
   Chessground boards that take moves must be created with `viewOnly: false` (listeners bind only at creation).
+- Layout (Finish M5, B10): `.layout` = `minmax(0, board + 32px) minmax(var(--side-min), 1fr)`: the board is sized from
+  the window height but shrinks before the side panel goes under `--side-min` (400 px, 360 under 1100 px); the sidebar
+  is icons-only at <= 1100 px. Grids holding names use `minmax(0, 1fr)` so text ellipsizes instead of being clipped.
+  Browser check: scratchpad `layout.mjs` (no sideways scroll, no clipped box, 1024/1280/1440/1920).
 - UI preferences: review is always interactive (puzzle first); board sized from window height for desktop; chess.com
   "Neo" pieces (hotlinked from images.chesscomfiles.com) on a brown/cream board (CSS in `style.css`).
 - `static/board.js`: makeBoard + settings (localStorage, applied via `html[data-board|data-pieces]`), square badges,
   promotion picker, WebAudio sounds. `static/icons.js`: our own SVG mark badges (`MARKS`, `markIcon`).
+  `keepRealBounds` (Finish M5, B17): chessground caches the board's rect; measured while hidden (0×0) every arrow is
+  NaN, and its position goes stale when content above moves (Practice's filter form). So a 0×0 measure falls back to
+  the last real one, the rect is re-measured on every mousedown/touchstart, and the guard is re-applied whenever
+  chessground rebuilds `state.dom` (it does on every flip). Never call `redrawAll()` (it wipes the badge layer).
+  `evalbar.js` labels are short ("1.2", "M3") to fit the 24 px bar.
 - `static/game.js` = Game Report (coach, accuracy, mark counts, key moments, eval graph + time chart with hover).
 - `static/evalbar.js` (vertical eval bar) and `static/analysis.js` (free analysis board: variation + SSE live lines,
   closes its EventSource on `done` so it doesn't auto-reconnect) are shared by game view and review.
@@ -227,4 +263,11 @@ Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--conf
 4. [x] M4 Endgames that teach: finish rules (P11: promote / bare_king / mate / hold, converts resign 3 pawns above
    the start), real Vancura position + tip (P12), Convert lesson on the slip position + resumed prompt (B14).
    Migration 9 reset the endgame cards "solved" under the old 3-move rule.
-5. [ ] M5 Polish: layout 1024–1440 (B10), Practice sessions (B16), scoring (B15), answer panel, clock vs time control
+5. [x] M5 Polish & finish: layout 1024–1920 (B10), Practice sessions + facets (B16), scoring + puzzle rating rules
+   (B15), lean answer panel, self-review copy by result, "Threat check first", chessground bounds (B17, plus stale
+   position after layout shifts), clock vs time control (F7), performance (F17: 6.1 s / 11.6 MB -> 0.08 s / 113 KB for
+   Practice at 1,928 games). Found by the regression: session self-review race, drill Stop race, 404 console noise.
+   Browser regression (scratchpad `regress.mjs` + `run-width.sh`, fresh copies per width): every flow of the audit's
+   Method section at 1280, 1440 and 1920, zero console errors / failed requests / layout problems.
+The Finish roadmap is complete. Next candidates: the list below the audit's cut line (F9 sparring at my level, F10
+calculation trainer, ...) and the deferred deeper re-check of card positions (M3).

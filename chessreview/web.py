@@ -8,6 +8,7 @@ import json
 import re
 import sqlite3
 import threading
+from collections import Counter
 from datetime import date
 
 import chess
@@ -16,7 +17,7 @@ from werkzeug.exceptions import HTTPException
 
 from . import (backup, chesscom, coach, convert, db, insights, level, library, progress, report, repertoire,
                session, srs)
-from .classify import (ADAPTIVE_BANDS, MODE_KEY, Eval, adaptive_enabled, capture_square, ensure_classified,
+from .classify import (ADAPTIVE_BANDS, MODE_KEY, REBUILD, Eval, adaptive_enabled, capture_square, refresh,
                        thresholds_for)
 from .config import PROJECT_ROOT, Config, effective_workers, load_config
 from .engine import AnalysisJob, count_pending
@@ -32,6 +33,11 @@ THREAT_RESULTS = {"correct", "wrong", "skipped"}
 # Latest review result for a mistake row `m` (NULL if never attempted).
 STATUS_SQL = """(SELECT r.result FROM review_results r
                  WHERE r.game_id = m.game_id AND r.ply = m.ply ORDER BY r.id DESC LIMIT 1)"""
+# Practice filters that narrow each other (B16): name -> column; fixed display order where it matters.
+FACETS = [("opening", "g.opening_family"), ("phase", "m.phase"), ("result", "g.my_result"),
+          ("color", "g.my_color"), ("time_class", "g.time_class"), ("kind", "m.kind")]
+FACET_ORDER = {"phase": ["opening", "middlegame", "endgame"], "result": ["win", "draw", "loss"],
+               "color": ["white", "black"]}
 STATUS_FILTERS = {
     "new": f"{STATUS_SQL} IS NULL",
     "unsolved": f"({STATUS_SQL} IS NULL OR {STATUS_SQL} IN ('failed', 'skipped'))",
@@ -91,7 +97,9 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     @app.get("/game/<int:game_id>")
     def game_page(game_id: int):
-        return render_template("game.html", game_id=game_id)
+        # An unknown id gets the "Game not found" state at once, without a failing API call.
+        found = conn().execute("SELECT 1 FROM games WHERE id = ?", (game_id,)).fetchone() is not None
+        return render_template("game.html", game_id=game_id, found=found)
 
     @app.get("/review")
     def review_page():
@@ -236,7 +244,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/games")
     def games():
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         rows = c.execute("""
             SELECT g.id, g.date, g.end_time, g.white, g.black, g.white_elo, g.black_elo, g.my_color,
                    g.my_result, g.result, g.time_class, g.time_control, g.eco, g.opening,
@@ -264,7 +272,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/game/<int:game_id>")
     def game(game_id: int):
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         row = c.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
         if row is None:
             return jsonify(error="Game not found. It may have been deleted."), 404
@@ -287,8 +295,11 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     @app.get("/api/mistakes")
     def mistakes():
+        """My mistakes for Practice, filtered. `keys` lists every match in order ("<game>:<ply>"),
+        `items` the first `limit` of them as puzzles (all of them without `limit`), and `options`
+        the values of each facet that have matches under the other filters, with counts."""
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         args = request.args
         where, params = ["m.is_mine = 1"], []
         if args.get("judgement") == "miss":     # mistakes/blunders that let the opponent's error go
@@ -298,12 +309,6 @@ def create_app(cfg: Config | None = None) -> Flask:
                           if j in JUDGEMENT_ORDER]
             where.append(f"m.judgement IN ({','.join('?' * len(judgements))})")
             params += judgements
-        for arg, column in [("opening", "g.opening_family"), ("phase", "m.phase"),
-                            ("result", "g.my_result"), ("time_class", "g.time_class"),
-                            ("kind", "m.kind"), ("color", "g.my_color")]:
-            if args.get(arg):
-                where.append(f"{column} = ?")
-                params.append(args[arg])
         if args.get("game", type=int):
             where.append("m.game_id = ?")
             params.append(args.get("game", type=int))
@@ -315,24 +320,45 @@ def create_app(cfg: Config | None = None) -> Flask:
             where.append("g.id IN (SELECT id FROM games ORDER BY end_time DESC, id DESC LIMIT ?)")
             params.append(last)
         order = {
-            "worst": "m.win_drop DESC",
+            "worst": "m.win_drop DESC, g.id, m.ply",
             "newest": "g.end_time DESC, g.id DESC, m.ply",
             "oldest": "g.end_time, g.id, m.ply",
-        }.get(args.get("sort", "worst"), "m.win_drop DESC")
+        }.get(args.get("sort", "worst"), "m.win_drop DESC, g.id, m.ply")
 
-        items = _query_mistakes(c, cfg, where, params, order)
-        if args.get("low_clock"):
-            items = [i for i in items if _low_clock(c, i)]
-        return jsonify(items=items, options=_filter_options(c), analysed=coach.analysed_games(c))
+        # One light query for every candidate (no positions, no explanations), then the facets.
+        columns = ", ".join(f"{column} AS {name}" for name, column in FACETS)
+        rows = c.execute(f"""SELECT m.game_id, m.ply, {columns} FROM mistakes m JOIN games g ON g.id = m.game_id
+                             WHERE {' AND '.join(where)} ORDER BY {order}""", params).fetchall()
+        if args.get("low_clock"):     # in time trouble when I made the mistake (needs chess.com clocks)
+            clocks = {r["id"]: r for r in c.execute(
+                "SELECT id, clocks_ms, time_control FROM games WHERE clocks_ms IS NOT NULL")}
+            rows = [r for r in rows if r["game_id"] in clocks and insights.in_time_trouble(
+                clocks[r["game_id"]]["clocks_ms"], clocks[r["game_id"]]["time_control"], r["ply"])]
+        chosen = {name: args[name] for name, _ in FACETS if args.get(name)}
+        hits = [r for r in rows if _facets_match(r, chosen)]
+        limit = args.get("limit", type=int)
+        if limit is None:
+            by_key = {(i["game_id"], i["ply"]): i for i in _query_mistakes(
+                c, cfg, where + [f"{column} = ?" for name, column in FACETS if name in chosen],
+                params + [chosen[name] for name, _ in FACETS if name in chosen], order)}
+            items = [by_key[(r["game_id"], r["ply"])] for r in hits]
+        else:
+            items = _items_for(c, [((r["game_id"], r["ply"]), "practice") for r in hits[:max(0, limit)]])
+        return jsonify(total=len(hits), keys=[f"{r['game_id']}:{r['ply']}" for r in hits], items=items,
+                       options=_facet_options(rows, chosen), analysed=coach.analysed_games(c))
 
-    def _low_clock(c, item) -> bool:
-        """Was my clock under a minute when I made this mistake? (needs chess.com clocks)"""
-        g = c.execute("SELECT clocks_ms, time_control FROM games WHERE id = ?", (item["game_id"],)).fetchone()
-        if not g["clocks_ms"]:
-            return False
-        base, _ = report.parse_time_control(g["time_control"])
-        left = insights.clock_before(g["clocks_ms"].split(), base, item["ply"])
-        return left is not None and left < insights.LOW_CLOCK_MS
+    @app.get("/api/mistakes/items")
+    def mistake_items():
+        """Puzzle items for `keys` ("<game>:<ply>,...", at most 50), in that order: the next
+        Practice session from the key list /api/mistakes returned."""
+        keyed = []
+        for key in request.args.get("keys", "").split(",")[:50]:
+            game_id, _, ply = key.partition(":")
+            if game_id.isdigit() and ply.isdigit():
+                keyed.append(((int(game_id), int(ply)), "practice"))
+        c = conn()
+        refresh(c, cfg)
+        return jsonify(items=_items_for(c, keyed))
 
     # ------------------------------------------------------------ training (SRS) + new-games session
 
@@ -343,7 +369,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/insights")
     def insights_data():
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         return jsonify(insights.compute(c, request.args.get("time_class") or None,
                                         request.args.get("last", type=int)))
 
@@ -355,22 +381,25 @@ def create_app(cfg: Config | None = None) -> Flask:
         th = thresholds_for(rating, cfg, True)
         std = thresholds_for(None, cfg, False)
         pct = lambda v: round(v * 50, 1)   # -1..1 win-chance drop -> win% points
+        mine = c.execute("""SELECT SUM(judgement = 'inaccuracy') AS i, SUM(judgement = 'mistake') AS m,
+                                   SUM(judgement = 'blunder') AS b FROM mistakes WHERE is_mine = 1""").fetchone()
         return jsonify(adaptive=adaptive, rating=rating, band=th.band,
                        adaptive_thresholds=[pct(th.inaccuracy), pct(th.mistake), pct(th.blunder)],
                        standard_thresholds=[pct(std.inaccuracy), pct(std.mistake), pct(std.blunder)],
-                       bands=[{"below": b, "values": [pct(i), pct(m), pct(x)]} for b, i, m, x in ADAPTIVE_BANDS])
+                       bands=[{"below": b, "values": [pct(i), pct(m), pct(x)]} for b, i, m, x in ADAPTIVE_BANDS],
+                       rebuild=dict(REBUILD), counts={"inaccuracies": mine["i"] or 0, "mistakes": mine["m"] or 0,
+                                                      "blunders": mine["b"] or 0})
 
     @app.post("/api/settings/thresholds")
     def thresholds_set():
+        """Switch adaptive/standard thresholds: every game is reclassified in the background
+        (progress in GET /api/settings/thresholds `rebuild`)."""
         adaptive = bool((request.get_json(force=True) or {}).get("adaptive"))
         c = conn()
         with c:
             db.set_meta(c, MODE_KEY, "adaptive" if adaptive else "standard")
-        n = ensure_classified(c, cfg)    # the fingerprint changed: every game is reclassified
-        mine = c.execute("""SELECT SUM(judgement = 'inaccuracy') AS i, SUM(judgement = 'mistake') AS m,
-                                   SUM(judgement = 'blunder') AS b FROM mistakes WHERE is_mine = 1""").fetchone()
-        return jsonify(adaptive=adaptive, games=n, inaccuracies=mine["i"] or 0, mistakes=mine["m"] or 0,
-                       blunders=mine["b"] or 0)
+        refresh(c, cfg)    # the fingerprint changed: starts the rebuild
+        return jsonify(adaptive=adaptive, rebuild=dict(REBUILD))
 
     @app.get("/openings")
     def openings_page():
@@ -383,7 +412,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     def openings_overview():
         """Families I play per colour, repertoire problems and drill status."""
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         color = request.args.get("color", "white")
         tree = _tree(color)
         families = [dict(r) for r in c.execute(
@@ -396,20 +425,19 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/openings/node")
     def openings_node():
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         color = request.args.get("color", "white")
         tree = _tree(color)
         fen = request.args.get("fen")
         epd = chess.Board(fen).epd() if fen else repertoire.root_epd()
         node = repertoire.node_json(tree, epd)
-        if node is None:
-            return jsonify(error="You haven't reached this position in your games."), 404
-        return jsonify(node)
+        # Not an error (an empty database, or a move off my repertoire): the page says so.
+        return jsonify(node or {"reached": False})
 
     @app.get("/api/openings/drill")
     def openings_drill():
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         color = request.args.get("color", "white")
         mode = request.args.get("mode")
         if mode == "today":
@@ -450,7 +478,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/train/stats")
     def train_stats():
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         out = srs.stats(c, cfg)
         out["session"] = session.status(c, cfg)
         out["lines_due"] = len(srs.due_lines(c, "white")) + len(srs.due_lines(c, "black"))
@@ -461,14 +489,14 @@ def create_app(cfg: Config | None = None) -> Flask:
         """Today's workout plan with progress, plus streak, the real-game default and how far
         the games are (for the first run: no games yet / still analysing)."""
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         return _today_json(c, coach.today_plan(c, cfg))
 
     @app.post("/api/today/refresh")
     def today_refresh():
         """Rebuild today's plan (e.g. after new games), keeping what was already tried today."""
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         return _today_json(c, coach.today_plan(c, cfg, refresh=True))
 
     @app.post("/api/today/budget")
@@ -480,7 +508,7 @@ def create_app(cfg: Config | None = None) -> Flask:
             coach.set_budget(c, int((request.get_json(force=True) or {}).get("minutes", 0)))
         except (TypeError, ValueError) as exc:
             return jsonify(error=str(exc)), 400
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         return _today_json(c, coach.today_plan(c, cfg, refresh=True))
 
     def _today_json(c: sqlite3.Connection, plan: dict):
@@ -522,7 +550,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/convert")
     def convert_overview():
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         rating = level.current_rating(c)
         return jsonify(positions=convert.convert_overview(c), endgames=convert.endgame_overview(c),
                        next=convert.next_convert(c), rating=rating, winning_cp=level.winning_cp(rating),
@@ -605,7 +633,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/progress/report")
     def progress_report():
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         return jsonify(progress.report(c, cfg))
 
     def _items_for(c, keyed: list[tuple[tuple, str]]) -> list[dict]:
@@ -731,6 +759,7 @@ def create_app(cfg: Config | None = None) -> Flask:
                     source.unlink(missing_ok=True)
                 return jsonify(error=str(exc)), 400
             backup.rotate(folder, cfg.backup)
+            repertoire.clear_cache()    # the stamp would almost surely differ, but a restore replaces everything
             games = c.execute("SELECT COUNT(*) FROM games").fetchone()[0]
         finally:
             import_lock.release()
@@ -747,7 +776,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/session")
     def session_info():
         c = conn()
-        ensure_classified(c, cfg)
+        refresh(c, cfg)
         st = session.status(c, cfg)
         if not st["open"]:
             return jsonify(st)
@@ -760,6 +789,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     def self_review_games():
         """Games of the open session to self-review (moves only: no evals, no marks)."""
         c = conn()
+        refresh(c, cfg)     # loaded alongside /api/session: both must see the new games classified
         st = session.status(c, cfg)
         return jsonify(games=session.self_review_games(c, cfg, st["batch_ids"]) if st["open"] else [])
 
@@ -1018,18 +1048,19 @@ def _calm_hint(threat) -> str:
     return "No tricks here: look for a solid, useful move that keeps everything protected."
 
 
-def _filter_options(c: sqlite3.Connection) -> dict:
-    def distinct(sql: str) -> list[str]:
-        return [r[0] for r in c.execute(sql) if r[0]]
-    return {
-        "opening": distinct("""SELECT g.opening_family FROM games g JOIN mistakes m ON m.game_id = g.id
-                               WHERE m.is_mine = 1 AND m.judgement != 'good'
-                               GROUP BY g.opening_family ORDER BY COUNT(*) DESC"""),
-        "phase": ["opening", "middlegame", "endgame"],
-        "result": ["win", "draw", "loss"],
-        "time_class": distinct("SELECT DISTINCT time_class FROM games ORDER BY time_class"),
-        "kind": distinct("""SELECT kind FROM mistakes WHERE is_mine = 1 AND kind IS NOT NULL
-                            GROUP BY kind ORDER BY COUNT(*) DESC"""),
-        "color": ["white", "black"],
-        "status": ["unsolved", "new", "failed", "solved"],
-    }
+def _facets_match(row: sqlite3.Row, chosen: dict, skip: str | None = None) -> bool:
+    return all(row[name] == value for name, value in chosen.items() if name != skip)
+
+
+def _facet_options(rows: list[sqlite3.Row], chosen: dict) -> dict:
+    """For each Practice facet, the values with matches under all the *other* chosen filters,
+    with counts (B16: no options that lead to an empty list). A chosen value with no matches
+    stays listed, with count 0, so the form still shows why the list is empty."""
+    options = {}
+    for name, _ in FACETS:
+        counts = Counter(r[name] for r in rows if r[name] and _facets_match(r, chosen, skip=name))
+        if chosen.get(name):
+            counts.setdefault(chosen[name], 0)
+        values = [v for v in FACET_ORDER.get(name, []) if v in counts] or sorted(counts, key=lambda v: (-counts[v], v))
+        options[name] = [{"value": v, "count": counts[v]} for v in values]
+    return options

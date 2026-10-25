@@ -11,11 +11,15 @@ engine's best move replaces it and the position is flagged as a "repertoire prob
 Drills replay lines from move 1: the opponent's moves are picked in proportion to how
 often my opponents played them, and I must find my repertoire move. Each of my positions
 is a spaced-repetition card (cards.kind = 'line', key = '<colour>:<epd>').
+
+`build()` keeps the last few trees in memory (F17): a tree is reused until the games or their
+classification change (`_stamp`), so clicking through the explorer doesn't rebuild it.
 """
 
 import random
 import sqlite3
-from collections import Counter
+import threading
+from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 
 import chess
@@ -25,6 +29,10 @@ from . import openings
 MAX_PLY = 20
 MIN_GAMES = 2
 BAD = {"inaccuracy", "mistake", "blunder"}
+CACHE_SIZE = 8
+
+_cache: OrderedDict = OrderedDict()     # (database, colour, family, stamp) -> tree
+_cache_lock = threading.Lock()
 
 
 @dataclass
@@ -62,7 +70,34 @@ class Node:
 
 
 def build(conn: sqlite3.Connection, color: str, family: str | None = None) -> dict[str, Node]:
-    """The repertoire tree for my games as `color` (optionally one opening family)."""
+    """The repertoire tree for my games as `color` (optionally one opening family), from the
+    cache while nothing it is built from has changed. Callers must not modify it."""
+    key = (conn.execute("PRAGMA database_list").fetchone()["file"], color, family, _stamp(conn))
+    with _cache_lock:
+        if key in _cache:
+            _cache.move_to_end(key)
+            return _cache[key]
+    tree = _build(conn, color, family)
+    with _cache_lock:
+        _cache[key] = tree
+        while len(_cache) > CACHE_SIZE:
+            _cache.popitem(last=False)
+    return tree
+
+
+def clear_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
+def _stamp(conn: sqlite3.Connection) -> tuple:
+    """Changes whenever a game is imported, analysed or deleted, or any game is (re)classified:
+    classify_game always inserts fresh mistakes rows, so their max rowid grows."""
+    return tuple(conn.execute("""SELECT (SELECT COUNT(*) FROM games), (SELECT MAX(id) FROM games),
+                                        (SELECT MAX(analysed_at) FROM games), (SELECT MAX(rowid) FROM mistakes)""").fetchone())
+
+
+def _build(conn: sqlite3.Connection, color: str, family: str | None) -> dict[str, Node]:
     sql = "SELECT * FROM games WHERE my_color = ? AND start_fen IS NULL"
     params: list = [color]
     if family:

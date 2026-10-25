@@ -1,6 +1,6 @@
 // Puzzle library (chessreview/library.py): Lichess puzzles around my puzzle rating, optionally
 // by theme. If the library isn't downloaded yet, offer the download with a progress bar.
-import { api, guard } from './common.js';
+import { api, guard, isSolved } from './common.js';
 import { createPuzzle } from './puzzle.js';
 
 const $ = id => document.getElementById(id);
@@ -10,7 +10,7 @@ const session = { solved: 0, failed: 0 };
 
 const puzzle = createPuzzle({
   onResult: (item, result) => {
-    if (result === 'solved') session.solved += 1;
+    if (isSolved(result)) session.solved += 1;
     else session.failed += 1;
     $('session-score').textContent = `This session: ✓ ${session.solved} · ✗ ${session.failed}`;
     setTimeout(refreshRating, 700);   // after the result has been stored

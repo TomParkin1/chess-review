@@ -63,8 +63,8 @@ def test_puzzle_json_starts_after_the_opponents_move(conn):
 
 def test_rating_moves_with_results_and_only_first_tries_count(conn):
     db.set_meta(conn, library.RATING_KEY, "1500")
-    before, after = library.update_rating(conn, 1500, True)
-    assert before == 1500 and after == 1520                      # K = 40, expected 0.5
+    before, after = library.update_rating(conn, 1500, 1.0)
+    assert before == 1500 and after == 1560                      # first puzzle: K = 120, expected 0.5
     r = library.record(conn, "eeeee", "failed")
     assert r["rated"] and r["rating_after"] < r["rating_before"]
     assert conn.execute("SELECT COUNT(*) FROM cards WHERE kind = 'library' AND key = 'eeeee'").fetchone()[0] == 1
@@ -72,6 +72,23 @@ def test_rating_moves_with_results_and_only_first_tries_count(conn):
     assert not again["rated"] and again["rating_after"] == r["rating_after"]
     library.record(conn, "bbbbb", "solved")                      # solved first time: no card
     assert conn.execute("SELECT COUNT(*) FROM cards WHERE key = 'bbbbb'").fetchone()[0] == 0
+
+
+def test_hints_cost_half_and_the_first_puzzles_count_most(conn):
+    """Section 3: a hint used to cost as much as a failure, and a seed far below my puzzle
+    strength took about 15 clean solves to correct."""
+    assert library.k_factor(0) == 120 and 39 < library.k_factor(5) < 41 and library.k_factor(10) == 37.6
+    assert library.k_factor(100) == library.k_factor(500) == 16
+    db.set_meta(conn, library.RATING_KEY, "1500")
+    db.set_meta(conn, library.COUNT_KEY, "50")                   # past the provisional puzzles: K = 28
+    with conn:
+        conn.execute("UPDATE puzzles SET rating = 1500")
+    helped = library.record(conn, "eeeee", "solved_with_help")
+    assert helped["rating_after"] == helped["rating_before"] == 1500     # half a win at equal ratings
+    failed = library.record(conn, "bbbbb", "failed")
+    assert failed["rating_after"] == 1486                        # a failure costs K/2
+    skipped = library.record(conn, "aaaaa", "skipped")
+    assert skipped["rating_after"] < failed["rating_after"]     # a skip counts as a loss too
 
 
 def test_pick_follows_the_rating(conn):

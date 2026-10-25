@@ -177,3 +177,54 @@ def time_spent(clocks_ms: str | None, time_control: str | None) -> list[int | No
         else:
             spent.append(max(0, previous - clock + inc))
     return spent
+
+
+# ------------------------------------------------------------------ the clock, relative to the time control
+#
+# Clock thresholds are shares of the estimated game duration, base + 40 × increment (what
+# Lichess uses to tell bullet, blitz, rapid and classical apart), so "time trouble" means the
+# same in 3+0 as in 15+10. At 10+0: time trouble under 60 s, a very fast move under 5 s, and
+# buckets at 3 min / 1 min / 18 s. Daily and unknown time controls have no budget.
+
+LOW_CLOCK_SHARE = 0.10
+FAST_MOVE_SHARE = 1 / 120
+CLOCK_BUCKETS = [(0.30, "30%+ left"), (0.10, "10–30% left"), (0.03, "3–10% left"), (0.0, "under 3% left")]
+
+
+def game_budget_ms(tc: str | None) -> int | None:
+    """Estimated game duration (ms) for one player: base + 40 × increment."""
+    base, inc = parse_time_control(tc)
+    return None if base is None else base + 40 * inc
+
+
+def low_clock_ms(tc: str | None) -> int | None:
+    budget = game_budget_ms(tc)
+    return None if budget is None else round(budget * LOW_CLOCK_SHARE)
+
+
+def fast_move_ms(tc: str | None) -> int | None:
+    budget = game_budget_ms(tc)
+    return None if budget is None else round(budget * FAST_MOVE_SHARE)
+
+
+def is_low_clock(left_ms: int | None, tc: str | None) -> bool:
+    """In time trouble: under LOW_CLOCK_SHARE of the game's time budget left."""
+    limit = low_clock_ms(tc)
+    return left_ms is not None and limit is not None and left_ms < limit
+
+
+def clock_bucket(left_ms: int | None, tc: str | None) -> str | None:
+    """Label of the CLOCK_BUCKETS share the remaining clock falls in (None without a budget)."""
+    budget = game_budget_ms(tc)
+    if left_ms is None or not budget:
+        return None
+    return next(label for share, label in CLOCK_BUCKETS if left_ms >= share * budget)
+
+
+def tc_label(tc: str | None) -> str:
+    """'600' -> '10+0', '900+10' -> '15+10', '90+30' -> '1.5+30'."""
+    base, inc = parse_time_control(tc)
+    if base is None:
+        return tc or "?"
+    minutes = base / 60_000
+    return f"{minutes:g}+{inc // 1000}"

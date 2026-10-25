@@ -33,8 +33,37 @@ export function makeBoard(el, config = {}) {
     drawable: { enabled: true, visible: true },
     ...config,
   });
-  window.addEventListener('resize', () => cg.redrawAll());
+  keepRealBounds(cg, el);
   return cg;
+}
+
+// Chessground measures the board once (a memo, cleared by its own ResizeObserver) and places
+// arrows from that size. Measured while the board was hidden (0×0), every arrow lands at NaN (B17:
+// "<line> attribute x1: Expected length, NaN"). So a hidden board keeps its last real size (or a
+// unit square) and is measured again next time; arrows only depend on the board's aspect ratio.
+// The cached size also holds the board's position, which goes stale when something above it opens
+// or closes (Practice's filter form) without a scroll or resize: clicks then hit the wrong squares.
+// So it is measured afresh at the start of every click or touch on the board.
+// Chessground rebuilds `state.dom` (and the memo) whenever the board flips, so the guard is put
+// back on every rebuild. (No redrawAll() on window resize any more: it dropped the badge layer.)
+function keepRealBounds(cg, el) {
+  let dom;
+  let last = null;
+  const guard = d => {
+    const measure = d.bounds;
+    const bounds = () => {
+      const b = measure();
+      if (b.width && b.height) return (last = b);
+      measure.clear();
+      return last || new DOMRect(0, 0, 1, 1);
+    };
+    bounds.clear = measure.clear;
+    d.bounds = bounds;
+  };
+  const current = cg.state.dom;
+  Object.defineProperty(cg.state, 'dom', { configurable: true, enumerable: true, get: () => dom, set: d => { dom = d; guard(d); } });
+  cg.state.dom = current;
+  for (const type of ['mousedown', 'touchstart']) el.addEventListener(type, () => dom.bounds.clear(), { capture: true, passive: true });
 }
 
 // A badge (move-mark icon) in the corner of one square, drawn above the pieces.

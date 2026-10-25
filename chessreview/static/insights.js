@@ -106,10 +106,16 @@ async function load() {
     title: `${b.blunders} blunders in ${b.moves} moves`,
   })), { color: 'var(--blunder)' });
   const fast = clock.fast, slow = clock.slow;
+  const u = clock.usual;
+  const secs = ms => (ms >= 60000 ? `${+(ms / 60000).toFixed(1)} min` : `${+(ms / 1000).toFixed(1)} s`);
   $('clock-note').textContent = clock.games_with_clocks
-    ? `Based on ${clock.games_with_clocks} games with clock times. ` +
+    ? `Based on ${clock.games_with_clocks} games with clock times. Time left is a share of the time control ` +
+      `(base + 40 × increment), so blitz and rapid compare fairly` +
+      (u ? `: at ${u.label}, 30% is ${secs(u.bucket_ms[0])}, time trouble (10%) starts at ${secs(u.low_ms)} and ` +
+           `3% is ${secs(u.bucket_ms[2])}. ` : '. ') +
       (fast.rate != null && slow.rate != null
-        ? `Moves made in under 5 s: ${fast.rate.toFixed(1)} blunders per 100; slower moves: ${slow.rate.toFixed(1)}.` : '')
+        ? `Very fast moves${u ? ` (under ${secs(u.fast_ms)} at ${u.label})` : ''}: ${fast.rate.toFixed(1)} blunders per 100; ` +
+          `slower moves: ${slow.rate.toFixed(1)}.` : '')
     : 'Clock times come with chess.com sync; uploaded PGN downloads have none.';
 
   $('colors').replaceChildren(...d.colors.map(c => el('a', { class: 'color-tile', href: trainHref({ color: c.color }) },

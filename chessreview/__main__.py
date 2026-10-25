@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 from . import backup, db
-from .classify import ensure_classified
+from .classify import ensure_classified, refresh
 from .config import effective_workers, load_config
 from .engine import AnalysisJob, count_pending
 from .pgn_import import import_paths
@@ -200,7 +200,7 @@ def _print_progress(job: AnalysisJob) -> None:
 
 def cmd_serve(conn: sqlite3.Connection, cfg, args) -> None:
     from .web import create_app  # Flask is only needed for the web app
-    ensure_classified(conn, cfg)
+    refresh(conn, cfg)    # new games now; a full rebuild (new thresholds or version) in the background
     print(f"Open http://127.0.0.1:{args.port} in your browser (Ctrl+C to stop).")
     app = create_app(cfg)
     daily = backup.DailyBackups(cfg.db_path, cfg.backup).start()   # today's copy, then hourly checks

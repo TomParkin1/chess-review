@@ -92,8 +92,8 @@ def test_session_status_summary_and_done(conn, cfg):
     summary = session.summary(conn, cfg, st["batch_ids"])
     assert summary["games"] == 1 and summary["losses"] == 1 and summary["blunders"] == 1
     assert summary["top_kinds"] == [("hanging_piece", 1)]
-    # ply 4 blunder: my clock before it is the value after ply 2 (100000 ms) -> "1–3 min"
-    assert dict(summary["blunder_clock"])["1–3 min"] == 1
+    # ply 4 blunder: my clock before it is the value after ply 2 (100 s of 10 minutes: 17% left)
+    assert dict(summary["blunder_clock"])["10–30% left"] == 1 and summary["time_trouble_blunders"] == 0
     session.mark_done(conn, st["batch_ids"])
     assert session.status(conn, cfg)["open"] is False
     assert (3, 4) in srs.queue(conn, cfg, DAY)["new"]          # now it joins daily training

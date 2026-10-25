@@ -55,6 +55,16 @@ def wait_for_analysis(client):
     raise AssertionError("analysis did not finish")
 
 
+def wait_for_rebuild(client):
+    import time
+    for _ in range(300):
+        info = client.get("/api/settings/thresholds").get_json()
+        if not info["rebuild"]["running"]:
+            return info
+        time.sleep(0.05)
+    raise AssertionError("reclassifying did not finish")
+
+
 def test_upload_analyse_and_review(client):
     c, _app = client
     with open(SAMPLE, "rb") as f:
@@ -146,6 +156,71 @@ def test_review_results_and_status_filter(client):
     assert c.post("/api/review/result", json={"game_id": 1, "ply": 0, "result": "bogus"}).status_code == 400
 
 
+def test_practice_sessions_get_keys_and_one_page_of_puzzles(client):
+    """F17 / B16: Practice used to build every item at once (5.5 s, 11.8 MB at 1,928 games) and
+    had no end. Now: every match's key in order, the first `limit` puzzles, the rest by key."""
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    q = "/api/mistakes?judgement=inaccuracy,mistake,blunder&sort=newest"
+    full = c.get(q).get_json()
+    assert len(full["items"]) == full["total"] == len(full["keys"]) >= 3   # no limit: everything, as before
+    paged = c.get(q + "&limit=1").get_json()
+    assert paged["keys"] == full["keys"] and paged["total"] == full["total"]
+    assert [f"{i['game_id']}:{i['ply']}" for i in paged["items"]] == full["keys"][:1]
+    rest = c.get("/api/mistakes/items?keys=" + ",".join(full["keys"][1:3] + ["bad", "9:x"])).get_json()["items"]
+    assert [f"{i['game_id']}:{i['ply']}" for i in rest] == full["keys"][1:3]
+    assert rest[0]["best_pv_uci"] and rest[0]["explanation"] is not None
+
+
+def test_practice_filters_only_offer_what_exists(client):
+    """B16: the Opening filter listed openings with 0 matches under the other filters."""
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    q = "/api/mistakes?judgement=inaccuracy,mistake,blunder&limit=1"
+    every = c.get(q).get_json()
+    openings = {o["value"]: o["count"] for o in every["options"]["opening"]}
+    assert sum(openings.values()) == every["total"] and all(openings.values())
+    # Narrow to one phase: the openings offered (and their counts) are those with mistakes in that phase.
+    phase = every["options"]["phase"][0]["value"]
+    narrowed = c.get(q + f"&phase={phase}").get_json()
+    in_phase = {o["value"]: o["count"] for o in narrowed["options"]["opening"]}
+    assert sum(in_phase.values()) == narrowed["total"] < every["total"] or len(every["options"]["phase"]) == 1
+    for family, n in in_phase.items():
+        assert c.get(q + f"&phase={phase}&opening={family}").get_json()["total"] == n
+    # The phase facet itself still lists every phase (it isn't narrowed by its own choice).
+    assert narrowed["options"]["phase"] == every["options"]["phase"]
+    # A chosen value with no matches stays listed with 0, so the form can show it.
+    none = c.get(q + "&opening=Nonexistent Defense").get_json()
+    assert none["total"] == 0 and {"value": "Nonexistent Defense", "count": 0} in none["options"]["opening"]
+
+
+def test_time_trouble_filter_is_relative_to_the_time_control(client, tmp_path):
+    """F7: "time trouble" meant under 60 s whatever the game; now under 10% of base + 40 x increment."""
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    q = "/api/mistakes?judgement=inaccuracy,mistake,blunder&status="
+    items = c.get(q).get_json()["items"]
+    m = next(i for i in items if i["ply"] >= 2)
+    conn = db.connect(tmp_path / "web.db")
+    plies = conn.execute("SELECT num_plies FROM games WHERE id = ?", (m["game_id"],)).fetchone()[0]
+    clocks = " ".join(["45000"] * plies)
+    with conn:
+        conn.execute("UPDATE games SET clocks_ms = ?, time_control = '600' WHERE id = ?", (clocks, m["game_id"]))
+    keys = c.get(q + "&low_clock=1").get_json()["keys"]
+    assert f"{m['game_id']}:{m['ply']}" in keys                  # 45 s of 10 minutes: under 10%
+    with conn:
+        conn.execute("UPDATE games SET time_control = '180' WHERE id = ?", (m["game_id"],))
+    keys = c.get(q + "&low_clock=1").get_json()["keys"]
+    assert f"{m['game_id']}:{m['ply']}" not in keys              # 45 s of 3 minutes is 25%: fine
+    conn.close()
+
+
 def test_analysis_stream(client):
     c, _app = client
     fen = "6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1"  # Ra8#
@@ -182,7 +257,7 @@ def test_openings_api(client):
         root = c.get(f"/api/openings/node?color={color}").get_json()
         assert root["games"] >= 1
         assert c.get(f"/api/openings/drill?color={color}").status_code == 200
-    assert c.get("/api/openings/node?color=white&fen=8/8/8/8/8/8/8/K6k w - - 0 1").status_code == 404
+    assert c.get("/api/openings/node?color=white&fen=8/8/8/8/8/8/8/K6k w - - 0 1").get_json() == {"reached": False}
     assert c.post("/api/openings/result", json={"key": "white:x", "result": "solved"}).get_json()["ok"]
     assert c.get("/openings").status_code == 200
 
@@ -194,12 +269,53 @@ def test_threshold_mode_switch_reclassifies(client):
     wait_for_analysis(c)
     info = c.get("/api/settings/thresholds").get_json()
     assert "adaptive" in info and len(info["standard_thresholds"]) == 3
-    std = c.post("/api/settings/thresholds", json={"adaptive": False}).get_json()
-    assert std["adaptive"] is False and std["games"] == 3          # every game reclassified
-    assert c.get("/api/settings/thresholds").get_json()["adaptive"] is False
-    ada = c.post("/api/settings/thresholds", json={"adaptive": True}).get_json()
+    c.get("/api/games")         # the first classification happens on the spot
+    assert c.post("/api/settings/thresholds", json={"adaptive": False}).get_json()["adaptive"] is False
+    std = wait_for_rebuild(c)   # reclassified in the background
+    assert std["adaptive"] is False and std["rebuild"]["total"] == 3          # every game reclassified
+    std = std["counts"]
+    c.post("/api/settings/thresholds", json={"adaptive": True})
+    ada = wait_for_rebuild(c)["counts"]
     # Sample players are rated ~1200 (or unrated): adaptive can only be as strict or more lenient.
     assert ada["mistakes"] + ada["blunders"] <= std["mistakes"] + std["blunders"]
+
+
+def test_requests_keep_working_while_everything_is_reclassified(client, monkeypatch):
+    """F17: a full reclassification runs in the background; pages keep reading the stored rows."""
+    import threading
+    from chessreview import classify
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    before = c.get("/api/mistakes?judgement=inaccuracy,mistake,blunder").get_json()["total"]
+    gate = threading.Event()
+    real = classify.classify_game
+    monkeypatch.setattr(classify, "classify_game", lambda *a, **k: (gate.wait(10), real(*a, **k))[1])
+    c.post("/api/settings/thresholds", json={"adaptive": False})
+    assert c.get("/api/settings/thresholds").get_json()["rebuild"]["running"]
+    # The rebuild is stuck on its first game, yet requests answer at once from the stored rows.
+    assert c.get("/api/mistakes?judgement=inaccuracy,mistake,blunder").get_json()["total"] == before
+    assert c.get("/api/games").status_code == 200
+    gate.set()
+    done = wait_for_rebuild(c)
+    assert done["rebuild"]["done"] == done["rebuild"]["total"] == 3 and done["rebuild"]["error"] is None
+
+
+def test_self_review_list_classifies_new_games_itself(client, tmp_path):
+    """The session page loads /api/session and /api/session/self-review at once; only the first
+    classified new games, so straight after analysis the self-review list came back empty."""
+    c, _app = client
+    with open(SAMPLE, "rb") as f:
+        c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
+    wait_for_analysis(c)
+    with db.connect(tmp_path / "web.db") as conn:      # new games (not history), lost: self-reviewed
+        conn.execute("UPDATE imports SET session_done_at = NULL")
+        conn.execute("UPDATE games SET my_result = 'loss'")
+    first = c.get("/api/session/self-review").get_json()["games"]     # before any other request
+    c.get("/api/session")
+    again = c.get("/api/session/self-review").get_json()["games"]
+    assert again and [g["game_id"] for g in first] == [g["game_id"] for g in again]
 
 
 def test_threat_check_and_real_game_queue(client):
@@ -332,6 +448,8 @@ def test_api_errors_are_json_and_pages_say_what_went_wrong(client, monkeypatch):
     c, _app = client
     r = c.get("/api/game/999999")
     assert r.status_code == 404 and "Game not found" in r.get_json()["error"]
+    # The page knows by itself, so it shows "Game not found" without a failing request (a console error).
+    assert "window.GAME_FOUND = false" in c.get("/game/999999").get_data(as_text=True)
     assert c.get("/api/no-such-thing").get_json()["error"]
     monkeypatch.setattr(coach, "today_plan", lambda *a, **k: 1 / 0)
     r = c.get("/api/today")

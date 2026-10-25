@@ -40,7 +40,7 @@ import sqlite3
 from datetime import date, datetime
 from statistics import mean
 
-from . import convert, db, insights, library, report, repertoire, session, srs
+from . import convert, db, insights, library, repertoire, session, srs
 from .config import Config
 
 PLAN_KEY = "today_plan"
@@ -388,7 +388,7 @@ def _matching_mistakes(conn: sqlite3.Connection, train: dict, taken: set[tuple],
     for r in rows:
         if (r["game_id"], r["ply"]) in taken:
             continue
-        if train.get("low_clock") and not _low_clock(r):
+        if train.get("low_clock") and not insights.in_time_trouble(r["clocks_ms"], r["time_control"], r["ply"]):
             continue
         if r["unseen"]:
             if new_left <= 0:
@@ -396,12 +396,3 @@ def _matching_mistakes(conn: sqlite3.Connection, train: dict, taken: set[tuple],
             new_left -= 1
         out.append((r["game_id"], r["ply"]))
     return out
-
-
-def _low_clock(row: sqlite3.Row) -> bool:
-    if not row["clocks_ms"]:
-        return False
-    base, _ = report.parse_time_control(row["time_control"])
-    left = insights.clock_before(row["clocks_ms"].split(), base, row["ply"])
-    return left is not None and left < insights.LOW_CLOCK_MS
-

@@ -5,9 +5,10 @@
 //                                                    until playout_moves are found -> done
 // "View solution" ends as failed; "Skip" records a skip and asks the host for the next one.
 //
-// Real-game mode (item.mode === 'blind'): nothing says a mistake was made (no badge, no game-move
-// arrow) and some items are calm positions where I played well. If the position has threat data,
-// a threat step comes first: play the opponent's threat (as if I passed) or press "No real threat".
+// Real-game mode (item.mode === 'blind', "Threat check first" on the pages): nothing says a mistake
+// was made (no badge, no game-move arrow) and in Today's real-game block some items are calm
+// positions where I played well. If the position has threat data, a threat step comes first: play
+// the opponent's threat (as if I passed) or press "No real threat".
 //
 // Library mode (item.mode === 'library'): a Lichess puzzle. The opponent's first move is played
 // on the board, moves are checked locally against the solution (any mate also counts), and the
@@ -397,39 +398,48 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     };
     const [cls, head, tail] = messages[result];
     rich($('prompt'), [`strong.${cls}`, head], tail);
+    // The lean answer panel: the result line and the buttons, then one block for what happened in
+    // the game, one for why the best move is better, and the best line. The last feedback ("✓ Best
+    // move!") and the status chip ("Solved before") would only repeat the result.
+    $('feedback').hidden = true;
+    $('status-chip').hidden = true;
     $('hint').hidden = true;
     $('solve-actions').hidden = true;
     $('done-actions').hidden = false;
 
-    $('eval-before').textContent = m.eval_before ?? '';
-    $('eval-after').textContent = m.eval_after ?? '';
-    $('answer').querySelector('.evals').hidden = p.lib;
-    $('reveal').hidden = !p.blind && !p.lib;
-    if (p.lib) rich($('reveal'), 'Themes: ', ['strong', m.themes.join(', ') || '–'], '. Rating: updating…');
-    if (p.blind) {
+    if (p.blind) {    // threat check mode: now say which move it was
       $('badge').hidden = false;
       $('move-title').textContent = `${m.move_label}${SYMBOLS[m.judgement] || ''}`;
-      if (calm) {
-        rich($('reveal'), 'In the game you played ', ['strong', m.move_san], ' here: a good move.',
-             m.threat?.real ? ' You dealt with the threat then too.' : '');
-      } else {
-        rich($('reveal'), 'In the game you played ', ['strong', `${m.move_san}${SYMBOLS[m.judgement]}`],
-             ` here: ${article(verdict(m))} ${verdict(m)}.`, verdict(m) === 'miss' ? MISS_NOTE : '');
-      }
     }
-    $('explanation').hidden = calm || p.lib;
-    $('answer').querySelector('.legend').hidden = calm || p.lib;
-    rich($('explanation'), ['strong', `Why ${m.move_san} was ${article(verdict(m))} ${verdict(m)}: `],
-         m.explanation || '', !p.blind && verdict(m) === 'miss' ? MISS_NOTE : '');
+    const ex = $('explanation');
+    ex.className = `explanation ${calm || p.lib ? 'neutral' : m.judgement}`;
+    // The evals, unless the explanation already quotes the drop ("the evaluation drops from …").
+    const evals = m.eval_before && !m.explanation?.includes(m.eval_after) ? ` (${m.eval_before} → ${m.eval_after})` : '';
+    const missNote = verdict(m) === 'miss' ? MISS_NOTE : '';
+    if (p.lib) libraryNote(m, 'Rating: updating…');
+    else if (calm) {
+      rich(ex, 'In the game you played ', ['strong', m.move_san], ' here: a good move.',
+           m.threat?.real ? ' You dealt with the threat then too.' : '');
+    } else if (p.blind) {
+      rich(ex, ['strong', `In the game you played ${m.move_san}${SYMBOLS[m.judgement]}, ${article(verdict(m))} ` +
+                          `${verdict(m)}${evals}. `], m.explanation || '', missNote);
+    } else {
+      rich(ex, ['strong', `Why ${m.move_san} was ${article(verdict(m))} ${verdict(m)}${evals}: `], m.explanation || '', missNote);
+    }
     $('best-explanation').hidden = !m.best_explanation || p.lib;
     rich($('best-explanation'), ['strong', `Why ${m.best_san} is better: `], m.best_explanation || '');
-    $('explanation').className = `explanation ${m.judgement}`;
+    $('arrow-legend').innerHTML = p.lib ? '' : calm ? '· <span class="swatch green"></span> a good move'
+      : '· <span class="swatch red"></span> your game move <span class="swatch green"></span> best';
     setTimeout(() => {
       if (puzzle !== p) return;
       $('answer').hidden = false;
       buildSolution(m);
       showSolutionStep(0);
     }, delay);
+  }
+
+  function libraryNote(m, rating, ...rest) {
+    rich($('explanation'), 'Themes: ', ['strong', m.themes.join(', ') || '–'], `. ${rating}`, ...rest);
   }
 
   // Next, Skip and Enter move on once per puzzle: the second click of a double click (or a held
@@ -454,8 +464,8 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
       }).then(r => {
         if (puzzle !== p) return;
         const diff = r.rating_after - r.rating_before;
-        rich($('reveal'), 'Themes: ', ['strong', p.item.themes.join(', ') || '–'], '. Your puzzle rating: ',
-             ['strong', `${r.rating_after}`], r.rated ? ` (${diff >= 0 ? '+' : ''}${diff}).` : ' (only the first try counts).');
+        libraryNote(p.item, 'Your puzzle rating: ', ['strong', `${r.rating_after}`],
+                    r.rated ? ` (${diff >= 0 ? '+' : ''}${diff}).` : ' (only the first try counts).');
       }).catch(() => { /* not critical */ });
       return;
     }

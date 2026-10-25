@@ -70,6 +70,25 @@ export async function need(where, url, what) {
 
 export const SYMBOLS = { inaccuracy: '?!', mistake: '?', blunder: '??' };
 
+// Every page scores a puzzle the same way: solved with hints or retries still counts as solved (B15).
+export const isSolved = result => result === 'solved' || result === 'solved_with_help';
+
+// What identifies a puzzle item: a library puzzle by its id, one of my positions by game and ply.
+export const itemKey = item => (item.mode === 'library' ? `lib:${item.puzzle_id}` : `${item.game_id}:${item.ply}`);
+
+// "Threat check first" (real-game mode): one preference for Practice and Today's reviews.
+// Returns true/false, or null when never set (each page then has its own default).
+export function threatCheckPref() {
+  try {
+    const v = localStorage.getItem('threat-check') ?? localStorage.getItem('practice-blind') ?? localStorage.getItem('train-blind');
+    return v === null ? null : v === '1';
+  } catch { return null; }
+}
+
+export function setThreatCheckPref(on) {
+  try { localStorage.setItem('threat-check', on ? '1' : '0'); } catch { /* unavailable */ }
+}
+
 // Evals arrive from White's point of view as {cp, mate}.
 export function formatEval(ev) {
   if (!ev) return '';

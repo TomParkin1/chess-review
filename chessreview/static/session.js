@@ -2,7 +2,7 @@
 // turn? picked before any engine verdict), then puzzles from the games just synced/uploaded,
 // in game order, then a summary card of what this batch shows.
 import { makeBoard, sound } from './board.js';
-import { api, arrow, busy, el, guard, lastMove, sideToMove, SYMBOLS } from './common.js';
+import { api, arrow, busy, el, guard, isSolved, lastMove, sideToMove, SYMBOLS } from './common.js';
 import { createPuzzle } from './puzzle.js';
 import { countBar } from './widgets.js';
 
@@ -23,7 +23,7 @@ const srTally = { found: 0, tried: 0 };
 
 const puzzle = createPuzzle({
   onResult: (item, result) => {
-    if (result.startsWith('solved')) tally.solved += 1; else tally.failed += 1;
+    if (isSolved(result)) tally.solved += 1; else tally.failed += 1;
     updateBar();
   },
   onNext: () => {
@@ -64,8 +64,8 @@ async function finish() {
   const anyClock = s.blunder_clock.some(([, n]) => n);
   const lessons = [];
   if (s.top_kinds.length) lessons.push(`Your most common problem this batch: ${(KIND_LABELS[s.top_kinds[0][0]] || s.top_kinds[0][0]).toLowerCase()}.`);
-  const lowTime = s.blunder_clock.filter(([label]) => label.startsWith('under') || label.startsWith('20')).reduce((t, [, n]) => t + n, 0);
-  if (s.blunders && lowTime / s.blunders >= 0.4) lessons.push(`${lowTime} of your ${s.blunders} blunders came with under a minute left: watch the clock.`);
+  const lowTime = s.time_trouble_blunders || 0;
+  if (s.blunders && lowTime / s.blunders >= 0.4) lessons.push(`${lowTime} of your ${s.blunders} blunders came in time trouble (under 10% of your clock): watch the clock.`);
 
   box.replaceChildren(...[
     el('div', { class: 'celebrate' }, '📋'),
@@ -75,7 +75,7 @@ async function finish() {
        ` · ${s.mistakes} mistakes, ${s.blunders} blunders`),
     attempted || s.self_review?.tries ? el('div', { class: 'chips' },
       s.self_review?.tries ? el('span', { class: 'chip' },
-        `🔍 turning points found: ${s.self_review.hits} of ${s.self_review.tries}`) : null,
+        `🔍 turning points you found: ${s.self_review.hits} of ${s.self_review.tries}`) : null,
       attempted ? el('span', { class: 'chip solved' }, `✓ ${tally.solved} solved`) : null,
       attempted ? el('span', { class: 'chip failed' }, `✗ ${tally.failed} missed (they're now in daily training)`) : null) : null,
     lessons.length ? el('div', { class: 'lessons' }, ...lessons.map(l => el('p', {}, '💡 ', l))) : null,
@@ -83,7 +83,7 @@ async function finish() {
       el('div', {}, el('div', { class: 'section-title' }, 'What went wrong'),
         ...(s.top_kinds.length ? s.top_kinds.map(([k, n]) => countBar(KIND_LABELS[k] || k, n, kindMax, 'var(--mistake)'))
                                : [el('p', { class: 'muted small' }, 'No mistakes or blunders. Nice!')])),
-      anyClock ? el('div', {}, el('div', { class: 'section-title' }, 'Clock left at each blunder'),
+      anyClock ? el('div', {}, el('div', { class: 'section-title' }, 'Share of your clock left at each blunder'),
         ...s.blunder_clock.map(([label, n]) => countBar(label, n, clockMax, 'var(--blunder)'))) : null),
     s.worst_game ? el('p', {}, 'Toughest game: ',
       el('a', { href: `/game/${s.worst_game.id}` }, `vs ${s.worst_game.opponent}`),
@@ -105,6 +105,18 @@ function moveLabel(m) {
 
 function isMine(m) { return sideToMove(m.fen) === sr.game.my_color; }
 
+// "Where did it turn?" makes no sense for a game I won (Section 3): there the question is my
+// worst moment, and in a draw where it slipped. The answer is the same move either way.
+const SR_COPY = {
+  loss: { ask: 'Before the engine has its say: where did this game turn? Step through it and pick the move of yours where it went wrong.',
+          pick: 'It turned at', it: 'the game turned at' },
+  draw: { ask: 'Before the engine has its say: where did this game slip? Step through it and pick the move of yours where it went wrong.',
+          pick: 'It slipped at', it: 'the game slipped at' },
+  win: { ask: 'You won, but before the engine has its say: where was your worst moment? Step through it and pick the move of yours that gave away the most.',
+         pick: 'My worst moment:', it: 'your worst moment was' },
+};
+const srCopy = () => SR_COPY[sr.game.result] || SR_COPY.loss;
+
 function showReviewGame(i) {
   const game = reviewGames[i];
   sr = { game, gameIndex: i, cursor: 0, picked: null, result: null };
@@ -115,7 +127,7 @@ function showReviewGame(i) {
   $('sr-score').textContent = srTally.tried ? `found ${srTally.found} of ${srTally.tried}` : '';
   $('sr-title').textContent = `vs ${game.opponent} · you ${{ win: 'won', loss: 'lost', draw: 'drew' }[game.result]}`;
   $('sr-context').textContent = `${game.date} · ${game.opening}`;
-  $('sr-prompt').textContent = 'Before the engine has its say: where did this game turn? Step through it and pick the move of yours where it went wrong.';
+  $('sr-prompt').textContent = srCopy().ask;
   $('sr-feedback').hidden = true;
   $('sr-explanation').hidden = true;
   $('sr-actions').hidden = false;
@@ -148,7 +160,7 @@ function renderReviewMoves() {
 function updatePickButton() {
   const m = sr.game.moves.find(x => x.ply === sr.picked);
   $('sr-pick').disabled = !m;
-  $('sr-pick').textContent = m ? `It turned at ${moveLabel(m)}` : 'Pick one of your moves';
+  $('sr-pick').textContent = m ? `${srCopy().pick} ${moveLabel(m)}` : 'Pick one of your moves';
 }
 
 function goTo(cursor) {
@@ -173,10 +185,12 @@ async function submitPick(ply) {
   if (r.hit) sound.correct(); else sound.wrong();
   $('sr-feedback').hidden = false;
   $('sr-feedback').className = `feedback ${r.hit ? 'ok' : 'bad'}`;
-  $('sr-feedback').textContent = r.exact ? `✓ Exactly: the game turned at ${label}.`
-    : r.hit ? `✓ Close enough: the game turned at ${label} (you picked ${moveLabel(picked)}).`
-      : ply == null ? `The game turned at ${label}.`
-        : `✗ The game turned at ${label}, not ${moveLabel(picked)}.`;
+  const it = srCopy().it;
+  const It = it.charAt(0).toUpperCase() + it.slice(1);
+  $('sr-feedback').textContent = r.exact ? `✓ Exactly: ${it} ${label}.`
+    : r.hit ? `✓ Close enough: ${it} ${label} (you picked ${moveLabel(picked)}).`
+      : ply == null ? `${It} ${label}.`
+        : `✗ ${It} ${label}, not ${moveLabel(picked)}.`;
   $('sr-explanation').hidden = !r.explanation;
   $('sr-explanation').className = `explanation ${r.judgement}`;
   $('sr-explanation').textContent = r.explanation || '';

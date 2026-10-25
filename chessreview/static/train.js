@@ -1,6 +1,6 @@
 // Today: the daily workout (chessreview/coach.py). A checklist of blocks; each block runs its
 // puzzles in the shared puzzle component. Puzzles failed in a block come back once at its end.
-import { api, busy, el, guard } from './common.js';
+import { api, busy, el, guard, isSolved, itemKey, setThreatCheckPref, threatCheckPref } from './common.js';
 import { createPuzzle } from './puzzle.js';
 import { showTodayBadge } from './shell.js';
 import { progressRing } from './widgets.js';
@@ -22,10 +22,10 @@ const retried = new Set();
 
 const puzzle = createPuzzle({
   onResult: (item, result) => {
-    if (result.startsWith('solved')) tally.solved += 1;
+    if (isSolved(result)) tally.solved += 1;
     else {
       tally.failed += 1;
-      const key = `${item.game_id}:${item.ply}`;
+      const key = itemKey(item);
       if (!retried.has(key)) { retried.add(key); queue.push({ ...item, again: true }); }  // once more today
     }
     updateBar();
@@ -33,18 +33,13 @@ const puzzle = createPuzzle({
   onNext: () => next(),
 });
 
-// ------------------------------------------------------------ real-game toggle (reviews block)
+// ------------------------------------------------------------ "Threat check first" toggle (reviews block)
 
-const BLIND_KEY = 'train-blind';
 function blindParam() {
-  try {
-    const v = localStorage.getItem(BLIND_KEY);
-    return v === null ? '' : `?blind=${v}`;
-  } catch { return ''; }
+  const pref = threatCheckPref();     // shared with Practice
+  return pref === null ? '' : `?blind=${pref ? 1 : 0}`;
 }
-$('blind-toggle').addEventListener('change', () => {
-  try { localStorage.setItem(BLIND_KEY, $('blind-toggle').checked ? '1' : '0'); } catch { /* unavailable */ }
-});
+$('blind-toggle').addEventListener('change', () => setThreatCheckPref($('blind-toggle').checked));
 
 // ------------------------------------------------------------ the plan
 
@@ -89,9 +84,8 @@ function waitForGames(games) {
 function render(data) {
   plan = data.plan;
   showTodayBadge(plan);
-  let pref = null;
-  try { pref = localStorage.getItem(BLIND_KEY); } catch { /* unavailable */ }
-  $('blind-toggle').checked = pref === null ? data.blind : pref === '1';
+  const pref = threatCheckPref();
+  $('blind-toggle').checked = pref === null ? data.blind : pref;
 
   const left = plan.total - plan.finished;
   $('ring').hidden = !plan.total;      // an empty plan isn't "done": there was nothing to do yet

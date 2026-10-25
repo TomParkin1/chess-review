@@ -1,5 +1,12 @@
 // Vertical evaluation bar (like Lichess): the white part grows with White's winning chances.
-import { formatEval, winChance } from './common.js';
+import { winChance } from './common.js';
+
+// Short enough for the 24 px bar: "1.2", "-0.5", "12", "M3" (mate either way).
+function barLabel(ev) {
+  if (ev.mate !== null && ev.mate !== undefined) return `M${Math.abs(ev.mate)}`;
+  const v = (ev.cp || 0) / 100;
+  return v.toFixed(Math.abs(v) < 9.95 ? 1 : 0).replace(/^-0(\.0)?$/, '0.0');
+}
 
 export function createEvalBar(container) {
   const bar = document.createElement('div');
@@ -23,8 +30,7 @@ export function createEvalBar(container) {
       }
       const share = (1 + winChance(ev)) / 2;           // 0..1 of the bar that is white
       white.style.height = `${(share * 100).toFixed(1)}%`;
-      const formatted = formatEval(ev).replace(/^\+/, '').replace(/^#/, 'M');
-      label.textContent = text ?? formatted.replace(/^M-/, 'M');
+      label.textContent = text ?? barLabel(ev);
       // Put the label at the end of whichever side is better.
       label.classList.toggle('on-white', share >= 0.5);
     },

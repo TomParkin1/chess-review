@@ -7,12 +7,18 @@ engine analysis.
 Win chance uses the Lichess formula on a -1..1 scale:
     winning_chances(cp) = 2 / (1 + exp(-0.00368208 * cp)) - 1
 A move's "drop" is my win chance before the move minus my win chance after it.
+
+`ensure_classified()` classifies what is missing (blocking: CLI, tests). Web requests call
+`refresh()` instead: new games are classified on the spot, but a full rebuild (thresholds or
+version changed) runs in a background thread while requests keep reading the stored rows.
 """
 
 import hashlib
 import json
 import math
 import sqlite3
+import threading
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 import chess
@@ -290,9 +296,59 @@ def settings_fingerprint(cfg: Config, adaptive: bool = False) -> str:
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
+_lock = threading.Lock()          # one classification run at a time
+_start_lock = threading.Lock()
+REBUILD = {"running": False, "done": 0, "total": 0, "error": None}   # the background rebuild's progress
+
+
 def ensure_classified(conn: sqlite3.Connection, cfg: Config, force: bool = False) -> int:
     """Classify analysed games that have no classification yet, or all of them if the
     settings changed since the last run. Returns the number of games classified."""
+    with _lock:
+        return _classify(conn, cfg, force)
+
+
+def needs_rebuild(conn: sqlite3.Connection, cfg: Config) -> bool:
+    return db.get_meta(conn, SETTINGS_KEY) != settings_fingerprint(cfg, adaptive_enabled(conn, cfg))
+
+
+def refresh(conn: sqlite3.Connection, cfg: Config) -> None:
+    """For web requests (F17): classify newly analysed games now, which is quick, but leave a
+    full rebuild of stored rows to `start_rebuild()`. Meanwhile requests read the rows as they
+    are: each game is replaced in one transaction, so no game is ever half-classified."""
+    if REBUILD["running"]:
+        return                  # the rebuild classifies new games too
+    if needs_rebuild(conn, cfg) and conn.execute("SELECT 1 FROM mistakes LIMIT 1").fetchone():
+        start_rebuild(cfg)
+        return
+    with _lock:
+        _classify(conn, cfg, False)
+
+
+def start_rebuild(cfg: Config) -> bool:
+    """Reclassify every game in a background thread with its own connection. Progress is in
+    REBUILD. Returns False if a rebuild is already running."""
+    with _start_lock:
+        if REBUILD["running"]:
+            return False
+        REBUILD.update(running=True, done=0, total=0, error=None)
+
+    def run() -> None:
+        conn = db.connect(cfg.db_path)
+        try:
+            with _lock:
+                _classify(conn, cfg, False, progress=lambda done, total: REBUILD.update(done=done, total=total))
+        except Exception as exc:   # shown in Settings; the next request tries again
+            REBUILD["error"] = str(exc)
+        finally:
+            conn.close()
+            REBUILD["running"] = False
+    threading.Thread(target=run, daemon=True, name="reclassify").start()
+    return True
+
+
+def _classify(conn: sqlite3.Connection, cfg: Config, force: bool,
+              progress: Callable[[int, int], None] | None = None) -> int:
     adaptive = adaptive_enabled(conn, cfg)
     fingerprint = settings_fingerprint(cfg, adaptive)
     rebuild_all = force or db.get_meta(conn, SETTINGS_KEY) != fingerprint
@@ -304,10 +360,14 @@ def ensure_classified(conn: sqlite3.Connection, cfg: Config, force: bool = False
         sql = """SELECT id FROM games g WHERE analysed_at IS NOT NULL
                  AND NOT EXISTS (SELECT 1 FROM mistakes m WHERE m.game_id = g.id)"""
     game_ids = [r["id"] for r in conn.execute(sql)]
-    for game_id in game_ids:
+    for done, game_id in enumerate(game_ids):
+        if progress:
+            progress(done, len(game_ids))
         classify_game(conn, game_id, cfg, adaptive)
     with conn:
         db.set_meta(conn, SETTINGS_KEY, fingerprint)
+    if progress:
+        progress(len(game_ids), len(game_ids))
     return len(game_ids)
 
 

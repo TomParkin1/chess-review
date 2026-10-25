@@ -6,12 +6,14 @@ import { api, arrow, el, emptyState, errorState, formatEval, lastMove, playedAt,
 import { createEvalBar } from './evalbar.js';
 import { MARK_ORDER, MARKS, markIcon } from './icons.js';
 
+const notFound = () => emptyState('Game not found', 'It may have been deleted, or the link is out of date.',
+                                  { href: '/games', label: 'All games' });
 let data;
 try {
+  if (!window.GAME_FOUND) throw Object.assign(new Error('not found'), { status: 404 });
   data = await api(`/api/game/${window.GAME_ID}`);
 } catch (err) {
-  document.querySelector('.game-layout').replaceChildren(err.status === 404
-    ? emptyState('Game not found', 'It may have been deleted, or the link is out of date.', { href: '/games', label: 'All games' })
+  document.querySelector('.game-layout').replaceChildren(err.status === 404 ? notFound()
     : errorState(err, () => location.reload(), 'this game'));
   await new Promise(() => {});    // nothing to show: stop here quietly
 }

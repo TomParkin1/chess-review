@@ -18,8 +18,6 @@ KIND_LABELS = {
     "allowed_mate": "Walking into mates", "missed_mate": "Missed checkmates", "fork": "Allowing forks",
     "discovered_attack": "Allowing discovered attacks",
 }
-CLOCK_BUCKETS = [(180_000, "3+ min"), (60_000, "1–3 min"), (20_000, "20–60 s"), (0, "<20 s")]
-LOW_CLOCK_MS = 60_000
 
 
 def _games(conn: sqlite3.Connection, time_class: str | None, last: int | None) -> list[sqlite3.Row]:
@@ -55,6 +53,14 @@ def clock_before(clocks: list[str], base_ms: int | None, ply: int) -> int | None
         value = clocks[ply - 2] if ply - 2 < len(clocks) else "-"
         return None if value == "-" else int(value)
     return base_ms
+
+
+def in_time_trouble(clocks_ms: str | None, tc: str | None, ply: int) -> bool:
+    """Was I in time trouble (report.is_low_clock) before my move at `ply`? Needs chess.com clocks."""
+    if not clocks_ms:
+        return False
+    base, _ = report.parse_time_control(tc)
+    return report.is_low_clock(clock_before(clocks_ms.split(), base, ply), tc)
 
 
 def compute(conn: sqlite3.Connection, time_class: str | None = None, last: int | None = None) -> dict:
@@ -96,38 +102,49 @@ def compute(conn: sqlite3.Connection, time_class: str | None = None, last: int |
     kind_rows = [{"kind": k, "label": KIND_LABELS.get(k, k), "count": n, "share": n / len(bad)}
                  for k, n in kinds.most_common()]
 
-    # ---- clock: blunders per 100 moves by time left, and fast blunders
+    # ---- clock: blunders per 100 moves by the share of my time left, and very fast moves (all
+    # relative to each game's time control, see report.CLOCK_BUCKETS)
     bucket_moves, bucket_blunders = Counter(), Counter()
     fast_moves = fast_blunders = slow_moves = slow_blunders = 0
+    controls = Counter()
     for g in games:
-        if not g["clocks_ms"]:
+        tc = g["time_control"]
+        if not g["clocks_ms"] or report.game_budget_ms(tc) is None:
             continue
+        controls[tc] += 1
         clocks = g["clocks_ms"].split()
-        base, _ = report.parse_time_control(g["time_control"])
-        spent = report.time_spent(g["clocks_ms"], g["time_control"])
+        base, _ = report.parse_time_control(tc)
+        spent = report.time_spent(g["clocks_ms"], tc)
+        fast_ms = report.fast_move_ms(tc)
         for m in by_game[g["id"]]:
-            left = clock_before(clocks, base, m["ply"])
-            if left is not None:
-                label = next(lbl for limit, lbl in CLOCK_BUCKETS if left >= limit)
+            label = report.clock_bucket(clock_before(clocks, base, m["ply"]), tc)
+            if label is not None:
                 bucket_moves[label] += 1
                 bucket_blunders[label] += m["judgement"] == "blunder"
             used = spent[m["ply"]] if m["ply"] < len(spent) else None
             if used is not None:
-                if used < 5000:
+                if used < fast_ms:
                     fast_moves += 1
                     fast_blunders += m["judgement"] == "blunder"
                 else:
                     slow_moves += 1
                     slow_blunders += m["judgement"] == "blunder"
+    usual = controls.most_common(1)[0][0] if controls else None
     clock = {
-        "buckets": [{"label": lbl, "moves": bucket_moves[lbl], "blunders": bucket_blunders[lbl],
+        "buckets": [{"label": lbl, "low": share < report.LOW_CLOCK_SHARE, "moves": bucket_moves[lbl],
+                     "blunders": bucket_blunders[lbl],
                      "rate": 100 * bucket_blunders[lbl] / bucket_moves[lbl] if bucket_moves[lbl] else None}
-                    for _, lbl in CLOCK_BUCKETS],
+                    for share, lbl in report.CLOCK_BUCKETS],
         "fast": {"moves": fast_moves, "blunders": fast_blunders,
                  "rate": 100 * fast_blunders / fast_moves if fast_moves else None},
         "slow": {"moves": slow_moves, "blunders": slow_blunders,
                  "rate": 100 * slow_blunders / slow_moves if slow_moves else None},
-        "games_with_clocks": sum(1 for g in games if g["clocks_ms"]),
+        "games_with_clocks": sum(controls.values()),
+        # What the shares mean in my most common time control, e.g. 10+0: 60 s and 5 s.
+        "usual": usual and {"label": report.tc_label(usual), "low_ms": report.low_clock_ms(usual),
+                            "fast_ms": report.fast_move_ms(usual),
+                            "bucket_ms": [round(share * report.game_budget_ms(usual))
+                                          for share, _ in report.CLOCK_BUCKETS[:-1]]},
     }
 
     # ---- openings (by family and my colour)
@@ -192,23 +209,25 @@ def weaknesses(d: dict, top: int = 3) -> list[dict]:
                             "detail": f"You score {op['score']:.0f}% in {op['games']} games "
                                       f"({gap:.0f} points below your average).",
                             "train": {"opening": op["family"], "color": op["color"]}})
-    low = [b for b in d["clock"]["buckets"] if b["label"] in ("20–60 s", "<20 s") and b["moves"]]
-    high = [b for b in d["clock"]["buckets"] if b["label"] in ("3+ min", "1–3 min") and b["moves"]]
+    low = [b for b in d["clock"]["buckets"] if b["low"] and b["moves"]]
+    high = [b for b in d["clock"]["buckets"] if not b["low"] and b["moves"]]
     low_moves, low_bl = sum(b["moves"] for b in low), sum(b["blunders"] for b in low)
     high_moves, high_bl = sum(b["moves"] for b in high), sum(b["blunders"] for b in high)
     if low_moves >= 20 and low_bl >= 3 and high_moves:
         ratio = (low_bl / low_moves) / max(high_bl / high_moves, 1e-6)
         if ratio >= 1.5:
             out.append({"title": "Time trouble", "severity": 15 * (ratio - 1),
-                        "detail": f"With under a minute left you blunder {ratio:.1f}× as often "
-                                  f"({low_bl} blunders in {low_moves} moves).",
+                        "detail": f"In time trouble (under {report.LOW_CLOCK_SHARE:.0%} of your clock) you blunder "
+                                  f"{ratio:.1f}× as often ({low_bl} blunders in {low_moves} moves).",
                         "train": {"low_clock": "1"}})
     fast, slow = d["clock"]["fast"], d["clock"]["slow"]
     if fast["moves"] >= 30 and fast["blunders"] >= 3 and slow["rate"]:
         ratio = fast["rate"] / slow["rate"]
         if ratio >= 1.5:
+            usual = d["clock"]["usual"]
+            example = f" (under {usual['fast_ms'] / 1000:g} s at {usual['label']})" if usual else ""
             out.append({"title": "Moving too fast", "severity": 12 * (ratio - 1),
-                        "detail": f"Moves played in under 5 seconds are {ratio:.1f}× as likely to be blunders.",
+                        "detail": f"Very fast moves{example} are {ratio:.1f}× as likely to be blunders.",
                         "train": {}})
     white, black = d["colors"]
     if white["score"] is not None and black["score"] is not None and min(white["games"], black["games"]) >= 5:
