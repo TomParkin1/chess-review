@@ -159,17 +159,22 @@ table.games td.num { font-variant-numeric: tabular-nums; }
 
 /* ------------------------------------------------------------ board layouts */
 
-/* The board is sized from the window height, but gives way (shrinks) before the side panel drops
-   below --side-min: the panel's text is clipped otherwise (B10). */
+/* The board fills the window height: 100vh minus what sits above it (main's top padding, Practice's
+   filter bar) and below it (a bottom margin, the move controls). It gives way (shrinks) before the side
+   panel drops below --side-min: the panel's text is clipped otherwise (B10). */
 .layout {
-  --board-size: clamp(320px, calc(100vh - var(--board-offset, 120px)), 860px);
+  --board-above: 22px;
+  --board-below: 22px;
+  --board-size: clamp(320px, calc(100vh - var(--board-above) - var(--board-below)), 1100px);
+  --evalbar-space: 32px;
   --side-min: 400px;
-  display: grid; grid-template-columns: minmax(0, calc(var(--board-size) + 32px)) minmax(var(--side-min), 1fr);
+  display: grid; grid-template-columns: minmax(0, calc(var(--board-size) + var(--evalbar-space))) minmax(var(--side-min), 1fr);
   gap: 22px; align-items: start;
 }
 @media (max-width: 1100px) { .layout { --side-min: 360px; } }
-.layout.review-layout { --board-offset: 200px; }
-.layout.game-layout { --board-offset: 120px; }
+.layout:not(:has(.evalbar)) { --evalbar-space: 0px; }             /* Openings: the board alone */
+.filter-bar ~ .layout { --board-above: 99px; }                     /* + filter bar (61) and its margin */
+.layout:has(> .board-col > .controls) { --board-below: 85px; }     /* + controls row (39) and margins */
 @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; --board-size: 100%; } }
 .board-wrap { width: 100%; display: flex; gap: 8px; align-items: stretch; }
 .board-wrap .board { flex: 1; min-width: 0; }

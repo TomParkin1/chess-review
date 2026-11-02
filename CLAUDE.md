@@ -197,8 +197,10 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   wrong (snap back + spoiler-free explanation via `explain(..., reveal_best=False)`) / right (auto-play reply, continue
   for `playout_moves`) → done (explanation, best-line stepper)). Hints: text from `explain.HINTS`, then piece highlight.
   Chessground boards that take moves must be created with `viewOnly: false` (listeners bind only at creation).
-- Layout (Finish M5, B10): `.layout` = `minmax(0, board + 32px) minmax(var(--side-min), 1fr)`: the board is sized from
-  the window height but shrinks before the side panel goes under `--side-min` (400 px, 360 under 1100 px); the sidebar
+- Layout (Finish M5, B10): `.layout` = `minmax(0, board + eval bar 32px) minmax(var(--side-min), 1fr)`: the board fills
+  the window height (100vh - `--board-above` - `--board-below`: main's padding, plus Practice/Puzzles' filter bar above
+  or the `.controls` row below; max 1100 px; no bar space without an `.evalbar`, i.e. Openings) but shrinks before the
+  side panel goes under `--side-min` (400 px, 360 under 1100 px); the sidebar
   is icons-only at <= 1100 px. Grids holding names use `minmax(0, 1fr)` so text ellipsizes instead of being clipped.
   Browser check: scratchpad `layout.mjs` (no sideways scroll, no clipped box, 1024/1280/1440/1920).
 - UI preferences: review is always interactive (puzzle first); board sized from window height for desktop; chess.com
