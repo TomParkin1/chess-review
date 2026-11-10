@@ -615,6 +615,8 @@ def test_analysis_job_starts_once_when_asked_twice_at_once(client, monkeypatch):
             return self.running
         def start(self):
             started.append(self)
+            import time
+            time.sleep(0.05)        # widen the gap between "not running" and "running"
             self.running = True
         @property
         def progress(self):

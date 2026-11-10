@@ -21,8 +21,11 @@ Everything runs on your own machine. Your games and progress live in a SQLite da
 - **Openings**: your repertoire tree for each colour, built from your games, with drills.
 - **Convert**: play won positions from your games out to the win against Stockfish, plus 15 essential endgames.
 - **Puzzle library**: about 19k Lichess puzzles (optional download), with your own puzzle rating.
-- **Insights and Progress**: trends, accuracy by phase, clock use, openings and your top weaknesses,
-  comparing your last games with the ones before.
+- **Insights and Progress**: trends, accuracy by phase, clock use, openings and your top weaknesses
+  (each with "Train this", including time trouble and moving too fast), comparing your last games with the
+  ones before.
+- **Keyboard friendly**: press Tab to reach the board's move box and type a move (`Nf3`, `O-O`, `e2e4`),
+  then Enter. Lists and rows are reachable with Tab and open with Enter.
 - **Backups**: automatic daily and weekly copies, plus one before any destructive operation, restorable from Settings.
 
 ## Requirements
