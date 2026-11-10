@@ -9,10 +9,11 @@ const form = $('filters');
 const urlParams = new URLSearchParams(location.search);
 const onlyGame = urlParams.get('game');          // "practise this game's mistakes"
 const lowClock = urlParams.get('low_clock');     // "Train this" for time trouble (Insights)
+const fast = urlParams.get('fast');              // "Train this" for moving too fast (Insights)
 // Filters given in the URL (from Insights' "Train this") replace the saved ones.
 const FILTER_KEYS = ['status', 'judgement', 'last', 'opening', 'phase', 'result', 'color', 'time_class', 'kind', 'sort'];
 const FACETS = ['opening', 'phase', 'result', 'color', 'time_class', 'kind'];   // options come from the server
-const fromLink = FILTER_KEYS.some(k => urlParams.has(k)) || lowClock;
+const fromLink = FILTER_KEYS.some(k => urlParams.has(k)) || lowClock || fast;
 const SESSION_SIZE = 10;
 
 let keys = [];       // every match, in order ("<game>:<ply>")
@@ -72,6 +73,7 @@ function query() {
   }
   if (onlyGame) params.set('game', onlyGame);
   if (lowClock) params.set('low_clock', lowClock);
+  if (fast) params.set('fast', fast);
   return params.toString();
 }
 
@@ -113,6 +115,7 @@ function renderSummary() {
     }
   }
   if (lowClock) parts.push('in time trouble');
+  if (fast) parts.push('played very fast');
   if (onlyGame) parts.push('from one game');
   $('filter-summary').textContent = `Showing ${parts.join(' · ')}`;
   $('reset-filters').hidden = !custom;
@@ -220,7 +223,8 @@ if (onlyGame || fromLink) {
   const box = $('game-filter');
   box.hidden = false;
   const what = onlyGame ? 'mistakes from one game'
-    : lowClock ? 'mistakes made in time trouble (under 10% of your clock)' : 'mistakes matching this weakness';
+    : lowClock ? 'mistakes made in time trouble (under 10% of your clock)'
+    : fast ? 'mistakes you played very fast' : 'mistakes matching this weakness';
   box.innerHTML = `Practising ${what}. <a href="/review">Show all mistakes</a>`;
 }
 restoreFilters();

@@ -77,6 +77,7 @@ class LiveEngine:
         self._stream_lock = threading.Lock()
         self._current_stream: _Stream | None = None
         self._cache: OrderedDict[str, PositionAnalysis] = OrderedDict()
+        self._cache_lock = threading.Lock()     # requests run on several threads
 
     # ------------------------------------------------------------ judging
 
@@ -87,9 +88,11 @@ class LiveEngine:
         if board.is_game_over(claim_draw=False):
             return PositionAnalysis(Eval(0, None), None)
         key = board.fen()
-        if key in self._cache:
-            self._cache.move_to_end(key)
-            return self._cache[key]
+        with self._cache_lock:
+            cached = self._cache.get(key)
+            if cached is not None:
+                self._cache.move_to_end(key)
+                return cached
 
         with self._judge_lock:
             if self._judge_engine is None:
@@ -98,14 +101,16 @@ class LiveEngine:
                 info = self._judge_engine.analyse(
                     board, chess.engine.Limit(time=self.cfg.review.live_time, depth=22))
             except chess.engine.EngineError:
+                _quit(self._judge_engine)
                 self._judge_engine = None  # restart on the next request
                 raise
         score = info["score"].white()
         pv = tuple(info.get("pv", []))
         result = PositionAnalysis(Eval(score.score(), score.mate()), pv[0] if pv else None, pv)
-        self._cache[key] = result
-        if len(self._cache) > CACHE_SIZE:
-            self._cache.popitem(last=False)
+        with self._cache_lock:
+            self._cache[key] = result
+            if len(self._cache) > CACHE_SIZE:
+                self._cache.popitem(last=False)
         return result
 
     def judge(self, fen: str, uci: str, before: PositionAnalysis | None = None,
@@ -214,6 +219,7 @@ class LiveEngine:
                 if not me.cancel.is_set():
                     out.put({"depth": last_depth, "lines": [lines[k] for k in sorted(lines)], "done": True})
         except chess.engine.EngineError:
+            _quit(self._stream_engine)
             self._stream_engine = None  # restart next time
         finally:
             out.put(None)
@@ -222,12 +228,17 @@ class LiveEngine:
         if self._current_stream is not None:
             self._current_stream.cancel.set()
         for engine in (self._judge_engine, self._stream_engine):
-            if engine is not None:
-                try:
-                    engine.quit()
-                except Exception:
-                    pass
+            _quit(engine)
         self._judge_engine = self._stream_engine = None
+
+
+def _quit(engine: chess.engine.SimpleEngine | None) -> None:
+    """Stop an engine process that may already be gone (an EngineError doesn't always kill it)."""
+    if engine is not None:
+        try:
+            engine.quit()
+        except Exception:
+            pass
 
 
 def _line_json(board: chess.Board, info: dict) -> dict:

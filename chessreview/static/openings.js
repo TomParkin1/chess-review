@@ -40,7 +40,12 @@ async function exploreMove(orig, dest, promo) {
   const piece = chess.get(orig);
   const promotion = promo || (isPromotion(piece, dest)
     ? await choosePromotion($('board'), sideToMove(currentFen()), dest, color) : undefined);
-  const mv = chess.move({ from: orig, to: dest, promotion });
+  let mv;
+  try {
+    mv = chess.move({ from: orig, to: dest, promotion });
+  } catch {
+    return;     // a move row of the position before (a double click while the next one loads)
+  }
   moveSound(mv.san);
   path.push({ uci: mv.from + mv.to + (mv.promotion || ''), san: mv.san, fen: chess.fen() });
   loadNode();
@@ -60,11 +65,15 @@ function goToPath(ucis) {
 }
 
 let lastName = '';
+let nodeSeq = 0;      // a newer position makes older replies stale (fast clicks, Back, colour switch)
 async function loadNode() {
+  const seq = ++nodeSeq;
+  $('moves').replaceChildren();     // the old position's move rows go at once (no clicks on stale rows)
   badge.clear();
   setExploreBoard();
   renderBreadcrumb();
   const node = await api(`/api/openings/node?${params()}&fen=${encodeURIComponent(currentFen())}`).catch(() => null);
+  if (seq !== nodeSeq) return;
   if (!node || node.reached === false) {
     $('node-summary').textContent = "You haven't reached this position in your games.";
     $('repertoire-note').replaceChildren();
@@ -134,8 +143,11 @@ function loadOverview() {
   return guard(document.querySelector('main'), fetchOverview, 'your openings');
 }
 
+let overviewSeq = 0;
 async function fetchOverview() {
+  const seq = ++overviewSeq;
   const d = await api(`/api/openings?${params()}`);
+  if (seq !== overviewSeq) return;
   const select = $('family');
   const keep = family;
   select.replaceChildren(new Option('All my openings', ''),
@@ -246,9 +258,11 @@ function advance() {
 
 async function drillMove(orig, dest) {
   const dr = drill;
+  if (!dr) return;     // the drill was stopped while the board still took a move
   const step = dr.lines[dr.line][dr.step];
   const piece = dr.chess.get(orig);
   const promotion = isPromotion(piece, dest) ? await choosePromotion($('board'), color, dest, color) : '';
+  if (drill !== dr) return;
   const uci = orig + dest + promotion;
   board.set({ movable: { color: undefined } });
   const fb = $('drill-feedback');
@@ -264,7 +278,7 @@ async function drillMove(orig, dest) {
     dr.step += 1;
     dr.failedStep = false;
     updateDrillBar();
-    setTimeout(() => { badge.clear(); advance(); }, 200);
+    setTimeout(() => { if (drill !== dr) return; badge.clear(); advance(); }, 200);
   } else {
     sound.wrong();
     badge.show(dest, 'mistake');
@@ -274,6 +288,7 @@ async function drillMove(orig, dest) {
       step.fix ? ' (an improvement on what you usually play)' : '', '. Play it to continue.');
     updateDrillBar();
     setTimeout(() => {
+      if (drill !== dr) return;
       const fen = dr.chess.fen();
       badge.clear();
       board.set({ fen, turnColor: sideToMove(fen), check: checkOf(fen) });
@@ -294,8 +309,12 @@ function endLine() {
 }
 
 function finishDrill() {
+  if (!drill) return;
   const { solved, failed } = drill.tally;
   drill = null;
+  board.set({ movable: { color: undefined, dests: new Map() } });   // Stop on my move: the board stops taking moves
+  board.cancelPremove?.();
+  board.setAutoShapes([]);
   $('drill-run').hidden = true;
   $('drill-start').hidden = false;
   const box = $('drill-done');

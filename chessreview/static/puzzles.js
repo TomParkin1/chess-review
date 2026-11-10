@@ -1,6 +1,6 @@
 // Puzzle library (chessreview/library.py): Lichess puzzles around my puzzle rating, optionally
 // by theme. If the library isn't downloaded yet, offer the download with a progress bar.
-import { api, guard, isSolved } from './common.js';
+import { api, guard, isSolved, itemKey } from './common.js';
 import { createPuzzle } from './puzzle.js';
 
 const $ = id => document.getElementById(id);
@@ -8,8 +8,11 @@ let items = [];
 let index = 0;
 const session = { solved: 0, failed: 0 };
 
+const counted = new Set();     // puzzles already in the session score
 const puzzle = createPuzzle({
   onResult: (item, result) => {
+    if (counted.has(itemKey(item))) return;    // Retry: the first try is the one that counts
+    counted.add(itemKey(item));
     if (isSolved(result)) session.solved += 1;
     else session.failed += 1;
     $('session-score').textContent = `This session: ✓ ${session.solved} · ✗ ${session.failed}`;
@@ -25,9 +28,12 @@ async function refreshRating() {
   return s;
 }
 
+let loadSeq = 0;      // a theme change makes an older reply stale
 async function load() {
+  const seq = ++loadSeq;
   const theme = $('theme').value;
-  const data = await api(`/api/library/next?n=10${theme ? `&theme=${theme}` : ''}`);
+  const data = await api(`/api/library/next?n=10${theme ? `&theme=${encodeURIComponent(theme)}` : ''}`);
+  if (seq !== loadSeq) return;
   items = data.items;
   index = 0;
   if (!items.length) {

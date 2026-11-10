@@ -4,7 +4,7 @@
 // that led to the position being analysed: they are shown greyed out and ◀ can step back through them.
 import { Chess } from 'chess.js';
 import { choosePromotion, isPromotion, moveSound } from './board.js';
-import { formatEval, lastMove, legalDests, sideToMove } from './common.js';
+import { clickable, formatEval, lastMove, legalDests, sideToMove } from './common.js';
 
 export function createAnalysis({ board, panel, evalBar }) {
   let root = null;          // {fen, last}
@@ -71,12 +71,15 @@ export function createAnalysis({ board, panel, evalBar }) {
   }
 
   async function onMove(orig, dest, promo) {
-    const chess = new Chess(currentFen());
+    if (!active) return;
+    const fen = currentFen();
+    const chess = new Chess(fen);
     const piece = chess.get(orig);
     const promotion = promo || (isPromotion(piece, dest)
       ? await choosePromotion(board.state.dom.elements.wrap, piece.color === 'w' ? 'white' : 'black', dest,
                               board.state.orientation)
       : undefined);
+    if (!active || currentFen() !== fen) return;   // closed, or another position, while the picker was open
     let mv;
     try { mv = chess.move({ from: orig, to: dest, promotion }); } catch { return refresh(); }
     moves = moves.slice(0, cursor);            // a new move replaces anything after the cursor
@@ -115,6 +118,7 @@ export function createAnalysis({ board, panel, evalBar }) {
       chip.className = `sm${i < base ? ' pre' : ''}${i + 1 === cursor ? ' current' : ''}`;
       chip.textContent = num + m.san;
       chip.addEventListener('click', () => go(i + 1));
+      clickable(chip);
       return chip;
     }));
   }
@@ -169,6 +173,7 @@ export function createAnalysis({ board, panel, evalBar }) {
       text.className = 'line-moves';
       text.textContent = l.san_line;
       row.append(ev, text);
+      clickable(row);
       row.addEventListener('click', () => {
         const chess = new Chess(fen);
         const mv = chess.move({ from: l.uci.slice(0, 2), to: l.uci.slice(2, 4), promotion: l.uci[4] });

@@ -4,7 +4,7 @@ import { api, el, emptyState, guard } from './common.js';
 
 const $ = id => document.getElementById(id);
 const pct = v => (v == null ? '–' : `${v.toFixed(0)}%`);
-const ICONS = { kind: '🎯', phase: '⏱️', opening: '📖', low_clock: '⏰', color: '♟️' };
+const ICONS = { kind: '🎯', phase: '⏱️', opening: '📖', low_clock: '⏰', fast: '⚡', color: '♟️' };
 
 // Practice link for a weakness; `last` keeps the same game range the weakness was found in.
 export function trainHref(train, last = currentLast()) {
@@ -32,11 +32,14 @@ export function renderWeaknesses(container, weaknesses, last = currentLast()) {
   }));
 }
 
+let loadSeq = 0;     // a newer filter makes an older reply stale
 async function load() {
+  const seq = ++loadSeq;
   const params = new URLSearchParams();
   if ($('f-time').value) params.set('time_class', $('f-time').value);
   if ($('f-last').value) params.set('last', $('f-last').value);
   const d = await api(`/api/insights?${params}`);
+  if (seq !== loadSeq) return;
   if (!$('f-time').options.length || $('f-time').options.length === 1) {
     for (const tc of d.time_classes || []) $('f-time').append(new Option(tc[0].toUpperCase() + tc.slice(1), tc));
   }

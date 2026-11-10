@@ -118,7 +118,8 @@ def record(conn: sqlite3.Connection, game_id: int, ply: int, result: str, on: da
         if kind == "position" and result in SOLVED:
             return
         with conn:
-            conn.execute("INSERT INTO cards (kind, game_id, ply) VALUES (?, ?, ?)", (kind, game_id, ply))
+            # OR IGNORE: two results for the same new position at once (two tabs) both get here.
+            conn.execute("INSERT OR IGNORE INTO cards (kind, game_id, ply) VALUES (?, ?, ?)", (kind, game_id, ply))
         card = conn.execute("SELECT * FROM cards WHERE game_id = ? AND ply = ?", (game_id, ply)).fetchone()
     _apply(conn, card, result, on)
 
@@ -186,8 +187,11 @@ def _review_order(rows: list[sqlite3.Row], on: date) -> list[sqlite3.Row]:
 
 
 def introduced_on(conn: sqlite3.Connection, on: date) -> int:
-    """Cards studied for the first time on day `on` (all kinds)."""
-    return conn.execute("SELECT COUNT(*) FROM cards WHERE introduced_on = ?", (on.isoformat(),)).fetchone()[0]
+    """Positions from my games (mistakes and failed calm positions) studied for the first time on
+    day `on`: what training.new_per_day limits. Failed library puzzles, drilled opening lines and
+    endgames don't use it up."""
+    return conn.execute("SELECT COUNT(*) FROM cards WHERE introduced_on = ? AND kind IN ('mistake', 'position')",
+                        (on.isoformat(),)).fetchone()[0]
 
 
 def stats(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> dict:

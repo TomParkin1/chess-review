@@ -187,17 +187,18 @@ def task_for(conn: sqlite3.Connection, key: str) -> Task | None:
     kind, _, rest = key.partition("/")
     if kind == "endgame":
         return next((t for t in endgames() if t.key == key), None)
-    if kind != "convert" or ":" not in rest:
-        return None
-    game_id, ply = (int(v) for v in rest.split(":"))
+    game, _, ply_text = rest.partition(":")
+    if kind != "convert" or not game.isdigit() or not ply_text.isdigit():
+        return None     # a malformed key is an unknown position, not an error
+    game_id, ply = int(game), int(ply_text)
     r = conn.execute("""SELECT p.fen, p.score_cp, p.score_mate, g.my_color, g.my_result, g.white, g.black, g.date
                         FROM positions p JOIN games g ON g.id = p.game_id
                         WHERE p.game_id = ? AND p.ply = ?""", (game_id, ply)).fetchone()
-    if r is None:
+    me = chess.WHITE if r is not None and r["my_color"] == "white" else chess.BLACK
+    if r is None or chess.Board(r["fen"]).turn != me:     # only positions where it is my move
         return None
-    me = chess.WHITE if r["my_color"] == "white" else chess.BLACK
     opponent = r["black"] if r["my_color"] == "white" else r["white"]
-    outcome = {"win": "won", "loss": "lost", "draw": "drew"}[r["my_result"]]
+    outcome = {"win": "won", "loss": "lost", "draw": "drew"}.get(r["my_result"], "played")
     start = Eval.from_row(r, me)
     return Task(key=key, kind="convert", fen=r["fen"], color=r["my_color"], goal="win", finish="resign",
                 title=f"vs {opponent}, move {ply // 2 + 1}", subtitle=f"{r['date']} · in the game you {outcome}",

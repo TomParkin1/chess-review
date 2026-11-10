@@ -13,13 +13,13 @@
 
     <div class="review-head">
       <span id="badge" class="badge"></span>
-      <h2 id="move-title"></h2>
+      <h2 id="move-title" tabindex="-1"></h2>
       <span id="status-chip" class="chip" hidden></span>
     </div>
     <p id="context" class="muted small"></p>
 
-    <div id="prompt" class="prompt"></div>
-    <div id="feedback" class="feedback" hidden></div>
+    <div id="prompt" class="prompt" aria-live="polite"></div>
+    <div id="feedback" class="feedback" role="status" aria-live="polite" hidden></div>
     <div id="hint" class="hint" hidden></div>
 
     <div class="actions" id="threat-actions" hidden>

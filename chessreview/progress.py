@@ -15,6 +15,7 @@ Plus mistake kinds per game (biggest gain / biggest slip) and weekly training ac
 import sqlite3
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date
 
 import chess
 
@@ -178,18 +179,29 @@ def summary_line(window: int, total: int, cur: dict, base: dict | None, kinds: l
     return text
 
 
+def _iso_week(day: date) -> str:
+    year, week, _ = day.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
 def training_weeks(conn: sqlite3.Connection, weeks: int = 12) -> list[dict]:
     """Training per week (the last `weeks` weeks with any training): days trained (any kind of
     training, srs.training_days), attempts at my positions, their solve rate and threat hits."""
-    stats = {r["week"]: r for r in conn.execute(f"""
-        SELECT strftime('%Y-%W', {srs.day_sql('at')}) AS week, COUNT(*) AS attempts,
-               SUM(result IN ('solved', 'solved_with_help')) AS solved,
-               SUM(threat_result = 'correct') AS threat_ok,
-               SUM(threat_result IN ('correct', 'wrong')) AS threat_tries
-        FROM review_results GROUP BY week""")}
+    # ISO weeks (Monday to Sunday), so the week around New Year isn't split in two.
+    stats: dict[str, dict] = {}
+    for r in conn.execute(f"""
+            SELECT {srs.day_sql('at')} AS day, COUNT(*) AS attempts,
+                   SUM(result IN ('solved', 'solved_with_help')) AS solved,
+                   SUM(threat_result = 'correct') AS threat_ok,
+                   SUM(threat_result IN ('correct', 'wrong')) AS threat_tries
+            FROM review_results GROUP BY day"""):
+        week = stats.setdefault(_iso_week(date.fromisoformat(r["day"])),
+                                {"attempts": 0, "solved": 0, "threat_ok": 0, "threat_tries": 0})
+        for k in week:
+            week[k] += r[k] or 0
     days: dict[str, list] = {}
     for day in srs.training_days(conn):
-        days.setdefault(day.strftime("%Y-%W"), []).append(day)     # %W as in SQLite: weeks from Monday
+        days.setdefault(_iso_week(day), []).append(day)
     out = []
     for week in sorted(days)[-weeks:]:
         r = stats.get(week)

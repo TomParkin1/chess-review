@@ -110,24 +110,24 @@ def pace(conn: sqlite3.Connection, cfg: Config) -> float:
     """Seconds a puzzle of the plan takes me: my time per attempt (`attempt_seconds`) times my
     attempts per puzzle (a retry, Today's "Again"), both over my last 200 attempts."""
     rows = _recent_attempts(conn)
-    per_puzzle = len(rows) / len({(key, at[:10]) for key, at in rows}) if rows else 1.0
+    per_puzzle = len(rows) / len({(key, day) for key, _, day in rows}) if rows else 1.0
     return min(max(attempt_seconds(conn, cfg) * per_puzzle, PACE_RANGE[0]), PACE_RANGE[1])
 
 
 def attempt_seconds(conn: sqlite3.Connection, cfg: Config) -> float:
     """My average time between two attempts in one sitting (positions and library puzzles, my last
     200), or coach.seconds_per_puzzle until there are MIN_GAPS such gaps."""
-    stamps = sorted(datetime.fromisoformat(at) for _, at in _recent_attempts(conn))
+    stamps = sorted(datetime.fromisoformat(at) for _, at, _ in _recent_attempts(conn))
     gaps = [g for g in ((b - a).total_seconds() for a, b in zip(stamps, stamps[1:])) if 0 < g <= SITTING_GAP]
     return mean(gaps) if len(gaps) >= MIN_GAPS else cfg.coach.seconds_per_puzzle
 
 
-def _recent_attempts(conn: sqlite3.Connection, n: int = 200) -> list[tuple[str, str]]:
-    """(what was tried, when) for my last `n` attempts."""
-    return [(r[0], r[1]) for r in conn.execute(
-        """SELECT key, at FROM (SELECT game_id || ':' || ply AS key, at FROM review_results
+def _recent_attempts(conn: sqlite3.Connection, n: int = 200) -> list[tuple[str, str, str]]:
+    """(what was tried, when, its training day) for my last `n` attempts."""
+    return [(r[0], r[1], r[2]) for r in conn.execute(
+        f"""SELECT key, at, {srs.day_sql('at')} FROM (SELECT game_id || ':' || ply AS key, at FROM review_results
                                 UNION ALL SELECT puzzle_id, at FROM puzzle_attempts)
-           WHERE at IS NOT NULL ORDER BY at DESC LIMIT ?""", (n,))]
+            WHERE at IS NOT NULL ORDER BY at DESC LIMIT ?""", (n,))]
 
 
 def _save(conn: sqlite3.Connection, plan: dict, basis: int) -> dict:
@@ -363,7 +363,7 @@ def _matching_mistakes(conn: sqlite3.Connection, train: dict, taken: set[tuple],
     """My mistakes matching a weakness' Practice filter (see insights.weaknesses), at most
     `new_left` of them never studied. Mistakes of an open new-games session wait for it."""
     if not train:
-        return []    # e.g. "moving too fast" has no position-level filter
+        return []    # a weakness without a position-level filter
     where = ["m.is_mine = 1", "m.judgement IN ('mistake', 'blunder')", "m.decided = 0",
              "g.id IN (SELECT id FROM games ORDER BY end_time DESC, id DESC LIMIT 100)",
              f"g.id NOT IN ({srs.OPEN_SESSION_GAMES})",
@@ -389,6 +389,8 @@ def _matching_mistakes(conn: sqlite3.Connection, train: dict, taken: set[tuple],
         if (r["game_id"], r["ply"]) in taken:
             continue
         if train.get("low_clock") and not insights.in_time_trouble(r["clocks_ms"], r["time_control"], r["ply"]):
+            continue
+        if train.get("fast") and not insights.fast_move(r["clocks_ms"], r["time_control"], r["ply"]):
             continue
         if r["unseen"]:
             if new_left <= 0:

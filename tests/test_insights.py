@@ -65,3 +65,32 @@ def test_time_trouble_uses_the_clock_before_my_move():
     assert not insights.in_time_trouble(clocks, "600", 2)       # 179 s of 10 minutes
     assert insights.in_time_trouble(clocks, "1800", 2)          # 179 s of 30 minutes is under 10% already
     assert not insights.in_time_trouble(None, "180", 6)
+
+
+def test_no_blunders_with_time_left_doesnt_explode_the_ratio():
+    """E1: with 0 blunders on a healthy clock the ratio was divided by 1e-6 (150,000x, severity in
+    the millions), so "Time trouble" was always #1 and Today's focus."""
+    d = base()
+    for b in d["clock"]["buckets"]:
+        if not b["low"]:
+            b["blunders"] = 0
+    tt = next(w for w in weaknesses(d, top=10) if w["title"] == "Time trouble")
+    assert tt["severity"] <= 15 * (insights.RATIO_CAP - 1)
+    assert "over 10×" in tt["detail"]
+
+
+def test_moving_too_fast_shows_when_slow_moves_never_blunder_and_can_be_trained():
+    """E1: the rule was skipped exactly when it was most pronounced (no blunders on slow moves),
+    and it had no Practice filter, so Today's focus could never train it."""
+    d = base()
+    d["clock"]["fast"] = {"moves": 40, "blunders": 6, "rate": 15.0}
+    d["clock"]["slow"] = {"moves": 400, "blunders": 0, "rate": 0.0}
+    fast = next(w for w in weaknesses(d, top=10) if w["title"] == "Moving too fast")
+    assert fast["train"] == {"fast": "1"}
+
+
+def test_fast_move_is_relative_to_the_time_control():
+    clocks = "600000 600000 598000 590000 597000 589000"   # my move at ply 4 took 1 s, at ply 2 2 s
+    assert insights.fast_move(clocks, "600", 4)
+    assert not insights.fast_move(clocks, "1/86400", 4)      # daily: no budget, never "fast"
+    assert not insights.fast_move(None, "600", 4)

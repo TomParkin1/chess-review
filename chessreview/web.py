@@ -13,7 +13,7 @@ from datetime import date
 
 import chess
 from flask import Flask, Response, g, jsonify, render_template, request
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import BadRequest, HTTPException
 
 from . import (backup, chesscom, coach, convert, db, insights, level, library, progress, report, repertoire,
                session, srs)
@@ -46,6 +46,50 @@ STATUS_FILTERS = {
 }
 
 
+MAX_LIMIT = 200     # puzzle items built in one request (one SQL term each)
+
+
+def _body() -> dict:
+    """The request's JSON object; a missing, broken or non-object body is a 400."""
+    data = request.get_json(force=True, silent=True)
+    if not isinstance(data, dict):
+        raise BadRequest("Expected a JSON object in the request body.")
+    return data
+
+
+def _int(data: dict, key: str, default: int | None = None) -> int:
+    """data[key] as an int (or `default` when it is missing); anything else is a 400."""
+    value = data.get(key, default)
+    if value is None:
+        raise BadRequest(f"{key} is required.")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise BadRequest(f"{key} must be a whole number.") from None
+
+
+def _color(value: str | None) -> str:
+    """A colour parameter: white (the default) or black; anything else is a 400."""
+    value = value or "white"
+    if value not in ("white", "black"):
+        raise BadRequest("color must be white or black.")
+    return value
+
+
+def _board(fen: str | None) -> chess.Board:
+    try:
+        return chess.Board(fen or "")
+    except ValueError:
+        raise BadRequest("invalid FEN") from None
+
+
+def _moves(data: dict) -> list[str]:
+    moves = data.get("moves", [])
+    if not isinstance(moves, list) or not all(isinstance(m, str) for m in moves):
+        raise BadRequest("moves must be a list of UCI moves.")
+    return moves
+
+
 def create_app(cfg: Config | None = None) -> Flask:
     cfg = cfg or load_config()
     app = Flask(__name__)
@@ -53,7 +97,8 @@ def create_app(cfg: Config | None = None) -> Flask:
     app.config["TEMPLATES_AUTO_RELOAD"] = True  # edited pages show up without a server restart
 
     state = {"job": AnalysisJob(cfg), "library": library.FetchProgress(), "library_thread": None}
-    import_lock = threading.Lock()    # one upload, chess.com sync or restore at a time
+    import_lock = threading.Lock()    # one upload, chess.com sync, restore or Delete all at a time
+    job_lock = threading.Lock()       # checking and starting the analysis job is one step
     live = LiveEngine(cfg)
     app.extensions["live"] = live  # closed by the `serve` command on shutdown
 
@@ -191,10 +236,13 @@ def create_app(cfg: Config | None = None) -> Flask:
                        duplicates=total.duplicates, skipped=total.skipped)
 
     def _start_job():
-        job = state["job"]
-        if not job.is_running():
-            state["job"] = job = AnalysisJob(cfg)
-            job.start()
+        with job_lock:      # two requests at once must not start two jobs (the first would be orphaned)
+            if not state["job"].is_running():
+                state["job"] = AnalysisJob(cfg)
+                state["job"].start()
+
+    def _rebuild_running() -> bool:
+        return bool(REBUILD.get("running"))
 
     @app.get("/api/sync")
     def sync_status():
@@ -263,10 +311,19 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.delete("/api/games")
     def delete_games():
         """Start afresh: remove all games and their analysis (PGN files on disk are untouched)."""
-        job = state["job"]
-        job.stop()
-        job.wait(timeout=30)
-        deleted = db.delete_all_games(conn())
+        if _rebuild_running():
+            return jsonify(error="Your games are being reclassified. Try again when that has finished."), 409
+        if not import_lock.acquire(blocking=False):
+            return jsonify(error="A sync, upload or restore is running. Try again when it has finished."), 409
+        try:
+            with job_lock:
+                job = state["job"]
+                job.stop()
+            if not job.wait(timeout=30):
+                return jsonify(error="The analysis is still stopping. Try again in a moment."), 409
+            deleted = db.delete_all_games(conn())
+        finally:
+            import_lock.release()
         return jsonify(deleted=deleted)
 
     @app.get("/api/game/<int:game_id>")
@@ -329,11 +386,13 @@ def create_app(cfg: Config | None = None) -> Flask:
         columns = ", ".join(f"{column} AS {name}" for name, column in FACETS)
         rows = c.execute(f"""SELECT m.game_id, m.ply, {columns} FROM mistakes m JOIN games g ON g.id = m.game_id
                              WHERE {' AND '.join(where)} ORDER BY {order}""", params).fetchall()
-        if args.get("low_clock"):     # in time trouble when I made the mistake (needs chess.com clocks)
-            clocks = {r["id"]: r for r in c.execute(
-                "SELECT id, clocks_ms, time_control FROM games WHERE clocks_ms IS NOT NULL")}
-            rows = [r for r in rows if r["game_id"] in clocks and insights.in_time_trouble(
-                clocks[r["game_id"]]["clocks_ms"], clocks[r["game_id"]]["time_control"], r["ply"])]
+        # In time trouble / played very fast when I made the mistake (needs chess.com clocks).
+        for flag, test in (("low_clock", insights.in_time_trouble), ("fast", insights.fast_move)):
+            if args.get(flag):
+                clocks = {r["id"]: r for r in c.execute(
+                    "SELECT id, clocks_ms, time_control FROM games WHERE clocks_ms IS NOT NULL")}
+                rows = [r for r in rows if r["game_id"] in clocks and test(
+                    clocks[r["game_id"]]["clocks_ms"], clocks[r["game_id"]]["time_control"], r["ply"])]
         chosen = {name: args[name] for name, _ in FACETS if args.get(name)}
         hits = [r for r in rows if _facets_match(r, chosen)]
         limit = args.get("limit", type=int)
@@ -343,7 +402,8 @@ def create_app(cfg: Config | None = None) -> Flask:
                 params + [chosen[name] for name, _ in FACETS if name in chosen], order)}
             items = [by_key[(r["game_id"], r["ply"])] for r in hits]
         else:
-            items = _items_for(c, [((r["game_id"], r["ply"]), "practice") for r in hits[:max(0, limit)]])
+            items = _items_for(c, [((r["game_id"], r["ply"]), "practice")
+                                   for r in hits[:min(max(0, limit), MAX_LIMIT)]])
         return jsonify(total=len(hits), keys=[f"{r['game_id']}:{r['ply']}" for r in hits], items=items,
                        options=_facet_options(rows, chosen), analysed=coach.analysed_games(c))
 
@@ -394,7 +454,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     def thresholds_set():
         """Switch adaptive/standard thresholds: every game is reclassified in the background
         (progress in GET /api/settings/thresholds `rebuild`)."""
-        adaptive = bool((request.get_json(force=True) or {}).get("adaptive"))
+        adaptive = bool(_body().get("adaptive"))
         c = conn()
         with c:
             db.set_meta(c, MODE_KEY, "adaptive" if adaptive else "standard")
@@ -413,7 +473,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         """Families I play per colour, repertoire problems and drill status."""
         c = conn()
         refresh(c, cfg)
-        color = request.args.get("color", "white")
+        color = _color(request.args.get("color"))
         tree = _tree(color)
         families = [dict(r) for r in c.execute(
             """SELECT opening_family AS family, COUNT(*) AS games FROM games WHERE my_color = ?
@@ -426,10 +486,10 @@ def create_app(cfg: Config | None = None) -> Flask:
     def openings_node():
         c = conn()
         refresh(c, cfg)
-        color = request.args.get("color", "white")
+        color = _color(request.args.get("color"))
         tree = _tree(color)
         fen = request.args.get("fen")
-        epd = chess.Board(fen).epd() if fen else repertoire.root_epd()
+        epd = _board(fen).epd() if fen else repertoire.root_epd()
         node = repertoire.node_json(tree, epd)
         # Not an error (an empty database, or a move off my repertoire): the page says so.
         return jsonify(node or {"reached": False})
@@ -438,7 +498,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     def openings_drill():
         c = conn()
         refresh(c, cfg)
-        color = request.args.get("color", "white")
+        color = _color(request.args.get("color"))
         mode = request.args.get("mode")
         if mode == "today":
             # Today's opening block: the planned lines not drilled yet, both colours.
@@ -461,8 +521,8 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     @app.post("/api/openings/result")
     def openings_result():
-        data = request.get_json(force=True)
-        if data.get("result") not in REVIEW_RESULTS or not data.get("key"):
+        data = _body()
+        if data.get("result") not in REVIEW_RESULTS or not isinstance(data.get("key"), str) or not data["key"]:
             return jsonify(error="key and a valid result are required"), 400
         srs.record_line(conn(), data["key"], data["result"])
         return jsonify(ok=True)
@@ -505,7 +565,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         was already tried today (its time counts)."""
         c = conn()
         try:
-            coach.set_budget(c, int((request.get_json(force=True) or {}).get("minutes", 0)))
+            coach.set_budget(c, _int(_body(), "minutes"))
         except (TypeError, ValueError) as exc:
             return jsonify(error=str(exc)), 400
         refresh(c, cfg)
@@ -576,13 +636,14 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.post("/api/play/move")
     def play_move():
         """My move in a playout; Stockfish replies. Body: {key, moves (so far), uci, streak}."""
-        data = request.get_json(force=True)
+        data = _body()
+        streak = _int(data, "streak", 0)
         c = conn()
-        task = convert.task_for(c, data.get("key", ""))
+        task = convert.task_for(c, str(data.get("key", "")))
         if task is None:
             return jsonify(error="unknown position"), 404
         try:
-            board = _replay(task, data.get("moves", []))
+            board = _replay(task, _moves(data))
             move = chess.Move.from_uci(data.get("uci", ""))
             if move not in board.legal_moves:
                 raise ValueError(f"illegal move {data.get('uci')}")
@@ -592,7 +653,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         rating = level.current_rating(c)
         out = {"san": board.san(move), "uci": move.uci()}
         board.push(move)
-        st = convert.state(task, board, None, int(data.get("streak", 0)), rating)
+        st = convert.state(task, board, None, streak, rating)
         if st.status == "playing":
             analysis = live.analyse(board)      # Stockfish's best reply; its eval is the position after it
             reply = analysis.best
@@ -606,12 +667,12 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     @app.post("/api/play/hint")
     def play_hint():
-        data = request.get_json(force=True)
-        task = convert.task_for(conn(), data.get("key", ""))
+        data = _body()
+        task = convert.task_for(conn(), str(data.get("key", "")))
         if task is None:
             return jsonify(error="unknown position"), 404
         try:
-            board = _replay(task, data.get("moves", []))
+            board = _replay(task, _moves(data))
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         best = live.analyse(board).best
@@ -619,8 +680,8 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     @app.post("/api/convert/result")
     def convert_result():
-        data = request.get_json(force=True)
-        task = convert.task_for(conn(), data.get("key", ""))
+        data = _body()
+        task = convert.task_for(conn(), str(data.get("key", "")))
         if task is None or data.get("result") not in REVIEW_RESULTS:
             return jsonify(error="unknown position or result"), 400
         srs.record_key(conn(), task.kind, task.card_key, data["result"])
@@ -697,13 +758,14 @@ def create_app(cfg: Config | None = None) -> Flask:
         c = conn()
         theme = request.args.get("theme")
         themes = [theme] if theme in library.THEMES else None
-        ids = library.pick(c, request.args.get("n", 10, type=int), themes)
+        n = min(max(request.args.get("n", 10, type=int) or 10, 1), 50)
+        ids = library.pick(c, n, themes)
         return jsonify(items=_items_for(c, [(("lib", i), "library") for i in ids]),
                        rating=library.rating(c), count=library.count(c))
 
     @app.post("/api/library/result")
     def library_result():
-        data = request.get_json(force=True)
+        data = _body()
         if data.get("result") not in REVIEW_RESULTS:
             return jsonify(error="unknown result"), 400
         try:
@@ -737,6 +799,8 @@ def create_app(cfg: Config | None = None) -> Flask:
         thread = state["library_thread"]
         if thread is not None and thread.is_alive():
             return jsonify(error="The puzzle library is downloading. Restore when it has finished."), 409
+        if _rebuild_running():
+            return jsonify(error="Your games are being reclassified. Restore when that has finished."), 409
         if not import_lock.acquire(blocking=False):
             return jsonify(error="A sync or upload is running. Restore when it has finished."), 409
         try:
@@ -796,7 +860,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.post("/api/session/self-review")
     def self_review_pick():
         """Body: {game_id, ply} (ply of my move I think the game turned on, or null = not sure)."""
-        data = request.get_json(force=True)
+        data = _body()
         ply = data.get("ply")
         try:
             return jsonify(session.record_self_review(conn(), int(data.get("game_id")),
@@ -807,7 +871,10 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.post("/api/session/done")
     def session_done():
         c = conn()
-        batch_ids = [int(i) for i in (request.get_json(force=True) or {}).get("batch_ids", [])]
+        raw = (request.get_json(silent=True) or {}).get("batch_ids", [])
+        if not isinstance(raw, list):
+            return jsonify(error="batch_ids must be a list"), 400
+        batch_ids = [_int({"id": i}, "id") for i in raw]
         summary = session.summary(c, cfg, batch_ids)
         session.mark_done(c, batch_ids)
         return jsonify(summary)
@@ -819,17 +886,17 @@ def create_app(cfg: Config | None = None) -> Flask:
         Body: {fen, uci, game_id?, ply?, step?}. On the first step of a puzzle (step 0)
         the stored analysis of the game position is used, so the verdict matches the game.
         """
-        data = request.get_json(force=True)
+        data = _body()
         fen, uci = data.get("fen"), data.get("uci")
-        if not fen or not uci:
+        if not (isinstance(fen, str) and isinstance(uci, str) and fen and uci):
             return jsonify(error="fen and uci are required"), 400
         before = prev_capture = None
         c = conn()
         thresholds = level.current_thresholds(c, cfg)   # tries are judged at my level *now*
         if data.get("game_id") is not None:
-            if data.get("step", 0) == 0:
+            if _int(data, "step", 0) == 0 and data.get("ply") is not None:
                 pos = c.execute("SELECT * FROM positions WHERE game_id = ? AND ply = ?",
-                                (data["game_id"], data.get("ply"))).fetchone()
+                                (_int(data, "game_id"), _int(data, "ply"))).fetchone()
                 if pos is not None and pos["fen"] == fen:
                     before = _stored_analysis(pos)
                     prev = c.execute("SELECT fen, move_uci FROM positions WHERE game_id = ? AND ply = ?",
@@ -843,31 +910,34 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     @app.post("/api/review/result")
     def review_result():
-        data = request.get_json(force=True)
+        data = _body()
         if data.get("result") not in REVIEW_RESULTS:
             return jsonify(error="unknown result"), 400
         threat_result = data.get("threat_result")
         if threat_result is not None and threat_result not in THREAT_RESULTS:
             return jsonify(error="unknown threat_result"), 400
+        game_id, ply = _int(data, "game_id"), _int(data, "ply")
+        attempts, hints = _int(data, "attempts", 0), _int(data, "hints_used", 0)
         c = conn()
+        if c.execute("SELECT 1 FROM mistakes WHERE game_id = ? AND ply = ? AND is_mine = 1",
+                     (game_id, ply)).fetchone() is None:
+            return jsonify(error="unknown position"), 404
         with c:
             c.execute("""INSERT INTO review_results (game_id, ply, result, attempts, hints_used, mode, threat_result)
                          VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                      (data["game_id"], data["ply"], data["result"],
-                       int(data.get("attempts", 0)), int(data.get("hints_used", 0)),
+                      (game_id, ply, data["result"], attempts, hints,
                        "blind" if data.get("mode") == "blind" else "labelled", threat_result))
-        srs.record(c, int(data["game_id"]), int(data["ply"]), data["result"],
-                   kind="position" if data.get("calm") else "mistake")
+        srs.record(c, game_id, ply, data["result"], kind="position" if data.get("calm") else "mistake")
         return jsonify(ok=True)
 
     @app.post("/api/threat/check")
     def threat_check():
         """Did I spot the opponent's threat? Body: {game_id, ply, uci} (the opponent move I think
         they threaten, played as if I passed) or uci = null for "no real threat"."""
-        data = request.get_json(force=True)
+        data = _body()
         c = conn()
         row = c.execute("""SELECT p.*, g.my_color FROM positions p JOIN games g ON g.id = p.game_id
-                           WHERE p.game_id = ? AND p.ply = ?""", (data.get("game_id"), data.get("ply"))).fetchone()
+                           WHERE p.game_id = ? AND p.ply = ?""", (_int(data, "game_id"), _int(data, "ply"))).fetchone()
         if row is None:
             return jsonify(error="unknown position"), 404
         me = chess.WHITE if row["my_color"] == "white" else chess.BLACK
@@ -882,7 +952,10 @@ def create_app(cfg: Config | None = None) -> Flask:
             return jsonify(out)
         passed = chess.Board(row["fen"])
         passed.push(chess.Move.null())
-        move = chess.Move.from_uci(uci)
+        try:
+            move = chess.Move.from_uci(str(uci))
+        except ValueError:
+            return jsonify(error=f"illegal move {uci}"), 400
         if move not in passed.legal_moves:
             return jsonify(error=f"illegal move {uci}"), 400
         out["san"] = passed.san(move)

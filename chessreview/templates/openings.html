@@ -53,8 +53,8 @@
         <div id="drill-run" hidden>
           <div class="session-bar"><span id="drill-counter"></span><span class="muted" id="drill-score"></span></div>
           <div class="session-progress"><div id="drill-progress"></div></div>
-          <div class="prompt" id="drill-prompt"></div>
-          <div class="feedback" id="drill-feedback" hidden></div>
+          <div class="prompt" id="drill-prompt" aria-live="polite"></div>
+          <div class="feedback" id="drill-feedback" role="status" aria-live="polite" hidden></div>
           <div class="solution-moves" id="drill-moves"></div>
           <div class="actions"><button class="btn" id="drill-stop">Stop</button></div>
         </div>

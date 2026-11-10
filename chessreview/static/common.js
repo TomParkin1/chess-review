@@ -140,6 +140,21 @@ export function busy(fn) {
   };
 }
 
+// Make a clickable element that isn't a button or link reachable from the keyboard: Tab focuses
+// it, Enter or Space clicks it, and screen readers call it a button.
+const NATIVE = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL', 'OPTION', 'SUMMARY']);
+export function clickable(node) {
+  if (NATIVE.has(node.tagName) || node.hasAttribute('tabindex')) return node;
+  node.tabIndex = 0;
+  if (!node.hasAttribute('role')) node.setAttribute('role', node.tagName === 'TR' ? 'link' : 'button');
+  node.addEventListener('keydown', e => {
+    if (e.target !== node || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    node.click();
+  });
+  return node;
+}
+
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -147,6 +162,7 @@ export function el(tag, attrs = {}, ...children) {
     else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
     else if (v !== null && v !== undefined && v !== false) node.setAttribute(k, v);
   }
+  if (attrs.onclick) clickable(node);
   for (const c of children.flat()) {
     if (c !== null && c !== undefined) node.append(c instanceof Node ? c : String(c));
   }

@@ -63,6 +63,28 @@ def in_time_trouble(clocks_ms: str | None, tc: str | None, ply: int) -> bool:
     return report.is_low_clock(clock_before(clocks_ms.split(), base, ply), tc)
 
 
+def fast_move(clocks_ms: str | None, tc: str | None, ply: int) -> bool:
+    """Did I play my move at `ply` very fast (report.fast_move_ms)? Needs chess.com clocks."""
+    if not clocks_ms or report.game_budget_ms(tc) is None:
+        return False
+    spent = report.time_spent(clocks_ms, tc)
+    used = spent[ply] if ply < len(spent) else None
+    return used is not None and used < report.fast_move_ms(tc)
+
+
+def _ratio(bad: int, moves: int, base_bad: int, base_moves: int) -> float:
+    """How many times as often `bad` happens as `base_bad`, per move. The base rate is smoothed
+    (one extra blunder in one extra move), so none in the base doesn't give a near-infinite ratio."""
+    return (bad / moves) / ((base_bad + 1) / (base_moves + 1))
+
+
+RATIO_CAP = 10      # beyond this, "N× as often" is just noise from small counts
+
+
+def _times(ratio: float) -> str:
+    return f"over {RATIO_CAP}×" if ratio >= RATIO_CAP else f"{ratio:.1f}×"
+
+
 def compute(conn: sqlite3.Connection, time_class: str | None = None, last: int | None = None) -> dict:
     games = _games(conn, time_class, last)
     ids = [g["id"] for g in games]
@@ -214,21 +236,21 @@ def weaknesses(d: dict, top: int = 3) -> list[dict]:
     low_moves, low_bl = sum(b["moves"] for b in low), sum(b["blunders"] for b in low)
     high_moves, high_bl = sum(b["moves"] for b in high), sum(b["blunders"] for b in high)
     if low_moves >= 20 and low_bl >= 3 and high_moves:
-        ratio = (low_bl / low_moves) / max(high_bl / high_moves, 1e-6)
+        ratio = min(_ratio(low_bl, low_moves, high_bl, high_moves), RATIO_CAP)
         if ratio >= 1.5:
             out.append({"title": "Time trouble", "severity": 15 * (ratio - 1),
                         "detail": f"In time trouble (under {report.LOW_CLOCK_SHARE:.0%} of your clock) you blunder "
-                                  f"{ratio:.1f}× as often ({low_bl} blunders in {low_moves} moves).",
+                                  f"{_times(ratio)} as often ({low_bl} blunders in {low_moves} moves).",
                         "train": {"low_clock": "1"}})
     fast, slow = d["clock"]["fast"], d["clock"]["slow"]
-    if fast["moves"] >= 30 and fast["blunders"] >= 3 and slow["rate"]:
-        ratio = fast["rate"] / slow["rate"]
+    if fast["moves"] >= 30 and fast["blunders"] >= 3 and slow["moves"]:
+        ratio = min(_ratio(fast["blunders"], fast["moves"], slow["blunders"], slow["moves"]), RATIO_CAP)
         if ratio >= 1.5:
             usual = d["clock"]["usual"]
             example = f" (under {usual['fast_ms'] / 1000:g} s at {usual['label']})" if usual else ""
             out.append({"title": "Moving too fast", "severity": 12 * (ratio - 1),
-                        "detail": f"Very fast moves{example} are {ratio:.1f}× as likely to be blunders.",
-                        "train": {}})
+                        "detail": f"Very fast moves{example} are {_times(ratio)} as likely to be blunders.",
+                        "train": {"fast": "1"}})
     white, black = d["colors"]
     if white["score"] is not None and black["score"] is not None and min(white["games"], black["games"]) >= 5:
         weaker, stronger = (white, black) if white["score"] < black["score"] else (black, white)

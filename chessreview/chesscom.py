@@ -42,6 +42,10 @@ class SyncResult:
                 "duplicates": s.duplicates, "skipped": s.skipped, "batch_id": self.batch_id}
 
 
+class Unavailable(OSError):
+    """chess.com answered, but not with the JSON we asked for (maintenance page, server error)."""
+
+
 def fetch_json(url: str, retries: int = 4) -> dict:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     for attempt in range(retries):
@@ -49,12 +53,15 @@ def fetch_json(url: str, retries: int = 4) -> dict:
             with urllib.request.urlopen(request, timeout=30) as response:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
-            if exc.code == 429 and attempt < retries - 1:   # rate limited: back off and retry
+            # Rate limited or a server error: back off and retry.
+            if (exc.code == 429 or exc.code >= 500) and attempt < retries - 1:
                 time.sleep(2 ** attempt)
                 continue
             if exc.code == 404:
                 raise LookupError(f"chess.com user not found ({url})") from exc
             raise
+        except json.JSONDecodeError as exc:     # a ValueError, which callers read as "no username"
+            raise Unavailable(f"chess.com sent a page that isn't game data ({url}); try again later") from exc
     raise RuntimeError("unreachable")
 
 
@@ -116,12 +123,13 @@ def sync(conn: sqlite3.Connection, cfg: Config, since: str | None = None,
     finally:
         conn.commit()     # the months imported before a failure are kept; an empty batch is dropped
         result.games_added = session.finish_import(conn, cfg, result.batch_id)
+        if result.games_added and last_month is None:
+            # The first sync brings in history, not "games I just played": no new-games session;
+            # its mistakes go straight to daily training instead. Also when it failed partway
+            # (the next sync is no longer the first one).
+            with conn:
+                conn.execute("""UPDATE imports SET session_done_at = COALESCE(session_done_at, CURRENT_TIMESTAMP),
+                                    label = 'chess.com history import' WHERE id = ?""", (result.batch_id,))
     if not result.games_added:
         result.batch_id = None
-    elif last_month is None:
-        # The first sync brings in history, not "games I just played": no new-games session;
-        # its mistakes go straight to daily training instead.
-        with conn:
-            conn.execute("""UPDATE imports SET session_done_at = CURRENT_TIMESTAMP,
-                                label = 'chess.com history import' WHERE id = ?""", (result.batch_id,))
     return result

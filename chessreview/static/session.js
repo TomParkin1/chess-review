@@ -2,7 +2,7 @@
 // turn? picked before any engine verdict), then puzzles from the games just synced/uploaded,
 // in game order, then a summary card of what this batch shows.
 import { makeBoard, sound } from './board.js';
-import { api, arrow, busy, el, guard, isSolved, lastMove, sideToMove, SYMBOLS } from './common.js';
+import { api, arrow, busy, el, guard, isSolved, itemKey, lastMove, sideToMove, SYMBOLS } from './common.js';
 import { createPuzzle } from './puzzle.js';
 import { countBar } from './widgets.js';
 
@@ -21,8 +21,11 @@ const tally = { solved: 0, failed: 0 };
 let reviewGames = [];
 const srTally = { found: 0, tried: 0 };
 
+const counted = new Set();
 const puzzle = createPuzzle({
   onResult: (item, result) => {
+    if (counted.has(itemKey(item))) return;    // Retry: the first try is the one that counts
+    counted.add(itemKey(item));
     if (isSolved(result)) tally.solved += 1; else tally.failed += 1;
     updateBar();
   },

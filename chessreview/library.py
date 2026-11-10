@@ -24,6 +24,7 @@ import io
 import math
 import random
 import sqlite3
+import threading
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -222,20 +223,24 @@ def update_rating(conn: sqlite3.Connection, puzzle_rating: int, score: float) ->
     return before, round(after)
 
 
+_record_lock = threading.Lock()
+
+
 def record(conn: sqlite3.Connection, puzzle_id: str, result: str) -> dict:
     """Store an attempt, update my puzzle rating (only the first attempt of a puzzle counts)
     and its spaced-repetition card (failed puzzles become cards; due ones get reviewed)."""
     p = conn.execute("SELECT rating FROM puzzles WHERE id = ?", (puzzle_id,)).fetchone()
     if p is None:
         raise LookupError(puzzle_id)
-    first = conn.execute("SELECT 1 FROM puzzle_attempts WHERE puzzle_id = ?", (puzzle_id,)).fetchone() is None
-    if first:
-        before, after = update_rating(conn, p["rating"], SCORES.get(result, 0.0))
-    else:
-        before = after = rating(conn)
-    with conn:
-        conn.execute("""INSERT INTO puzzle_attempts (puzzle_id, result, rating_before, rating_after)
-                        VALUES (?, ?, ?, ?)""", (puzzle_id, result, before, after))
+    with _record_lock:      # "first attempt?" and the rating update are one step (a double submit)
+        first = conn.execute("SELECT 1 FROM puzzle_attempts WHERE puzzle_id = ?", (puzzle_id,)).fetchone() is None
+        if first:
+            before, after = update_rating(conn, p["rating"], SCORES.get(result, 0.0))
+        else:
+            before = after = rating(conn)
+        with conn:
+            conn.execute("""INSERT INTO puzzle_attempts (puzzle_id, result, rating_before, rating_after)
+                            VALUES (?, ?, ?, ?)""", (puzzle_id, result, before, after))
     card = conn.execute("SELECT 1 FROM cards WHERE kind = 'library' AND key = ?", (puzzle_id,)).fetchone()
     if card or result not in srs.SOLVED:
         srs.record_key(conn, "library", puzzle_id, result)

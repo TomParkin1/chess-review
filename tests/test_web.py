@@ -550,3 +550,85 @@ def test_today_budget_and_todays_opening_lines(client):
     assert c.get("/api/today").get_json()["plan"]["budget"] == 30
     assert c.post("/api/today/budget", json={"minutes": 15}).status_code == 400
     assert c.get("/api/openings/drill?mode=today").get_json() == {"lines": [], "colors": []}
+
+
+# ------------------------------------------------------------ E1 (audit of 10 Nov 2026): bad input is a 400/404
+
+def test_bad_input_is_a_client_error_not_a_server_error(client, tmp_path):
+    """Each of these used to raise inside the route (a 500 with a stack trace in the terminal)."""
+    c, _app = client
+    post = lambda url, body: c.post(url, data=json.dumps(body), content_type="application/json")
+    cases = [
+        (c.get("/api/convert/task?key=convert/a:b"), 404),
+        (c.get("/api/convert/task?key=convert/1:2:3"), 404),
+        (post("/api/play/move", {"key": "convert/x:y", "moves": [], "uci": "e2e4"}), 404),
+        (post("/api/play/move", {"key": "endgame/kq_k", "moves": [], "uci": "e2e4", "streak": "lots"}), 400),
+        (post("/api/play/move", {"key": "endgame/kq_k", "moves": "e2e4", "uci": "e2e4"}), 400),
+        (post("/api/play/hint", {"key": "endgame/kq_k", "moves": [1, 2]}), 400),
+        (c.get("/api/openings/node?fen=garbage"), 400),
+        (c.get("/api/openings?color=purple"), 400),
+        (post("/api/review/result", {"result": "solved"}), 400),                       # no game_id/ply
+        (post("/api/review/result", {"result": "solved", "game_id": "x", "ply": 1}), 400),
+        (post("/api/review/result", {"result": "solved", "game_id": 999, "ply": 4}), 404),  # not my position
+        (post("/api/threat/check", {"game_id": [1], "ply": 2}), 400),
+        (post("/api/judge", {"fen": {"a": 1}, "uci": "e2e4"}), 400),
+        (post("/api/today/budget", {"minutes": "soon"}), 400),
+        (post("/api/session/done", {"batch_ids": "all"}), 400),
+        (c.post("/api/library/result", data="[1, 2]", content_type="application/json"), 400),  # not an object
+        (post("/api/openings/result", {"key": {"x": 1}, "result": "solved"}), 400),
+    ]
+    for response, status in cases:
+        assert response.status_code == status, (response.request.path, response.get_json())
+        assert "error" in response.get_json()
+    assert c.get("/api/library/next?n=-1").status_code == 200          # clamped, not "all but the last"
+    # Nothing was recorded for the unknown position.
+    conn = db.connect(tmp_path / "web.db")
+    assert conn.execute("SELECT COUNT(*) FROM review_results").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 0
+    conn.close()
+
+
+def test_delete_all_waits_for_imports_and_rebuilds(client, monkeypatch):
+    """Delete all during a sync or a background reclassification used to leave rows behind for
+    deleted games (foreign-key errors in the rebuild, a batch row gone under the sync)."""
+    from chessreview import classify
+    c, _app = client
+    monkeypatch.setitem(classify.REBUILD, "running", True)
+    assert c.delete("/api/games").status_code == 409
+    assert c.post("/api/backups/restore", data=json.dumps({"name": "x"}),
+                  content_type="application/json").status_code == 409
+    monkeypatch.setitem(classify.REBUILD, "running", False)
+    assert c.delete("/api/games").status_code == 200
+
+
+def test_analysis_job_starts_once_when_asked_twice_at_once(client, monkeypatch):
+    """Two requests at once each started a job; the first was orphaned (still running, unstoppable)."""
+    from chessreview import web
+    c, _app = client
+    started = []
+    barrier = threading.Barrier(4)
+
+    class SlowJob:
+        def __init__(self, cfg):
+            self.running = False
+        def is_running(self):
+            return self.running
+        def start(self):
+            started.append(self)
+            self.running = True
+        @property
+        def progress(self):
+            from chessreview.engine import Progress
+            return Progress()
+
+    monkeypatch.setattr(web, "AnalysisJob", SlowJob)
+
+    def go():
+        barrier.wait()
+        c.post("/api/analysis/start")
+    threads = [threading.Thread(target=go) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(started) == 1

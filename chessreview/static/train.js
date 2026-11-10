@@ -19,13 +19,17 @@ let queue = [];
 let index = 0;
 let tally = { solved: 0, failed: 0 };
 const retried = new Set();
+const counted = new Set();   // items in the block's tally (reset with it)
 
 const puzzle = createPuzzle({
   onResult: (item, result) => {
+    const key = itemKey(item);
+    const tried = `${key}${item.again ? ':again' : ''}`;   // "Again" is its own attempt; Retry isn't
+    if (counted.has(tried)) return;
+    counted.add(tried);
     if (isSolved(result)) tally.solved += 1;
     else {
       tally.failed += 1;
-      const key = itemKey(item);
       if (!retried.has(key)) { retried.add(key); queue.push({ ...item, again: true }); }  // once more today
     }
     updateBar();
@@ -43,10 +47,19 @@ $('blind-toggle').addEventListener('change', () => setThreatCheckPref($('blind-t
 
 // ------------------------------------------------------------ the plan
 
+// Every plan request takes a number; only the newest one's reply is drawn (a slow poll must not
+// redraw over a newer budget or refresh).
+let planSeq = 0;
+async function fetchPlan(url, options) {
+  const seq = ++planSeq;
+  const data = await api(url, options);
+  if (seq === planSeq) render(data);
+}
+
 function loadPlan() {
   return guard($('plan-view'), async () => {
     try {
-      render(await api('/api/today'));
+      await fetchPlan('/api/today');
     } catch (err) {
       $('train-sub').textContent = "Couldn't load your plan.";
       $('plan-card').hidden = true;
@@ -55,16 +68,20 @@ function loadPlan() {
   }, 'your plan');
 }
 
-async function refreshPlan() {
+// Busy: the stale note's button and the header's both rebuild the plan once (B12).
+const refreshPlan = busy(async () => {
   $('refresh-btn').disabled = true;
-  await guard($('plan-view'), async () => render(await api('/api/today/refresh', { method: 'POST' })), 'your plan');
-  $('refresh-btn').disabled = false;
-}
+  try {
+    await guard($('plan-view'), () => fetchPlan('/api/today/refresh', { method: 'POST' }), 'your plan');
+  } finally {
+    $('refresh-btn').disabled = false;
+  }
+});
 
 // The time budget: the plan is rebuilt for it (what's done today is kept and counts).
-const setBudget = busy(minutes => guard($('plan-view'), async () => render(await api('/api/today/budget', {
+const setBudget = busy(minutes => guard($('plan-view'), () => fetchPlan('/api/today/budget', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ minutes }),
-})), 'your plan'));
+}), 'your plan'));
 
 function renderBudget(data) {
   $('budget-row').hidden = !data.plan.total && !data.plan.blocks.length;
@@ -170,10 +187,12 @@ const startBlock = busy(async b => {
   if (!queue.length) { await loadPlan(); return; }
   index = 0;
   tally = { solved: 0, failed: 0 };
+  counted.clear();
   $('plan-view').hidden = true;
   $('block-done').hidden = true;
   $('review').hidden = false;
   showCurrent();
+  $('move-title').focus({ preventScroll: true });     // keyboard users start in the puzzle
 });
 
 function updateBar() {
@@ -213,7 +232,7 @@ async function finishBlock() {
   box.hidden = false;
   box.replaceChildren(
     el('div', { class: 'celebrate' }, plan.complete ? '🏆' : '✅'),
-    el('h1', {}, plan.complete ? 'Workout complete!' : `${block.title}: done`),
+    el('h1', { tabindex: '-1' }, plan.complete ? 'Workout complete!' : `${block.title}: done`),
     el('p', { class: 'muted' }, `${tally.solved} of ${total} solved.` +
        (tally.failed ? ' The ones you missed come back soon.' : '')),
     el('div', { class: 'actions' },
@@ -221,6 +240,7 @@ async function finishBlock() {
       el('button', { class: `btn big ${following ? '' : 'primary'}`, onclick: () => showPlan() }, 'Back to the plan'),
       plan.complete ? el('a', { class: 'btn big', href: '/progress' }, 'See your progress') : ''),
   );
+  box.querySelector('h1').focus();      // keyboard and screen-reader users land on the result
 }
 
 function showPlan() {

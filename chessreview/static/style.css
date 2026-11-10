@@ -73,7 +73,10 @@ main { margin-left: var(--sidebar); padding: 22px 24px 60px; max-width: calc(148
 /* Icons only below 1100 px, so 1024-wide screens keep room for the board and its panel (B10). */
 @media (max-width: 1100px) {
   :root { --sidebar: 64px; }
-  .brand-text, .sidebar nav a span { display: none; }
+  .brand-text, .sidebar nav a span:not(.nav-badge) { display: none; }
+  /* The Today badge stays, as a dot-sized count on the icon's corner. */
+  .sidebar nav a { position: relative; }
+  .sidebar nav a .nav-badge { position: absolute; top: 2px; right: 2px; font-size: 10px; padding: 0 5px; }
 }
 @media (max-width: 900px) {
   main { padding: 16px; }
@@ -145,6 +148,14 @@ table.games td { padding: 9px 10px; border-top: 1px solid var(--border); white-s
 table.games tbody tr { cursor: pointer; }
 table.games tbody tr:hover { background: var(--panel-2); }
 table.games td.num { font-variant-numeric: tabular-nums; }
+/* Narrower windows: drop the columns you can read elsewhere (type, then your rating and moves) so the table fits. */
+@media (max-width: 1400px) {
+  table.games th:nth-child(8), table.games td:nth-child(8) { display: none; }
+}
+@media (max-width: 1100px) {
+  table.games th:nth-child(3), table.games td:nth-child(3), table.games th:nth-child(6), table.games td:nth-child(6) { display: none; }
+}
+table.games tr.empty-row td { display: table-cell; }
 .result-pill { display: inline-block; min-width: 46px; text-align: center; font-weight: 800; font-size: 12px; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; }
 .result-pill.win { background: rgba(129, 182, 76, .2); color: var(--green); }
 .result-pill.loss { background: rgba(250, 65, 45, .18); color: var(--miss); }
@@ -495,7 +506,7 @@ a.chip { text-decoration: none; }
 
 /* Today: the workout plan */
 .blocks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.block-row { display: grid; grid-template-columns: 40px 1fr auto auto; align-items: center; gap: 14px; background: var(--panel-2); border-radius: 8px; padding: 12px 14px; }
+.block-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; background: var(--panel-2); border-radius: 8px; padding: 12px 14px; }
 .block-row.done { opacity: .65; }
 .block-row.done .block-icon { color: var(--green); font-weight: 900; }
 .block-icon { font-size: 22px; text-align: center; }
@@ -582,3 +593,9 @@ table.games tbody tr.empty-row, table.games tbody tr.empty-row:hover { backgroun
 #stale-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .state-box strong { color: var(--text); }
 .progress-summary .state-box { font-size: 15px; font-weight: 400; }
+
+/* Keyboard move entry (board.js addKeyboardMoves): out of sight until Tab reaches it. */
+.kbd-move { position: absolute; left: 8px; bottom: 8px; z-index: 5; width: min(260px, 70%); padding: 8px 10px;
+  border-radius: 6px; border: 2px solid var(--green); background: var(--panel); color: var(--text); font: inherit; }
+.kbd-move:not(:focus) { clip-path: inset(50%); width: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; }
+.kbd-move[aria-invalid="true"] { border-color: var(--blunder); }

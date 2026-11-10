@@ -18,8 +18,8 @@
 // Callbacks: onResult(item, result) once per puzzle, onNext(), onPrev() (optional).
 import { Chess } from 'chess.js';
 import { createAnalysis } from './analysis.js';
-import { choosePromotion, createBadge, isPromotion, makeBoard, moveSound, sound } from './board.js';
-import { api, arrow, lastMove, legalDests, sideToMove, SYMBOLS } from './common.js';
+import { choosePromotion, createBadge, dismissPromotion, isPromotion, makeBoard, moveSound, sound } from './board.js';
+import { api, arrow, clickable, lastMove, legalDests, sideToMove, SYMBOLS } from './common.js';
 import { createEvalBar } from './evalbar.js';
 
 const STATUS_CHIPS = {
@@ -74,6 +74,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
   // ------------------------------------------------------------ showing a mistake
 
   function show(m) {
+    dismissPromotion($('board'));     // a picker left open belongs to the previous puzzle
     const blind = m.mode === 'blind';
     const lib = m.mode === 'library';
     puzzle = {
@@ -165,6 +166,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     p.phase = 'threat-checking';
     lockBoard();
     const promotion = isPromotion(piece, dest) ? await choosePromotion($('board'), opp, dest, p.item.my_color) : '';
+    if (puzzle !== p) return;
     checkThreat(p, orig + dest + promotion);
   }
 
@@ -180,6 +182,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
         body: JSON.stringify({ game_id: p.item.game_id, ply: p.item.ply, uci }),
       });
     } catch (err) {
+      if (puzzle !== p) return;
       p.threatResult = 'skipped';
       showFeedback('bad', `Couldn't check that (${err.message}).`);
       return startSolving(p, 0);
@@ -244,6 +247,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
     lockBoard();
     const promotion = isPromotion(piece, dest)
       ? await choosePromotion($('board'), p.item.my_color, dest, p.item.my_color) : '';
+    if (puzzle !== p) return;     // skipped or moved on while the promotion picker was open
     const uci = orig + dest + promotion;
 
     const m = p.item;
@@ -260,6 +264,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
         body: JSON.stringify({ fen: p.fen, uci, game_id: m.game_id, ply: m.ply, step: p.step }),
       });
     } catch (err) {
+      if (puzzle !== p) return;
       showFeedback('bad', `Couldn't check that move (${err.message}).`);
       p.phase = 'solving';
       return setSolvingBoard();
@@ -495,7 +500,7 @@ export function createPuzzle({ onResult = () => {}, onNext = () => {}, onPrev = 
       chip.dataset.index = i + 1;
       chip.textContent = num + s.san;
       chip.addEventListener('click', () => showSolutionStep(i + 1));
-      return chip;
+      return clickable(chip);
     }));
   }
 

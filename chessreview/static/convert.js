@@ -237,8 +237,17 @@ function showFeedback(cls, text) {
 
 async function hint() {
   const p = play;
-  if (!p || p.phase !== 'mine') return;
-  const r = await post('/api/play/hint', { key: p.task.key, moves: p.moves });
+  if (!p || p.phase !== 'mine' || p.hinting) return;    // a double click asks (and counts) once
+  p.hinting = true;
+  let r;
+  try {
+    r = await post('/api/play/hint', { key: p.task.key, moves: p.moves });
+  } catch (err) {
+    if (play === p) showFeedback('bad', `Couldn't get a hint (${err.message}).`);
+    return;
+  } finally {
+    p.hinting = false;
+  }
   if (play !== p || !r.uci) return;
   p.hints += 1;
   board.setAutoShapes([arrow(r.uci, 'green')]);

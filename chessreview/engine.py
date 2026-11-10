@@ -294,9 +294,11 @@ class AnalysisJob:
             self.progress.state = "stopping"
             self._stop.set()
 
-    def wait(self, timeout: float | None = None) -> None:
+    def wait(self, timeout: float | None = None) -> bool:
+        """Wait for the job to end; True once it is no longer running."""
         if self._thread:
             self._thread.join(timeout)
+        return not self.is_running()
 
     def _run(self) -> None:
         attempted: set[int] = set()
@@ -304,14 +306,16 @@ class AnalysisJob:
             # Keep going in rounds so games uploaded while a job is running get picked up too.
             while not self._stop.is_set():
                 conn = db.connect(self.cfg.db_path)
-                games = [g for g in pending_games(conn, self.limit) if g["id"] not in attempted]
-                if self.limit:
-                    games = games[: max(0, self.limit - len(attempted))]
-                # Threat-only pass for games analysed before threats existed (not when limited:
-                # `analyse --limit` is about new games).
-                threat_only = [] if self.limit else [
-                    g for g in pending_threat_games(conn) if g["id"] not in attempted]
-                conn.close()
+                try:
+                    games = [g for g in pending_games(conn, self.limit) if g["id"] not in attempted]
+                    if self.limit:
+                        games = games[: max(0, self.limit - len(attempted))]
+                    # Threat-only pass for games analysed before threats existed (not when limited:
+                    # `analyse --limit` is about new games).
+                    threat_only = [] if self.limit else [
+                        g for g in pending_threat_games(conn) if g["id"] not in attempted]
+                finally:
+                    conn.close()
                 if not games and not threat_only:
                     break
                 attempted.update(g["id"] for g in games + threat_only)

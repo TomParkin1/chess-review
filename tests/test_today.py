@@ -196,3 +196,29 @@ def test_untouched_plan_follows_new_games(conn, cfg, monkeypatch):
     conn.commit()
     plan = coach.today_plan(conn, cfg, DAY)
     assert not plan["stale"] and plan["basis"] == 2
+
+
+def test_pace_counts_retries_on_the_same_training_day(conn, cfg):
+    """E1: attempts were grouped by UTC calendar date, so a retry around midnight UTC looked like a
+    new puzzle and the plan underestimated how long each puzzle takes."""
+    with conn:
+        conn.execute("""INSERT INTO review_results (game_id, ply, result, at) VALUES
+                        (1, 2, 'failed', '2026-11-09 23:50:00'), (1, 2, 'solved', '2026-11-10 00:10:00')""")
+    assert coach.pace(conn, cfg) == 2 * cfg.coach.seconds_per_puzzle     # one puzzle, two attempts
+
+
+def test_new_per_day_counts_only_positions_from_my_games(conn, cfg):
+    """E1: failed library puzzles and drilled lines used up training.new_per_day."""
+    with conn:
+        conn.execute("INSERT INTO cards (kind, key, introduced_on) VALUES ('library', 'p1', ?)", (DAY.isoformat(),))
+        conn.execute("INSERT INTO cards (kind, key, introduced_on) VALUES ('line', 'white:x', ?)", (DAY.isoformat(),))
+    assert srs.introduced_on(conn, DAY) == 0
+
+
+def test_training_weeks_dont_split_at_new_year(conn):
+    """E1: %Y-%W put 31 Dec 2026 and 1 Jan 2027 (the same Monday-Sunday week) in two weeks."""
+    with conn:
+        conn.execute("""INSERT INTO review_results (game_id, ply, result, at) VALUES
+                        (1, 2, 'solved', '2026-12-31 12:00:00'), (1, 4, 'failed', '2027-01-01 12:00:00')""")
+    weeks = progress.training_weeks(conn)
+    assert [(w["week"], w["attempts"], w["days"]) for w in weeks] == [("2026-W53", 2, 2)]

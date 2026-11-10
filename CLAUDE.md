@@ -38,8 +38,10 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   through `_apply`/`next_state` (Finish M2, B3): only the first attempt of a training day moves a card (Retry, "Again",
   repeated drill lines don't), and before a card is due only a failure counts. `due_cards()` = most overdue relative
   to the box interval first (library cards included); `new_cards()` (not from open sessions).
-  Training day = 04:00 to 04:00 (B13): `srs.today()` and, in SQL, `srs.day_sql("at")`; never `date.today()` or
-  `date(at, 'localtime')` for training days. Streak = `training_days()` over review_results, puzzle_attempts,
+  Training day = 04:00 to 04:00 (B13): `srs.today()` and, in SQL, `srs.day_sql("at")`; never `date.today()`,
+  `date(at, 'localtime')` or `at[:10]` for training days (`coach.pace` groups retries by it, E1). `introduced_on()`
+  counts only `mistake`/`position` cards (what `training.new_per_day` limits). Progress weeks are ISO weeks
+  (`progress._iso_week`). Streak = `training_days()` over review_results, puzzle_attempts,
   self_reviews and training_log (B9; Progress weeks too).
 - `chessreview/session.py`: "new games" session = open import batches (session_done_at NULL). Every import ends in
   `session.finish_import` (B5): the first import, or one whose games mostly ended > `coach.history_days` ago, is
@@ -49,7 +51,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   Self-review wording follows the result (session.js `SR_COPY`): losses "where did it turn?", draws "where did it
   slip?", wins "where was your worst moment?" (same turning point underneath).
 - `chessreview/insights.py`: per-game trends, phase accuracy, mistake kinds, clock buckets, openings, colours and
-  heuristic `weaknesses()` (each with a Practice filter). `static/charts.js`: SVG line/bar charts with hover
+  heuristic `weaknesses()` (each with a Practice filter; ratios via `_ratio()`, base rate smoothed, capped at
+  `RATIO_CAP`; "Moving too fast" trains `fast=1`, `insights.fast_move()`, in Practice and Today's focus). `static/charts.js`: SVG line/bar charts with hover
   (dataviz rules: one axis, 2px lines, rounded bar ends, validated colours `--series-you/--series-opp`).
   Practice (`/review`) accepts filters in the URL (incl. `low_clock`), overriding saved filters; the summary line
   names them ("· in time trouble", "· from one game").
@@ -69,7 +72,14 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   happened in the game: verdict, evals unless the text already quotes them, why; library: themes + rating change),
   `#best-explanation`, and the best line with the arrow legend in its header. Feedback and status chip hide at the end.
   `common.js`: `isSolved()` (solved_with_help counts as solved everywhere, B15), `itemKey()` (`lib:<id>` or
-  `<game>:<ply>`, Today's "Again"), `threatCheckPref()`/`setThreatCheckPref()`.
+  `<game>:<ply>`, Today's "Again"), `threatCheckPref()`/`setThreatCheckPref()`. Session tallies (Today, Puzzles,
+  Session) count each item once (a Retry doesn't count again; Today's "Again" is its own attempt); the server still
+  records every attempt (`coach.pace` needs them). Every async step checks `puzzle !== p` after an await, and
+  `show()` dismisses an open promotion picker (`board.dismissPromotion`, its promise resolves null).
+- Accessibility (E1): `common.clickable(node)` (tabindex, role, Enter/Space) is applied by `el()` to anything with an
+  `onclick` that isn't a native control; feedback/prompt boxes are `aria-live`. Boards created with `viewOnly: false`
+  get a keyboard move box (`board.js addKeyboardMoves`, `.kbd-move`, hidden until focused): SAN or UCI, played
+  through the board's own `movable.events.after` only when the board allows that move.
 - `chessreview/report.py`: chess.com-style move marks (documented approximations), Lichess accuracy, time spent,
   clock rules relative to the time control.
 - `chessreview/pgn_import.py`: PGN parsing, my colour/result, time class, dedupe (Link header, else sha1 of players+date+moves).
@@ -218,7 +228,10 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 - `chessreview/templates/` + `chessreview/static/`: plain ES modules, no build step. chessground 9.2.1 and
   chess.js 1.4.0 via an import map from jsdelivr (see `base.html`). `common.js` has shared helpers.
 - Error and empty states (Finish M1, B11/F6): `/api/*` errors are always JSON `{error}` (web.py error handlers,
-  500s logged). `common.js`: `api()` throws `ApiError` (`status`, 0 = server unreachable), `errorState()`,
+  500s logged). Bad input is a 400/404, never a 500 (E1): request bodies through `web._body()` (a JSON object or 400),
+  numbers through `_int(data, key, default)`, colours `_color()`, FENs `_board()`, move lists `_moves()`;
+  `convert.task_for` returns None for a malformed key or a position where it isn't my move; `/api/review/result`
+  404s unless the position is my analysed move. `chesscom.Unavailable` (an OSError) = a non-JSON reply (502). `common.js`: `api()` throws `ApiError` (`status`, 0 = server unreachable), `errorState()`,
   `emptyState()`, `guard(where, load, what)` (shows why + Try again), `need(where, url, what)` (data a page can't
   work without; on failure it never resolves, so the module stops quietly). `shell.js` shows a banner for any
   uncaught error. Every page's first load is guarded; empty DB states point to Home. First run: Home asks for the
@@ -271,5 +284,22 @@ Browser tests: scratchpad `drive.mjs` (CDP) against a copy of the DB via `--conf
    Practice at 1,928 games). Found by the regression: session self-review race, drill Stop race, 404 console noise.
    Browser regression (scratchpad `regress.mjs` + `run-width.sh`, fresh copies per width): every flow of the audit's
    Method section at 1280, 1440 and 1920, zero console errors / failed requests / layout problems.
-The Finish roadmap is complete. Next candidates: the list below the audit's cut line (F9 sparring at my level, F10
-calculation trainer, ...) and the deferred deeper re-check of card positions (M3).
+The Finish roadmap is complete.
+
+## E roadmap (audit of 10 Nov 2026; plan approved; one milestone at a time, stop after each for testing)
+Openings are practised on Chessly: Today drops opening lines (the /openings page stays) and leans on endgames.
+1. [x] E1 Bug squash: bad input -> 400/404 (`_body`/`_int`/...), races (job start lock, Delete all/restore vs
+   imports and rebuilds, live cache lock, card insert, puzzle rating), time-trouble/fast weakness ratios + `fast`
+   filter, pace by training day, new_per_day scope, ISO weeks, partial first sync = history, chess.com 5xx/non-JSON;
+   frontend: Openings drill Stop + stale replies, promotion picker per puzzle, stale judge replies, once-per-item
+   tallies, analysis/convert/Today/Insights/Puzzles races, Today badge + games table at 1024 px, keyboard moves,
+   clickable/aria-live. Browser regression: scratchpad `regress/run.sh` (fresh DB copy, port 8765, `drive.mjs`:
+   every page at 1024/1280/1440/1920 + drill Stop, rapid Openings clicks, a typed move in Practice).
+2. [ ] E2 Today without openings; Endgame block (~30%: essential endgame or Convert, my endgame mistakes, Lichess
+   endgame puzzles by type)
+3. [ ] E3 Lichess tablebase API (<= 7 pieces) for endgame play: perfect defence, exact verdicts, cached
+4. [ ] E4 Endgame insights (conversion rate, results by endgame type, "Endgames" weakness)
+5. [ ] E5 Sparring vs a rating-limited Stockfish from my positions (F9)
+6. [ ] E6 Calculation trainer (F10)
+Still deferred: the deeper re-check of card positions (M3); idempotent old migrations (rule: never edit old ones;
+new migrations use `conn.execute` per statement, not `executescript`, so they stay atomic).

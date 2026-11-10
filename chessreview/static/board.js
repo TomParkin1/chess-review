@@ -1,5 +1,6 @@
 // Everything about the chessboard that pages share: creation with the saved settings,
 // move-mark badges on squares, the promotion picker and move sounds.
+import { Chess } from 'chess.js';
 import { Chessground } from 'chessground';
 import { markIcon } from './icons.js';
 
@@ -34,7 +35,54 @@ export function makeBoard(el, config = {}) {
     ...config,
   });
   keepRealBounds(cg, el);
+  if (config.viewOnly === false) addKeyboardMoves(cg, el);
   return cg;
+}
+
+// Moves from the keyboard: Tab to the board's move box (hidden until focused) and type a move in
+// SAN ("Nf3", "exd5", "O-O") or UCI ("g1f3", "e7e8q"), then Enter. It is played exactly like a
+// dragged move: only when the board takes moves for that side, through the same handler.
+function addKeyboardMoves(cg, el) {
+  const host = el.parentElement;
+  if (!host) return;
+  if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+  const input = document.createElement('input');
+  input.className = 'kbd-move';
+  input.type = 'text';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.placeholder = 'Type a move, e.g. Nf3, then Enter';
+  input.setAttribute('aria-label', 'Type a move (like Nf3 or e2e4) and press Enter');
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { input.value = ''; input.blur(); return; }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const move = parseTypedMove(cg, input.value.trim());
+    if (!move) { input.setAttribute('aria-invalid', 'true'); sound.wrong(); return; }
+    input.removeAttribute('aria-invalid');
+    input.value = '';
+    const after = cg.state.movable.events?.after;
+    cg.move(move.from, move.to);
+    after?.(move.from, move.to, {});
+  });
+  host.append(input);
+}
+
+// {from, to} of a typed move that the board currently allows, or null.
+function parseTypedMove(cg, text) {
+  const { color, dests } = cg.state.movable;
+  if (!text || !color || !dests?.size || cg.state.turnColor !== color) return null;
+  const allowed = (from, to) => dests.get(from)?.includes(to);
+  const uci = text.toLowerCase().match(/^([a-h][1-8])-?([a-h][1-8])[qrbn]?$/);
+  if (uci) return allowed(uci[1], uci[2]) ? { from: uci[1], to: uci[2] } : null;
+  // SAN needs a full position: the board only knows the pieces and who moves. Castling rights are
+  // whatever the pieces still allow; the board's own move list (dests) has the final say.
+  const fen = `${cg.getFen()} ${color[0]} KQkq - 0 1`;
+  let chess;
+  try { chess = new Chess(fen, { skipValidation: true }); } catch { return null; }
+  let mv;
+  try { mv = chess.move(text.replace(/0/g, 'O'), { strict: false }); } catch { return null; }
+  return mv && allowed(mv.from, mv.to) ? { from: mv.from, to: mv.to } : null;
 }
 
 // Chessground measures the board once (a memo, cleared by its own ResizeObserver) and places
@@ -112,9 +160,23 @@ export function choosePromotion(boardEl, color, square, orientation) {
       overlay.append(cell);
     });
     overlay.addEventListener('click', () => finish('q'));
-    function finish(code) { overlay.remove(); resolve(code); }
+    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); finish('q'); } }
+    function finish(code) {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey, true);
+      resolve(code);
+    }
+    overlay.dismiss = () => finish(null);     // dismissPromotion: the position went away
+    document.addEventListener('keydown', onKey, true);
     boardEl.append(overlay);
+    overlay.querySelector('button').focus();
   });
+}
+
+// Close an open promotion picker without a choice (its promise resolves to null): the caller
+// must check that its position is still the current one before using the answer.
+export function dismissPromotion(boardEl) {
+  boardEl.querySelectorAll('.promotion').forEach(o => o.dismiss?.());
 }
 
 export function isPromotion(piece, dest) {

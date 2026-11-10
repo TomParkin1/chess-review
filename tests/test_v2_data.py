@@ -208,3 +208,32 @@ def test_later_sync_with_new_games_opens_a_session(conn, cfg):
     assert later.games_added == 1
     batch = conn.execute("SELECT * FROM imports WHERE id = ?", (later.batch_id,)).fetchone()
     assert batch["session_done_at"] is None
+
+
+def test_first_sync_that_fails_partway_is_still_history(conn, cfg):
+    """E1: the "history" label was skipped when the first sync raised, but its months were saved,
+    so its games became a new-games session."""
+    def failing(url):
+        if url.endswith("/2026/10"):
+            raise OSError("network down")
+        return fake_fetch(url) if not url.endswith("/2026/09") else MONTH
+    with pytest.raises(OSError):
+        chesscom.sync(conn, cfg, fetch=failing)
+    row = conn.execute("SELECT label, session_done_at FROM imports").fetchone()
+    assert row["label"] == "chess.com history import" and row["session_done_at"] is not None
+
+
+def test_a_page_that_isnt_json_is_chess_com_unavailable(monkeypatch):
+    """E1: a maintenance page raised JSONDecodeError, a ValueError, which the sync route reads as
+    "no username yet" (a 400 with a JSON parse message)."""
+    import urllib.request
+
+    class Page(io.BytesIO):
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: Page(b"<html>maintenance</html>"))
+    with pytest.raises(chesscom.Unavailable):
+        chesscom.fetch_json("https://api.chess.com/pub/player/x/games/archives")
+    assert issubclass(chesscom.Unavailable, OSError)       # the sync route answers 502
