@@ -399,7 +399,8 @@ def test_library_api_without_a_library(client):
 PAGE_APIS = ["/api/today", "/api/today/reviews", "/api/today/real", "/api/today/focus", "/api/train/stats",
              "/api/insights?last=100", "/api/progress/report", "/api/convert", "/api/openings?color=white",
              "/api/session", "/api/session/self-review", "/api/mistakes", "/api/games", "/api/sync",
-             "/api/library/status", "/api/account", "/api/backups", "/api/settings/thresholds"]
+             "/api/library/status", "/api/account", "/api/backups", "/api/settings/thresholds",
+             "/api/insights/endgame-training", "/api/settings/tablebase"]
 
 
 def test_pages_work_on_an_empty_and_an_unanalysed_database(client, tmp_path):

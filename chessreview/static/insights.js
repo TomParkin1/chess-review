@@ -163,24 +163,25 @@ function renderEndgames(d) {
   $('endgame-scope').textContent = `"clearly" = ${bar} or more at your rating`;
   const tile = (value, label, title = '') => el('div', { class: 'stat', title },
     el('div', { class: 'value' }, value), el('div', { class: 'label' }, label));
-  const conv = e.endgame_conversion, saves = e.saves;
+  const conv = e.endgame_conversion, saves = e.saves, all = e.conversion;
   $('endgame-tiles').replaceChildren(
     tile(`${e.games}`, `games reached an endgame (${pct(e.share * 100)})`),
-    tile(pct(conv.rate), `won from clearly winning endgames (${ofGames(conv)})`,
-         `Of all positions where you were clearly winning: ${pct(e.conversion.rate)} won (${ofGames(e.conversion)})`),
+    tile(pct(all.rate), `won after being clearly winning (${all.games ? `${all.won}/${all.drawn}/${all.lost} of ${all.games}` : 'none yet'})`,
+         'Every game where you were clearly winning at some point, endgame or not: won/drawn/lost'),
+    tile(pct(conv.rate), `won from clearly winning endgames (${ofGames(conv)})`),
     tile(saves.games ? `${saves.won + saves.drawn} of ${saves.games}` : '–', 'saved from clearly losing endgames',
          `${saves.won} won, ${saves.drawn} drawn`),
     tile(pct(phases.endgame?.accuracy), `endgame accuracy (middlegame ${pct(phases.middlegame?.accuracy)})`));
   $('endgame-types').tBodies[0].replaceChildren(...e.types.map(t =>
-    el('tr', { onclick: () => { location.href = trainHref({ phase: 'endgame' }); } },
+    el('tr', {},
       el('td', {}, t.label), el('td', { class: 'num' }, t.games),
       el('td', {}, wdlBar(t), el('span', { class: 'muted small' }, ` ${t.won}/${t.drawn}/${t.lost}`)),
       el('td', { class: 'num' }, pct(t.score)), el('td', { class: 'num' }, pct(t.accuracy)),
       el('td', { class: 'num' }, t.errors_per_game.toFixed(1)))));
   $('endgame-types').closest('.table-wrap').hidden = !e.types.length;
   $('endgame-note').textContent = e.games
-    ? 'The type is the material at your first endgame move. Endgame accuracy runs high for everyone (many moves are ' +
-      'simple), so compare endgames with each other and over time rather than with the middlegame.'
+    ? 'The type is the material at your first endgame move. Accuracy is the share of your endgame moves that kept ' +
+      'the evaluation; many endgame moves are simple, so compare endgame types with each other and over time.'
     : 'None of these games reached an endgame.';
   loadTraining();
 }
@@ -197,7 +198,7 @@ function loadTraining() {
       link('/convert', `won positions ${t.positions.converted} converted of ${t.positions.tried} tried`), ' · ',
       link('/puzzles?theme=endgame', t.puzzles.tried
         ? `endgame puzzles ${t.puzzles.clean} of ${t.puzzles.tried} clean first time` : 'no endgame puzzles yet'), ' · ',
-      link(trainHref({ phase: 'endgame' }), `your endgame mistakes ${t.mistakes.studied} of ${t.mistakes.total} studied`));
+      link(trainHref({ phase: 'endgame' }, ''), `your endgame mistakes ${t.mistakes.studied} of ${t.mistakes.total} studied`));
   }).catch(() => { trainingLoaded = false; $('endgame-training').textContent = ''; });
 }
 

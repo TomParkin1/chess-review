@@ -317,6 +317,24 @@ def test_due_endgame_cards_can_fill_the_whole_endgame_block(conn, cfg):
     assert len(endgame) == 7 and all(tag == "due" and g != "lib" for g, _, tag in endgame)
 
 
+def test_an_endgames_focus_never_repeats_the_endgame_block(conn, cfg, monkeypatch):
+    """E4: with "Endgames" as the top weakness, Today's focus trains endgames too (my endgame
+    mistakes, endgame puzzles), but never an item the endgame block already has."""
+    endgames_in(conn, library_puzzles=20)
+    conn.execute("UPDATE mistakes SET phase = 'endgame' WHERE game_id <= 10 AND ply = 2")
+    conn.commit()
+    weakness = {"title": "Endgames", "detail": "", "train": {"phase": "endgame"}}
+    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [weakness]})
+    coach.set_budget(conn, 30)
+    roomy = replace(cfg, training=replace(cfg.training, new_per_day=30))     # new cards left for focus too
+    b = blocks(coach.today_plan(conn, roomy, DAY))
+    endgame = {tuple(i[:2]) for i in b["endgame"]["items"]}
+    focus = {tuple(i[:2]) for i in b["focus"]["items"]}
+    assert b["focus"]["title"] == "Focus: Endgames" and focus and endgame
+    assert not endgame & focus
+    assert any(k[0] == "lib" for k in focus) and any(k[0] != "lib" for k in focus)
+
+
 def test_without_the_library_my_own_endgames_fill_the_block(conn, cfg):
     endgames_in(conn, library_puzzles=0)
     plan = coach.today_plan(conn, cfg, DAY)

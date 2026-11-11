@@ -64,7 +64,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   (`/api/insights/endgame-training`). Weakness "Endgames" (`_endgame_weakness`): endgame conversion missed >= 25% of
   >= 5 games (severity 60 x missed) or endgame moves >= 3 points below the middlegame (2.5 x gap); it replaces "The
   endgame" phase card, keeping the higher severity; trains `phase=endgame` (Today's focus: endgame mistakes + puzzles).
-  Insights' Endgames card; Puzzles takes `?theme=`. Progress already compares conversion between game windows.
+  Insights' Endgames card (5 tiles: reached, conversion at any point with W/D/L, endgame conversion, saves, accuracy); Puzzles
+  takes `?theme=`. Progress already compares conversion between game windows.
 - Clock rules (Finish M5, F7) live in `report.py`: shares of the estimated game duration `game_budget_ms` = base +
   40 × increment (none for daily/unknown). Time trouble < 10% (`is_low_clock`; 60 s at 10+0, 18 s at 3+0, 130 s at
   15+10), a very fast move < 1/120 (5 s at 10+0), buckets `CLOCK_BUCKETS` 30/10/3%. `insights.in_time_trouble(clocks,
