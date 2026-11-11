@@ -219,3 +219,26 @@ render();
 guard($('backups-card'), loadBackups, 'your backups');
 guard(document.querySelector('input[name="th-mode"]').closest('.card'), loadThresholds, 'the thresholds');
 guard($('library-btn').closest('.card'), loadLibrary, 'the puzzle library status');
+
+// ------------------------------------------------------------ endgame tablebase (E3)
+
+function showTablebase(s) {
+  $('tablebase-toggle').checked = s.enabled;
+  $('tablebase-note').textContent = s.enabled
+    ? `On: ${s.cached.toLocaleString()} position${s.cached === 1 ? '' : 's'} kept for offline play.`
+    : 'Off: Stockfish alone plays and judges endgames.';
+}
+$('tablebase-toggle').addEventListener('change', async () => {
+  const toggle = $('tablebase-toggle');
+  toggle.disabled = true;
+  try {
+    showTablebase(await api('/api/settings/tablebase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                         body: JSON.stringify({ enabled: toggle.checked }) }));
+  } catch (err) {
+    toggle.checked = !toggle.checked;
+    $('tablebase-note').textContent = `Couldn't change it: ${err.message}`;
+  } finally {
+    toggle.disabled = false;
+  }
+});
+guard($('tablebase-card'), async () => showTablebase(await api('/api/settings/tablebase')), 'the tablebase setting');

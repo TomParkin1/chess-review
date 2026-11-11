@@ -279,8 +279,14 @@ def _migrate_9(conn: sqlite3.Connection) -> None:
     conn.execute(f"DELETE FROM cards WHERE kind = 'endgame' AND key IN ({','.join('?' * len(changed))})", changed)
 
 
+def _migrate_10(conn: sqlite3.Connection) -> None:
+    """Lichess tablebase answers (E3), keyed by EPD: an endgame played once works offline."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS tablebase_cache (
+                        epd TEXT PRIMARY KEY, data TEXT NOT NULL, at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+
+
 MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5, _migrate_6, _migrate_7,
-              _migrate_8, _migrate_9]   # index i upgrades user_version i -> i + 1
+              _migrate_8, _migrate_9, _migrate_10]   # index i upgrades user_version i -> i + 1
 
 
 _schema_lock = threading.Lock()     # requests opening a new database at once must not both set it up

@@ -26,7 +26,7 @@ const analysis = createAnalysis({ board, panel: $('analysis'), evalBar });
 let overview = null;
 let list = [];          // the list the current task came from (for "Next")
 let tab = 'games';
-let play = null;        // { task, moves, sans, fen, last, evals, evalTexts, streak, hints, phase, partial, lesson, view }
+let play = null;        // { task, moves, sans, fen, last, evals, evalTexts, tbs, streak, hints, phase, partial, lesson, view }
 const FROM_TODAY = new URLSearchParams(location.search).get('from') === 'today';
 
 // ------------------------------------------------------------ lists
@@ -102,10 +102,11 @@ async function startTask(key, from, resume = null) {
     return;
   }
   list = from || [];
+  $('play-source').hidden = true;
   const previousTab = tab === 'play' ? (task.kind === 'endgame' ? 'endgames' : 'games') : (play?.returnTab || tab);
   const replayed = replay(task.fen, resume?.moves || []);
   play = { task, moves: replayed.moves, sans: replayed.sans, fen: replayed.fen, last: replayed.last,
-           evals: resume?.evals || [], evalTexts: resume?.evalTexts || [], streak: 0, hints: 0, phase: 'mine',
+           evals: resume?.evals || [], evalTexts: resume?.evalTexts || [], tbs: resume?.tbs || [], streak: 0, hints: 0, phase: 'mine',
            returnTab: previousTab, partial: replayed.moves.length > 0, lesson: null, view: null };
   stopAnalysis();
   showTab('play');
@@ -201,9 +202,11 @@ async function onMove(orig, dest) {
     p.sans.push(r.reply_san);
     p.evals.push(r.cp);
     p.evalTexts.push(r.eval);
+    p.tbs.push(r.tablebase || null);     // the tablebase result after my move, when it knows it (E3)
   }
   p.fen = r.fen;
   p.last = lastMove(r.reply_uci || uci);
+  if (r.reply_source === 'tablebase') showSource('♾ Perfect defence: with 7 pieces or fewer, Stockfish plays the Lichess tablebase\'s moves.');
   renderMoves();
   setTimeout(() => {
     if (play !== p || p.phase !== 'waiting') return;
@@ -229,6 +232,12 @@ function renderMoves(sans = play.sans, from = 0, slip = -1) {
   }));
 }
 
+// Where the moves come from, once the tablebase takes over (E3).
+function showSource(text) {
+  $('play-source').hidden = false;
+  $('play-source').textContent = text;
+}
+
 function showFeedback(cls, text) {
   $('play-feedback').hidden = false;
   $('play-feedback').className = `feedback ${cls}`;
@@ -250,6 +259,7 @@ async function hint() {
   }
   if (play !== p || !r.uci) return;
   p.hints += 1;
+  if (r.source === 'tablebase') showSource('♾ Hint from the Lichess tablebase: perfect play.');
   board.setAutoShapes([arrow(r.uci, 'green')]);
 }
 
@@ -280,9 +290,30 @@ function finish(result, reason) {
 
 // ------------------------------------------------------------ learning from it
 
+// The move where it slipped: the first that made the tablebase result worse (E3: exact; the eval
+// often barely moves when a rook endgame win becomes a draw), else the biggest eval drop.
+function worstMove(p) {
+  return tablebaseSlip(p) || evalSlip(p);
+}
+
+function tablebaseSlip(p) {
+  let prev = null;
+  for (let i = 0; i < p.tbs.length; i++) {
+    const t = p.tbs[i];
+    if (!t) continue;
+    const before = prev || { wdl: t.start_wdl, verdict: t.start_verdict };
+    if (t.wdl < before.wdl) {
+      return { at: 2 * i, drop: 1, before: i ? p.evalTexts[i - 1] : p.task.start_eval, after: p.evalTexts[i],
+               tablebase: `${before.verdict} → ${t.verdict}` };
+    }
+    prev = t;
+  }
+  return null;
+}
+
 // The move of mine after which my winning chances fell the most: {at (index into moves), drop,
 // before, after (eval texts, e.g. "+8.45" or "#5")}.
-function worstMove(p) {
+function evalSlip(p) {
   let prev = p.task.start_cp ?? p.evals[0];
   let worst = null;
   p.evals.forEach((cp, i) => {
@@ -312,7 +343,8 @@ async function showLesson(p, won) {
   $('view-btn').hidden = false;
   const san = p.sans[worst.at];
   const n = moveNumber(p, worst.at);
-  const slipped = `It slipped most with ${n}${san} (${worst.before} → ${worst.after}).`;
+  const slipped = worst.tablebase ? `It slipped with ${n}${san}: the tablebase says ${worst.tablebase}.`
+    : `It slipped most with ${n}${san} (${worst.before} → ${worst.after}).`;
   rich(`${slipped} The board shows the position before it.`);
   showSlip(p);
   let r;
@@ -432,7 +464,7 @@ $('from-slip-btn').addEventListener('click', () => {
   if (!p || p.phase !== 'done' || !p.lesson) return;
   const n = p.lesson.at / 2;
   start(p.task.key, list, { moves: p.moves.slice(0, p.lesson.at), evals: p.evals.slice(0, n),
-                            evalTexts: p.evalTexts.slice(0, n), eval: p.lesson.before });
+                            evalTexts: p.evalTexts.slice(0, n), tbs: p.tbs.slice(0, n), eval: p.lesson.before });
 });
 $('view-btn').addEventListener('click', () => {
   const p = play;

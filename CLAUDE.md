@@ -163,6 +163,20 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   `tests/test_endgame_playouts.py`: strong moves win/hold all 15, three merely safe moves finish none. Playouts are stateless: the client sends all moves (`/api/play/move`, `/api/play/hint`),
   Stockfish = `LiveEngine.analyse` at full strength. Cards: `srs.record_key(kind 'convert'|'endgame', key)`.
   Page `/convert` (`static/convert.js`, eval hidden until the end); Today gets a "Convert" block.
+- Tablebase (E3): `chessreview/tablebase.py` asks the Lichess API (`tablebase.lichess.ovh/standard`) for positions with
+  <= 7 pieces and no castling rights (`eligible`); `probe(conn, board)` -> `TbResult` (WDL from the side to move: 2 win,
+  1 cursed win, 0 draw, -1 blessed loss, -2 loss; cursed/blessed count as almost draws since playouts apply the 50-move
+  rule) or None (ineligible, game over, Settings off = meta `tablebase` 'off', or any failure -> Stockfish). Cache: LRU
+  in memory + `tablebase_cache` (migration 10, EPD -> compact JSON), so played endgames work offline. 3 s timeout;
+  after a failure no requests for `BACKOFF` 30 s (`RATE_LIMIT_BACKOFF` 60 s after 429). `TbResult.best` = quickest win
+  (DTM, else DTZ) / longest defence; `reply()` keeps the engine's move among equal draws (sets problems).
+  `/api/play/move`: defender = `tablebase.reply`, `reply_source`, `tablebase.verdict`; `convert.state(..., tb=(start WDL,
+  WDL after my move))` (start from `_start_wdl`: the probe, else 2 for win goals / 0 for draw goals): a drop below the
+  start fails at once with an exact reason ("throws away the win ... (tablebase)") and replaces the 40%-slip and
+  -60% losing eval rules; a start the tablebase calls no better is judged by the eval. `/api/play/hint` = tablebase
+  best (`source`), so "Watch Stockfish play it" is perfect play too. Convert page `#play-source` says so. Settings
+  card toggle (`/api/settings/tablebase`). Tests never touch the network: `tests/conftest.py` replaces
+  `tablebase.fetch`; the opt-in playouts run every endgame twice (Stockfish alone, real tablebase).
 - v3 puzzle library (Milestone 4): `library.py` streams the Lichess puzzle DB (`lichess_db_puzzle.csv.zst`, ~300 MB,
   stdlib `compression.zstd`) and keeps a reservoir sample per (100-point bucket, theme in `THEMES`), 400-3100, well-tested
   only (~19k puzzles) in `puzzles`; attempts in `puzzle_attempts`. Puzzle rating (meta) starts at my chess.com rating,
@@ -307,7 +321,7 @@ Openings are practised on Chessly: Today drops opening lines (the /openings page
    (~30%: the endgame to play + endgame puzzle block), convert block done only for its planned key; library endgame
    types. `simulate --days 90`: 0 days over budget at 10/20/30, backlog as before E2 (max 55 = the starting
    backlog), endgames 27-29% of planned time, Lichess endgame puzzles on ~2/3 of days at 10 min, all at 20/30.
-3. [ ] E3 Lichess tablebase API (<= 7 pieces) for endgame play: perfect defence, exact verdicts, cached
+3. [x] E3 Lichess tablebase API (<= 7 pieces) for endgame play: perfect defence, exact verdicts, cached
 4. [ ] E4 Endgame insights (conversion rate, results by endgame type, "Endgames" weakness)
 5. [ ] E5 Sparring vs a rating-limited Stockfish from my positions (F9)
 6. [ ] E6 Calculation trainer (F10)

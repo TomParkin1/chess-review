@@ -16,7 +16,7 @@ from flask import Flask, Response, g, jsonify, render_template, request
 from werkzeug.exceptions import BadRequest, HTTPException
 
 from . import (backup, chesscom, coach, convert, db, insights, level, library, progress, report, repertoire,
-               session, srs)
+               session, srs, tablebase)
 from .classify import (ADAPTIVE_BANDS, MODE_KEY, REBUILD, Eval, adaptive_enabled, capture_square, refresh,
                        thresholds_for)
 from .config import PROJECT_ROOT, Config, effective_workers, load_config
@@ -461,6 +461,22 @@ def create_app(cfg: Config | None = None) -> Flask:
         refresh(c, cfg)    # the fingerprint changed: starts the rebuild
         return jsonify(adaptive=adaptive, rebuild=dict(REBUILD))
 
+    @app.get("/api/settings/tablebase")
+    def tablebase_info():
+        c = conn()
+        cached = c.execute("SELECT COUNT(*) FROM tablebase_cache").fetchone()[0]
+        return jsonify(enabled=tablebase.enabled(c), cached=cached, max_pieces=tablebase.MAX_PIECES)
+
+    @app.post("/api/settings/tablebase")
+    def tablebase_set():
+        """Body: {enabled: bool}. Off: Stockfish alone plays and judges endgames (no network)."""
+        enabled = _body().get("enabled")
+        if not isinstance(enabled, bool):
+            return jsonify(error="enabled must be true or false"), 400
+        c = conn()
+        tablebase.set_enabled(c, enabled)
+        return tablebase_info()
+
     @app.get("/openings")
     def openings_page():
         return render_template("openings.html")
@@ -642,28 +658,46 @@ def create_app(cfg: Config | None = None) -> Flask:
         board.push(move)
         st = convert.state(task, board, None, streak, rating)
         if st.status == "playing":
-            analysis = live.analyse(board)      # Stockfish's best reply; its eval is the position after it
-            reply = analysis.best
-            out |= {"reply_uci": reply.uci(), "reply_san": board.san(reply)}
+            analysis = live.analyse(board)      # Stockfish's eval of the position after its best reply
+            # With 7 pieces or fewer the tablebase defends perfectly and judges my move exactly (E3).
+            tb = tablebase.probe(c, board)
+            best = tablebase.reply(tb, analysis.best) if tb else None
+            reply = chess.Move.from_uci(best.uci) if best else analysis.best
+            out |= {"reply_uci": reply.uci(), "reply_san": board.san(reply),
+                    "reply_source": "tablebase" if best else "stockfish"}
             board.push(reply)
             ev = analysis.for_side(me)
             out |= {"eval": str(ev), "cp": ev.as_cp()}
-            st = convert.state(task, board, ev, st.streak, rating)
+            exact = (_start_wdl(c, task), -tb.wdl) if tb else None
+            if exact:       # my side: the start, and after my move (the Convert lesson finds the slip by it)
+                out["tablebase"] = {"wdl": exact[1], "verdict": tablebase.verdict(exact[1]),
+                                    "start_wdl": exact[0], "start_verdict": tablebase.verdict(exact[0])}
+            st = convert.state(task, board, ev, st.streak, rating, tb=exact)
         out |= {"fen": board.fen(), "status": st.status, "reason": st.reason, "streak": st.streak}
         return jsonify(out)
 
     @app.post("/api/play/hint")
     def play_hint():
         data = _body()
-        task = convert.task_for(conn(), str(data.get("key", "")))
+        c = conn()
+        task = convert.task_for(c, str(data.get("key", "")))
         if task is None:
             return jsonify(error="unknown position"), 404
         try:
             board = _replay(task, _moves(data))
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
+        tb = tablebase.probe(c, board)
+        if tb and tb.best:      # perfect play (E3)
+            return jsonify(uci=tb.best.uci, san=tb.best.san, source="tablebase")
         best = live.analyse(board).best
-        return jsonify(uci=best.uci() if best else None, san=board.san(best) if best else None)
+        return jsonify(uci=best.uci() if best else None, san=board.san(best) if best else None, source="stockfish")
+
+    def _start_wdl(c: sqlite3.Connection, task: convert.Task) -> int:
+        """The task's start from my side in the tablebase; when it isn't in it (more than 7 pieces),
+        what the goal assumes: a win for a win goal, a draw for a draw goal."""
+        tb = tablebase.probe(c, chess.Board(task.fen))
+        return tb.wdl if tb else (2 if task.goal == "win" else 0)
 
     @app.post("/api/convert/result")
     def convert_result():

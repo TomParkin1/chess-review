@@ -23,6 +23,9 @@ Everything runs on your own machine. Your games and progress live in a SQLite da
 - **New-games session**: after an import, first guess where each lost game turned, then review it.
 - **Openings**: your repertoire tree for each colour, built from your games, with drills.
 - **Convert**: play won positions from your games out to the win against Stockfish, plus 15 essential endgames.
+  With 7 pieces or fewer the free [Lichess tablebase](https://tablebase.lichess.ovh) takes over: perfect defence,
+  perfect hints, and an exact verdict the moment a move throws a win away. Answers are kept, so endgames you've
+  played work offline; Settings can switch it off.
 - **Puzzle library**: about 19k Lichess puzzles (optional download), with your own puzzle rating.
 - **Insights and Progress**: trends, accuracy by phase, clock use, openings and your top weaknesses
   (each with "Train this", including time trouble and moving too fast), comparing your last games with the
@@ -97,6 +100,7 @@ chessreview/
   srs.py, coach.py          spaced repetition and the daily plan
   repertoire.py, convert.py openings and endgame training
   library.py                Lichess puzzle library
+  tablebase.py              Lichess endgame tablebase (<= 7 pieces), cached
   insights.py, progress.py  statistics
   web.py                    Flask app and JSON API
   static/, templates/       front end (plain ES modules, no build step)
@@ -111,4 +115,5 @@ config.toml
   and [chess.js](https://github.com/jhlywa/chess.js)
 - Opening names from [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings) (CC0).
   Puzzles from the [Lichess puzzle database](https://database.lichess.org/#puzzles) (CC0).
+  Endgame tablebase answers from the [Lichess tablebase API](https://github.com/lichess-org/lila-tablebase) (Syzygy).
 - Mistake thresholds and accuracy formula follow Lichess.

@@ -237,8 +237,12 @@ class State:
     streak: int = 0        # convert: my moves in a row at Task.resign_cp or more
 
 
-def state(task: Task, board: chess.Board, ev: Eval | None, streak: int, rating: int | None) -> State:
-    """Where the playout stands after a move (`ev`: engine eval from my side, None if the game is over)."""
+def state(task: Task, board: chess.Board, ev: Eval | None, streak: int, rating: int | None,
+          tb: tuple[int, int] | None = None) -> State:
+    """Where the playout stands after a move (`ev`: engine eval from my side, None if the game is over).
+    `tb` = (WDL at the start, WDL after my last move), both from my side, when the tablebase knows
+    them (E3): then the result is exact and replaces the eval thresholds (a win thrown away, a
+    lost draw), and the reason says so."""
     me = chess.WHITE if task.color == "white" else chess.BLACK
     plies = len(board.move_stack)
     if board.is_checkmate():
@@ -249,10 +253,13 @@ def state(task: Task, board: chess.Board, ev: Eval | None, streak: int, rating: 
     if ev is None:
         return State("playing", streak=streak)
     bar = level.winning_cp(rating)
+    exact = _exact(task, tb)
+    if exact:
+        return State("failed", exact, streak)
     if ev.mate is not None and ev.mate < 0:
         return State("failed", "You are getting mated.")
     if task.goal == "draw":
-        if ev.as_cp() <= -LOSING_SHARE * bar:
+        if tb is None and ev.as_cp() <= -LOSING_SHARE * bar:
             return State("failed", f"The position is now lost ({ev}).")
         if (plies + 1) // 2 >= HOLD_MOVES:
             return State("won", f"You held for {HOLD_MOVES} moves.")
@@ -268,11 +275,31 @@ def state(task: Task, board: chess.Board, ev: Eval | None, streak: int, rating: 
         streak = streak + 1 if at_bar else 0
         if streak >= RESIGN_MOVES:
             return State("won", f"Stockfish resigns ({ev}, from {task.start_eval} at the start).", streak)
-    if task.kind == "convert" and not decisive and ev.as_cp() < SLIP_SHARE * bar:
+    if task.kind == "convert" and tb is None and not decisive and ev.as_cp() < SLIP_SHARE * bar:
         return State("failed", f"The advantage slipped ({ev}).", streak)
     if plies >= task.max_plies:
         return State("failed", "Out of moves: you didn't finish it in time.", streak)
     return State("playing", streak=streak)
+
+
+def _exact(task: Task, tb: tuple[int, int] | None) -> str | None:
+    """Why the tablebase says this attempt failed (my last move made the result worse than the
+    task's start), or None. Not when the start was already no better (e.g. a won position from a
+    game that is a tablebase draw: then the eval rules judge it)."""
+    if tb is None:
+        return None
+    start, now = tb
+    if now >= start:
+        return None
+    if task.goal == "win" and start == 2:
+        if now == 1:
+            return "That move throws away the win: it still wins, but not within the 50-move rule (tablebase)."
+        if now == 0:
+            return "That move throws away the win: with perfect defence it's a draw now (tablebase)."
+        return "That move loses: with perfect play you are lost now (tablebase)."
+    if task.goal == "draw" and start >= 0 and now < 0:
+        return "That move loses: against perfect play the position is lost now (tablebase)."
+    return None
 
 
 def _milestone(task: Task, board: chess.Board, me: chess.Color, ev: Eval, decisive: bool) -> str | None:
