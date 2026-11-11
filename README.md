@@ -27,7 +27,8 @@ Everything runs on your own machine. Your games and progress live in a SQLite da
   perfect hints, and an exact verdict the moment a move throws a win away. Answers are kept, so endgames you've
   played work offline; Settings can switch it off.
 - **Puzzle library**: about 19k Lichess puzzles (optional download), with your own puzzle rating.
-- **Insights and Progress**: trends, accuracy by phase, clock use, openings and your top weaknesses
+- **Insights and Progress**: trends, accuracy by phase, clock use, openings, endgames (results by type of endgame,
+  how often you convert winning endgames and save losing ones, your endgame training) and your top weaknesses
   (each with "Train this", including time trouble and moving too fast), comparing your last games with the
   ones before.
 - **Keyboard friendly**: press Tab to reach the board's move box and type a move (`Nf3`, `O-O`, `e2e4`),

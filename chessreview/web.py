@@ -461,6 +461,11 @@ def create_app(cfg: Config | None = None) -> Flask:
         refresh(c, cfg)    # the fingerprint changed: starts the rebuild
         return jsonify(adaptive=adaptive, rebuild=dict(REBUILD))
 
+    @app.get("/api/insights/endgame-training")
+    def endgame_training():
+        """Insights' endgame card: my endgame drills (essential endgames, won positions, puzzles)."""
+        return jsonify(insights.drill_progress(conn()))
+
     @app.get("/api/settings/tablebase")
     def tablebase_info():
         c = conn()

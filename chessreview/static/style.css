@@ -134,6 +134,8 @@ select, input[type=text], input[type=search] {
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stat { background: var(--panel); border-radius: var(--radius); padding: 14px 16px; }
+.card .stats.compact .stat { background: var(--panel-2); }     /* tiles inside a card (Insights' endgames) */
+.card .stats.compact .value { font-size: 22px; }
 .stat .value { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .stat .label { color: var(--muted); font-size: 13px; font-weight: 600; }
 

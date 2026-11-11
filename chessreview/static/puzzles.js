@@ -81,6 +81,9 @@ $('fetch-btn').addEventListener('click', async () => {
 $('theme').addEventListener('change', () => guard(document.querySelector('main'), load, 'puzzles'));
 
 async function start() {
+  // ?theme=<Lichess theme> (e.g. from Insights' endgame card) preselects it when the library has it.
+  const wanted = new URLSearchParams(location.search).get('theme');
+  if (wanted && [...$('theme').options].some(o => o.value === wanted)) $('theme').value = wanted;
   const s = await refreshRating();
   $('library-empty').hidden = s.count > 0;
   if (s.count) load();

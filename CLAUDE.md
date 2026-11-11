@@ -56,6 +56,15 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   (dataviz rules: one axis, 2px lines, rounded bar ends, validated colours `--series-you/--series-opp`).
   Practice (`/review`) accepts filters in the URL (incl. `low_clock`), overriding saved filters; the summary line
   names them ("· in time trouble", "· from one game").
+- Endgame insights (E4): `insights.endgames()` (in `compute`, so filtered like the rest): games reaching an endgame
+  (my first `phase='endgame'` move), by `endgame_type()` of the material there (pawn, rook, minor, rook_minor, queen,
+  mixed = queen + others), `endgame_conversion` (entered at `win_before >= level.winning_chance`: won/drawn/lost),
+  `saves` (entered at <= -bar), `conversion` (winning at any point). `drill_progress()` (essential endgames, won
+  positions, first tries of endgame-tagged library puzzles, endgame mistake cards) only for Insights
+  (`/api/insights/endgame-training`). Weakness "Endgames" (`_endgame_weakness`): endgame conversion missed >= 25% of
+  >= 5 games (severity 60 x missed) or endgame moves >= 3 points below the middlegame (2.5 x gap); it replaces "The
+  endgame" phase card, keeping the higher severity; trains `phase=endgame` (Today's focus: endgame mistakes + puzzles).
+  Insights' Endgames card; Puzzles takes `?theme=`. Progress already compares conversion between game windows.
 - Clock rules (Finish M5, F7) live in `report.py`: shares of the estimated game duration `game_budget_ms` = base +
   40 × increment (none for daily/unknown). Time trouble < 10% (`is_low_clock`; 60 s at 10+0, 18 s at 3+0, 130 s at
   15+10), a very fast move < 1/120 (5 s at 10+0), buckets `CLOCK_BUCKETS` 30/10/3%. `insights.in_time_trouble(clocks,
@@ -327,7 +336,7 @@ Openings are practised on Chessly: Today drops opening lines (the /openings page
    types. `simulate --days 90`: 0 days over budget at 10/20/30, backlog as before E2 (max 55 = the starting
    backlog), endgames 27-29% of planned time, Lichess endgame puzzles on ~2/3 of days at 10 min, all at 20/30.
 3. [x] E3 Lichess tablebase API (<= 7 pieces) for endgame play: perfect defence, exact verdicts, cached
-4. [ ] E4 Endgame insights (conversion rate, results by endgame type, "Endgames" weakness)
+4. [x] E4 Endgame insights (conversion rate, results by endgame type, saves, drill progress, "Endgames" weakness)
 5. [ ] E5 Sparring vs a rating-limited Stockfish from my positions (F9)
 6. [ ] E6 Calculation trainer (F10)
 Still deferred: the deeper re-check of card positions (M3); idempotent old migrations (rule: never edit old ones;

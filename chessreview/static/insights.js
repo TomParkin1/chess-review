@@ -126,6 +126,8 @@ async function load() {
     el('div', { class: 'value' }, pct(c.score)), el('div', { class: 'muted small' },
       `score in ${c.games} games · ${pct(c.accuracy)} accuracy`))));
 
+  renderEndgames(d);
+
   const SHOWN = 12;
   const rows = d.openings.map(op => {
     const bar = el('span', { class: 'wdl', title: `${op.wins}W ${op.draws}D ${op.losses}L` },
@@ -145,6 +147,58 @@ async function load() {
          `Show all ${rows.length} openings`)));
     body.append(more);
   }
+}
+
+// ------------------------------------------------------------ endgames (E4)
+
+const wdlBar = r => el('span', { class: 'wdl', title: `${r.won}W ${r.drawn}D ${r.lost}L` },
+  el('span', { class: 'w', style: `flex:${r.won}` }), el('span', { class: 'd', style: `flex:${r.drawn}` }),
+  el('span', { class: 'l', style: `flex:${r.lost}` }));
+const ofGames = r => (r.games ? `${r.won} of ${r.games}` : 'none yet');
+
+function renderEndgames(d) {
+  const e = d.endgames;
+  const phases = Object.fromEntries(d.phases.map(p => [p.phase, p]));
+  const bar = `${e.winning_cp >= 0 ? '+' : ''}${(e.winning_cp / 100).toFixed(1)}`;
+  $('endgame-scope').textContent = `"clearly" = ${bar} or more at your rating`;
+  const tile = (value, label, title = '') => el('div', { class: 'stat', title },
+    el('div', { class: 'value' }, value), el('div', { class: 'label' }, label));
+  const conv = e.endgame_conversion, saves = e.saves;
+  $('endgame-tiles').replaceChildren(
+    tile(`${e.games}`, `games reached an endgame (${pct(e.share * 100)})`),
+    tile(pct(conv.rate), `won from clearly winning endgames (${ofGames(conv)})`,
+         `Of all positions where you were clearly winning: ${pct(e.conversion.rate)} won (${ofGames(e.conversion)})`),
+    tile(saves.games ? `${saves.won + saves.drawn} of ${saves.games}` : '–', 'saved from clearly losing endgames',
+         `${saves.won} won, ${saves.drawn} drawn`),
+    tile(pct(phases.endgame?.accuracy), `endgame accuracy (middlegame ${pct(phases.middlegame?.accuracy)})`));
+  $('endgame-types').tBodies[0].replaceChildren(...e.types.map(t =>
+    el('tr', { onclick: () => { location.href = trainHref({ phase: 'endgame' }); } },
+      el('td', {}, t.label), el('td', { class: 'num' }, t.games),
+      el('td', {}, wdlBar(t), el('span', { class: 'muted small' }, ` ${t.won}/${t.drawn}/${t.lost}`)),
+      el('td', { class: 'num' }, pct(t.score)), el('td', { class: 'num' }, pct(t.accuracy)),
+      el('td', { class: 'num' }, t.errors_per_game.toFixed(1)))));
+  $('endgame-types').closest('.table-wrap').hidden = !e.types.length;
+  $('endgame-note').textContent = e.games
+    ? 'The type is the material at your first endgame move. Endgame accuracy runs high for everyone (many moves are ' +
+      'simple), so compare endgames with each other and over time rather than with the middlegame.'
+    : 'None of these games reached an endgame.';
+  loadTraining();
+}
+
+let trainingLoaded = false;     // the same whatever the filters: load once
+function loadTraining() {
+  if (trainingLoaded) return;
+  trainingLoaded = true;
+  api('/api/insights/endgame-training').then(t => {
+    const link = (href, text) => el('a', { href }, text);
+    $('endgame-training').replaceChildren('Your endgame training: ',
+      link('/convert', `essential endgames ${t.essentials.solved} of ${t.essentials.total} solved` +
+                       (t.essentials.mastered ? ` (${t.essentials.mastered} mastered)` : '')), ' · ',
+      link('/convert', `won positions ${t.positions.converted} converted of ${t.positions.tried} tried`), ' · ',
+      link('/puzzles?theme=endgame', t.puzzles.tried
+        ? `endgame puzzles ${t.puzzles.clean} of ${t.puzzles.tried} clean first time` : 'no endgame puzzles yet'), ' · ',
+      link(trainHref({ phase: 'endgame' }), `your endgame mistakes ${t.mistakes.studied} of ${t.mistakes.total} studied`));
+  }).catch(() => { trainingLoaded = false; $('endgame-training').textContent = ''; });
 }
 
 if (document.getElementById('f-time')) {     // the Insights page (Home only borrows renderWeaknesses)

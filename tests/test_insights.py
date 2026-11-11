@@ -94,3 +94,98 @@ def test_fast_move_is_relative_to_the_time_control():
     assert insights.fast_move(clocks, "600", 4)
     assert not insights.fast_move(clocks, "1/86400", 4)      # daily: no budget, never "fast"
     assert not insights.fast_move(None, "600", 4)
+
+
+# ------------------------------------------------------------ E4: endgames
+
+import chess  # noqa: E402
+
+from chessreview import db  # noqa: E402
+
+ENDGAME_FENS = {
+    "pawn": "8/5k2/8/3p4/3P4/8/5K2/8 w - - 0 40",
+    "rook": "8/5k2/8/3p4/3P4/8/5K2/R6r w - - 0 40",
+    "minor": "8/5k2/2n5/3p4/3P4/8/5K2/2B5 w - - 0 40",
+    "rook_minor": "8/5k2/2n5/3p4/3P4/8/5K2/R6r w - - 0 40",
+    "queen": "8/5k2/8/3p4/3P4/8/5K2/Q6q w - - 0 40",
+    "mixed": "8/5k2/8/3p4/3P4/8/5K2/Q6r w - - 0 40",
+}
+
+
+def test_endgame_types_by_material():
+    for kind, fen in ENDGAME_FENS.items():
+        assert insights.endgame_type(chess.Board(fen)) == kind, kind
+
+
+def endgame_db(tmp_path):
+    """Games entering an endgame at ply 40 (my move as White): a rook endgame entered winning and
+    won, one entered winning and drawn, a pawn endgame entered losing and saved, a queen endgame
+    entered losing and lost; and a game that never reached an endgame but was won from +5."""
+    c = db.connect(tmp_path / "e.db")
+    games = [  # id, result, endgame fen, win_before at the endgame's start
+        (1, "win", ENDGAME_FENS["rook"], 0.9), (2, "draw", ENDGAME_FENS["rook"], 0.9),
+        (3, "draw", ENDGAME_FENS["pawn"], -0.9), (4, "loss", ENDGAME_FENS["queen"], -0.9), (5, "win", None, None)]
+    for gid, result, fen, win in games:
+        c.execute("""INSERT INTO games (id, dedupe_key, white, black, white_elo, black_elo, my_color, my_result, date,
+                         moves_uci, num_plies, pgn, analysed_at, end_time, time_class, rated)
+                     VALUES (?, ?, 'me', 'opp', 1000, 1000, 'white', ?, '2026-10-01', '', 60, '', '2026-10-01', ?,
+                             'rapid', 1)""", (gid, f"k{gid}", result, f"2026-10-0{gid} 12:00"))
+        c.execute("""INSERT INTO mistakes (game_id, ply, judgement, phase, is_mine, accuracy, win_before)
+                     VALUES (?, 20, 'good', 'middlegame', 1, 80, ?)""", (gid, 0.9 if gid == 5 else 0.0))
+        if fen:
+            c.execute("INSERT INTO positions (game_id, ply, fen, score_cp) VALUES (?, 40, ?, 0)", (gid, fen))
+            c.execute("""INSERT INTO mistakes (game_id, ply, judgement, phase, is_mine, accuracy, win_before)
+                         VALUES (?, 40, 'mistake', 'endgame', 1, 60, ?), (?, 42, 'good', 'endgame', 1, 90, ?)""",
+                      (gid, win, gid, win))
+    c.commit()
+    return c
+
+
+def test_endgame_results_conversion_and_saves(tmp_path):
+    c = endgame_db(tmp_path)
+    e = insights.compute(c)["endgames"]
+    assert e["games"] == 4 and e["share"] == 0.8
+    types = {t["type"]: t for t in e["types"]}
+    assert set(types) == {"rook", "pawn", "queen"}
+    assert (types["rook"]["games"], types["rook"]["won"], types["rook"]["drawn"]) == (2, 1, 1)
+    assert types["rook"]["accuracy"] == 75 and types["rook"]["errors_per_game"] == 1
+    assert e["endgame_conversion"] == {"games": 2, "won": 1, "drawn": 1, "lost": 0, "rate": 50}
+    assert e["saves"] == {"games": 2, "won": 0, "drawn": 1, "lost": 1, "rate": 0}
+    assert e["conversion"]["games"] == 3            # winning at any point: games 1, 2 and the endgame-less 5
+    c.close()
+
+
+def test_endgame_training_progress(tmp_path):
+    c = endgame_db(tmp_path)
+    t = insights.drill_progress(c)
+    assert t["essentials"]["total"] == 15 and t["essentials"]["solved"] == 0
+    assert t["puzzles"] == {"tried": 0, "clean": 0, "rate": None}
+    c.close()
+
+
+def with_endgames(conversion=None, endgame_acc=None):
+    d = base()
+    if endgame_acc is not None:
+        d["phases"][2] = {"phase": "endgame", "moves": 60, "accuracy": endgame_acc, "errors_per_game": 0.5}
+    d["endgames"] = {"endgame_conversion": conversion or {"games": 0, "won": 0, "drawn": 0, "lost": 0, "rate": None}}
+    return d
+
+
+def test_endgames_weakness_from_conversion():
+    found = weaknesses(with_endgames({"games": 8, "won": 4, "drawn": 2, "lost": 2, "rate": 50}), top=10)
+    w = next(w for w in found if w["title"] == "Endgames")
+    assert w["train"] == {"phase": "endgame"} and "won 4 of the 8 endgames you started clearly winning" in w["detail"]
+    assert w["severity"] == 30
+    assert "Endgames" not in [w["title"] for w in weaknesses(with_endgames(
+        {"games": 4, "won": 1, "drawn": 3, "lost": 0, "rate": 25}), top=10)]           # too few to judge
+    assert "Endgames" not in [w["title"] for w in weaknesses(with_endgames(
+        {"games": 8, "won": 7, "drawn": 1, "lost": 0, "rate": 88}), top=10)]           # converts well
+
+
+def test_endgames_weakness_from_accuracy_replaces_the_endgame_phase():
+    found = weaknesses(with_endgames(endgame_acc=70.0), top=10)
+    titles = [w["title"] for w in found]
+    assert "Endgames" in titles and "The endgame" not in titles                    # one card, not two
+    w = next(w for w in found if w["title"] == "Endgames")
+    assert "10 points below your middlegame" in w["detail"]
+    assert w["severity"] == 2.5 * (88 - 70)      # as urgent as "The endgame" (18 below average) was

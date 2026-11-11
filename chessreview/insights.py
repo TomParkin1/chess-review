@@ -9,7 +9,9 @@ severity scores and attaches a "Train this" filter for the Practice page.
 import sqlite3
 from collections import Counter, defaultdict
 
-from . import report
+import chess
+
+from . import level, report
 
 KIND_LABELS = {
     "missed_opportunity": "Letting advantages slip", "positional": "Positional slips",
@@ -197,11 +199,115 @@ def compute(conn: sqlite3.Connection, time_class: str | None = None, last: int |
                        "accuracy": sum(g_accs) / len(g_accs) if g_accs else None})
 
     data = {"games": len(games), "overall": overall, "trend": trend, "phases": phases, "kinds": kind_rows,
-            "clock": clock, "openings": openings, "colors": colors,
+            "clock": clock, "openings": openings, "colors": colors, "endgames": endgames(conn, games, by_game),
             "time_classes": [r[0] for r in conn.execute(
                 "SELECT time_class FROM games GROUP BY time_class ORDER BY COUNT(*) DESC")]}
     data["weaknesses"] = weaknesses(data)
     return data
+
+
+# ------------------------------------------------------------ endgames (E4)
+
+ENDGAME_TYPES = {"pawn": "Pawn endgames", "rook": "Rook endgames", "minor": "Minor-piece endgames",
+                 "rook_minor": "Rook + minor piece", "queen": "Queen endgames", "mixed": "Queen + other pieces"}
+MIN_CONVERSION_GAMES = 5      # winning endgames needed before conversion counts as a weakness
+CONVERSION_MISS = 0.25        # ... and the share of them not won from which it does
+
+
+def endgame_type(board: chess.Board) -> str:
+    """The material of an endgame position: pawns only, rooks, minor pieces, rooks and minor
+    pieces, queens, or queens with other pieces."""
+    pieces = {pt for pt in (chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN) if board.pieces_mask(pt, True)
+              or board.pieces_mask(pt, False)}
+    if not pieces:
+        return "pawn"
+    if pieces == {chess.ROOK}:
+        return "rook"
+    if pieces <= {chess.KNIGHT, chess.BISHOP}:
+        return "minor"
+    if chess.QUEEN not in pieces:
+        return "rook_minor"
+    if pieces == {chess.QUEEN}:
+        return "queen"
+    return "mixed"
+
+
+def _outcomes(gs: list[sqlite3.Row]) -> dict:
+    won = sum(g["my_result"] == "win" for g in gs)
+    drawn = sum(g["my_result"] == "draw" for g in gs)
+    return {"games": len(gs), "won": won, "drawn": drawn, "lost": len(gs) - won - drawn,
+            "rate": 100 * won / len(gs) if gs else None}
+
+
+def endgames(conn: sqlite3.Connection, games: list[sqlite3.Row], by_game: dict) -> dict:
+    """How my endgames go: the games that reached one (my first move in the endgame phase), by
+    type of endgame (its material then), how often I won the ones I entered clearly winning and
+    saved the ones I entered clearly losing ("clearly" = level.winning_chance at my current
+    rating, the bar Progress uses for conversion), and accuracy against the middlegame."""
+    winning = level.winning_chance(level.current_rating(conn))
+    first = {}
+    for g in games:
+        moves = [m for m in by_game[g["id"]] if m["phase"] == "endgame"]
+        if moves:
+            first[g["id"]] = min(moves, key=lambda m: m["ply"])
+    fens = {}
+    keys = [(gid, m["ply"]) for gid, m in first.items()]
+    for chunk in range(0, len(keys), 400):
+        part = keys[chunk:chunk + 400]
+        rows = conn.execute(f"""SELECT game_id, fen FROM positions WHERE (game_id, ply) IN
+                                (VALUES {",".join("(?, ?)" for _ in part)})""", [v for k in part for v in k])
+        fens |= {r["game_id"]: r["fen"] for r in rows}
+    reached = [g for g in games if g["id"] in first]
+    by_type = defaultdict(list)
+    for g in reached:
+        if g["id"] in fens:
+            by_type[endgame_type(chess.Board(fens[g["id"]]))].append(g)
+    types = []
+    for key, label in ENDGAME_TYPES.items():
+        gs = by_type.get(key, [])
+        if not gs:
+            continue
+        mine = [m for g in gs for m in by_game[g["id"]] if m["phase"] == "endgame"]
+        types.append({"type": key, "label": label, **_outcomes(gs), "score": score([g["my_result"] for g in gs]),
+                      "accuracy": _mean(m["accuracy"] for m in mine),
+                      "errors_per_game": sum(m["judgement"] in ("mistake", "blunder") for m in mine) / len(gs)})
+    start = {gid: m["win_before"] for gid, m in first.items() if m["win_before"] is not None}
+    won_any = [g for g in games if any((m["win_before"] or -1) >= winning for m in by_game[g["id"]])]
+    return {
+        "games": len(reached), "share": len(reached) / len(games) if games else None,
+        "score": score([g["my_result"] for g in reached]),
+        "types": types,
+        "conversion": _outcomes(won_any),                                                   # winning at any point
+        "endgame_conversion": _outcomes([g for g in reached if start.get(g["id"], -1) >= winning]),
+        "saves": _outcomes([g for g in reached if start.get(g["id"], 1) <= -winning]),      # entered clearly losing
+        "winning_cp": level.winning_cp(level.current_rating(conn)),
+    }
+
+
+def drill_progress(conn: sqlite3.Connection) -> dict:
+    """My endgame training: essential endgames, won positions from my games, Lichess endgame
+    puzzles (first tries) and my own endgame mistakes in spaced repetition."""
+    from . import convert       # convert -> level -> ...: imported late, only Insights needs it
+    essentials = convert.endgame_overview(conn)
+    positions = convert.convert_overview(conn)
+    first_tries = [r["result"] for r in conn.execute("""
+        SELECT a.result FROM puzzle_attempts a JOIN puzzles p ON p.id = a.puzzle_id
+        WHERE p.themes LIKE '% endgame %'
+          AND a.id = (SELECT MIN(a2.id) FROM puzzle_attempts a2 WHERE a2.puzzle_id = a.puzzle_id)""")]
+    cards = conn.execute("""SELECT COUNT(*) AS n, SUM(c.mastered_on IS NOT NULL) AS mastered,
+                                   SUM(c.due_on IS NOT NULL OR c.mastered_on IS NOT NULL) AS studied
+                            FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
+                            WHERE c.kind = 'mistake' AND m.phase = 'endgame'""").fetchone()
+    count = lambda rows, *states: sum(r["status"] in states for r in rows)
+    return {
+        "essentials": {"total": len(essentials), "solved": count(essentials, "solved", "mastered"),
+                       "mastered": count(essentials, "mastered"), "unlocked": sum(e["unlocked"] for e in essentials)},
+        "positions": {"total": len(positions), "tried": len(positions) - count(positions, "new"),
+                      "converted": count(positions, "solved", "mastered")},
+        "puzzles": {"tried": len(first_tries), "clean": first_tries.count("solved"),
+                    "rate": 100 * first_tries.count("solved") / len(first_tries) if first_tries else None},
+        "mistakes": {"total": cards["n"] or 0, "studied": cards["studied"] or 0, "mastered": cards["mastered"] or 0},
+    }
 
 
 def weaknesses(d: dict, top: int = 3) -> list[dict]:
@@ -260,8 +366,39 @@ def weaknesses(d: dict, top: int = 3) -> list[dict]:
                         "detail": f"You score {weaker['score']:.0f}% as {weaker['color']} vs "
                                   f"{stronger['score']:.0f}% as {stronger['color']}.",
                         "train": {"color": weaker["color"]}})
+    endgame = _endgame_weakness(d)
+    if endgame:     # it says what "The endgame" (phase accuracy) would, and more: one card, as urgent
+        phase = [w for w in out if w["train"] == {"phase": "endgame"}]
+        endgame["severity"] = max([endgame["severity"], *(w["severity"] for w in phase)])
+        out = [w for w in out if w not in phase] + [endgame]
     out.sort(key=lambda w: -w["severity"])
     return out[:top]
+
+
+def _endgame_weakness(d: dict) -> dict | None:
+    """"Endgames" (E4): my endgame moves clearly less accurate than my middlegame ones, or the
+    endgames I entered clearly winning too often not won. Trains my endgame positions (and, in
+    Today's focus, endgame puzzles)."""
+    phases = {p["phase"]: p for p in d["phases"]}
+    end, mid = phases.get("endgame"), phases.get("middlegame")
+    reasons, severity = [], 0.0
+    conv = d.get("endgames", {}).get("endgame_conversion")
+    if conv and conv["games"] >= MIN_CONVERSION_GAMES:
+        missed = 1 - conv["won"] / conv["games"]
+        if missed >= CONVERSION_MISS:
+            reasons.append(f"you won {conv['won']} of the {conv['games']} endgames you started clearly winning")
+            severity = max(severity, 60 * missed)
+    if end and mid and end["accuracy"] is not None and mid["accuracy"] is not None and end["moves"] >= 30:
+        gap = mid["accuracy"] - end["accuracy"]
+        if gap >= 3:
+            reasons.append(f"your endgame moves are {end['accuracy']:.0f}% accurate, {gap:.0f} points below your "
+                           f"middlegame")
+            severity = max(severity, 2.5 * gap)
+    if not reasons:
+        return None
+    detail = " and ".join(reasons)
+    return {"title": "Endgames", "severity": severity, "detail": detail[0].upper() + detail[1:] + ".",
+            "train": {"phase": "endgame"}}
 
 
 def _mean(values) -> float | None:
