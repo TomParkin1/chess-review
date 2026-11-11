@@ -771,7 +771,7 @@ def create_app(cfg: Config | None = None) -> Flask:
             return jsonify(error="your move"), 400
         over = spar.outcome(board, me)
         if over is None:
-            reply = live.play(board, st.options, st.limit)
+            reply = live.play(board, st.options, st.limit, st.swap, st.swap_kind)
             out |= {"reply_uci": reply.uci(), "reply_san": board.san(reply)}
             board.push(reply)
             over = spar.outcome(board, me)
@@ -786,6 +786,9 @@ def create_app(cfg: Config | None = None) -> Flask:
         data = _body()
         board, me, moves = _spar_game(data)
         over = spar.outcome(board, me)
+        start = chess.Board(data["fen"])
+        if not any(i % 2 == (0 if start.turn == me else 1) for i in range(len(moves))):
+            return jsonify(error="you haven't played a move: nothing to record"), 400   # leaving isn't losing
         if over is None:
             if not data.get("resigned"):
                 return jsonify(error="the game isn't over"), 400

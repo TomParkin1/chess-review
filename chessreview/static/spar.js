@@ -37,7 +37,8 @@ function showLevel() {
   const rating = overview.rating ? `your ${overview.rating}` : 'no rating yet';
   $('level-label').textContent = lvl.label;
   $('level-note').textContent = `${rating} ${offset >= 0 ? '+' : '−'} ${Math.abs(offset)}` +
-    (lvl.exact ? '' : ' · below 1320 Stockfish plays at its lowest skill with a shallow search: move the slider if it feels too easy or too hard');
+    (lvl.exact ? '' : ' · below 1320 Stockfish swaps some of its moves for weaker ones (measured in engine matches). ' +
+                      'Your results show whether to move the slider.');
   const rec = overview.history.by_offset.find(r => r.offset === offset);
   $('level-record').textContent = rec ? `Your record at this level: ${rec.won} won, ${rec.drawn} drawn, ${rec.lost} lost.` : '';
 }
@@ -90,7 +91,7 @@ const begin = busy(async ({ source, fen, color, title, sub }) => {
   game = { source, title, sub, fen, color, moves: [], sans: [], pos: fen, offset, phase: 'waiting', id: null };
   showPanel('play');
   $('play-title').textContent = title;
-  $('play-chip').textContent = levelOf(offset).label.replace(' (approximate below 1320)', '');
+  $('play-chip').textContent = levelOf(offset).label;
   $('play-sub').textContent = `${sub} · you play ${color}`;
   $('play-feedback').hidden = true;
   $('play-done').hidden = true;
@@ -107,6 +108,7 @@ function myTurn() {
   const g = game;
   g.phase = 'mine';
   $('play-prompt').textContent = 'Your move.';
+  $('resign-btn').textContent = myMoves(g) ? 'Resign' : 'Leave';     // before my first move nothing is recorded
   board.set({
     fen: g.pos, turnColor: g.color, lastMove: lastMove(g.moves.at(-1)), check: checkOf(g.pos),
     movable: { free: false, color: g.color, dests: legalDests(new Chess(g.pos)), showDests: true,
@@ -155,6 +157,12 @@ async function send(uci) {
     if (r.status === 'playing') myTurn();
     else finish(false);
   }, r.reply_uci && r.uci ? 150 : 0);
+}
+
+// How many moves I have played (the start may be Stockfish's move).
+function myMoves(g) {
+  const offset = sideToMove(g.fen) === g.color ? 0 : 1;
+  return g.moves.filter((_, i) => i % 2 === offset).length;
 }
 
 function renderMoves(marks = null) {
@@ -269,18 +277,22 @@ $('fen-btn').addEventListener('click', () => {
 });
 $('flip-btn').addEventListener('click', () => board.toggleOrientation());
 $('resign-btn').addEventListener('click', () => {
-  if (game && game.phase !== 'done' && confirm('Resign this game?')) finish(true);
+  if (!game || game.phase === 'done') return;
+  if (!myMoves(game)) { leave(); return; }          // nothing played: back to the positions, no result
+  if (confirm('Resign this game?')) finish(true);
 });
 $('review-btn').addEventListener('click', review);
 $('rematch-btn').addEventListener('click', () => game && begin(game));
-$('new-btn').addEventListener('click', () => {
+function leave() {
   analysis.stop?.();
   $('analysis').hidden = true;
   evalBar.hide(true);
   game = null;
   board.set({ movable: { color: undefined } });
+  board.cancelPremove?.();
   showPanel('setup');
   showLevel();
-});
+}
+$('new-btn').addEventListener('click', leave);
 
 guard(document.querySelector('main'), loadOverview, 'your sparring positions');

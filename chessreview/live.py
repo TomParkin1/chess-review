@@ -8,6 +8,7 @@ interpreter alive otherwise (`serve` does this in a finally block).
 """
 
 import queue
+import random
 import threading
 import time
 from collections import OrderedDict
@@ -228,15 +229,25 @@ class LiveEngine:
 
     # ------------------------------------------------------------ sparring (E5)
 
-    def play(self, board: chess.Board, options: dict, limit: chess.engine.Limit) -> chess.Move:
-        """A move at limited strength (spar.strength): its own process, so UCI_LimitStrength and
-        Skill Level never reach the judging or streaming engines. Options are set on every move
-        (games at different levels share the process)."""
+    def play(self, board: chess.Board, options: dict, limit: chess.engine.Limit, swap: float = 0.0,
+             swap_kind: str | None = None, rng: random.Random | None = None) -> chess.Move:
+        """A move at limited strength (spar.strength): its own process, so UCI_LimitStrength never
+        reaches the judging or streaming engines. Options are set on every move (games at different
+        levels share the process). Below Stockfish's floor a `swap` share of moves is replaced:
+        'top5' = a random one of its five best, 'random' = any legal move."""
+        rng = rng or random
         with self._spar_lock:
             if self._spar_engine is None:
                 self._spar_engine = open_engine(self.cfg, threads=1)
             try:
                 self._spar_engine.configure(options)
+                if swap and rng.random() < swap:
+                    if swap_kind == "random":
+                        return rng.choice(list(board.legal_moves))
+                    infos = self._spar_engine.analyse(board, limit, multipv=5)
+                    candidates = [i["pv"][0] for i in infos if i.get("pv")]
+                    if candidates:
+                        return rng.choice(candidates)
                 return self._spar_engine.play(board, limit).move
             except chess.engine.EngineError:
                 _quit(self._spar_engine)

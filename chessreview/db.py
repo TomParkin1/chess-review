@@ -379,6 +379,7 @@ def delete_all_games(conn: sqlite3.Connection) -> int:
         conn.execute("DELETE FROM review_results")
         conn.execute("DELETE FROM self_reviews")
         conn.execute("DELETE FROM training_log")
+        conn.execute("DELETE FROM spar_games")
         conn.execute("DELETE FROM mistakes")
         conn.execute("DELETE FROM positions")
         conn.execute("DELETE FROM games")

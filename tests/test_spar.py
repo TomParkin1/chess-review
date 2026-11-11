@@ -21,11 +21,18 @@ def test_strength_uses_uci_elo_from_the_floor():
     assert spar.strength(5000).elo == spar.ELO_MAX
 
 
-def test_below_the_floor_it_is_skill_zero_with_a_shallow_search():
-    depths = [spar.strength(elo).limit.depth for elo in (400, 800, 1000, 1300)]
-    assert depths == sorted(depths) and depths[0] == 1 and depths[-1] == 4      # weaker targets search less
-    s = spar.strength(860)
-    assert not s.exact and s.options == {"UCI_LimitStrength": False, "Skill Level": 0} and "approximate" in s.label
+def test_below_the_floor_it_swaps_a_measured_share_of_its_moves():
+    """Calibration (engine matches against UCI_Elo 1320): a depth cap at Skill Level 0 didn't change
+    the strength at all; swapping moves for one of the top 5, then for random ones, did."""
+    s = spar.strength(1201)
+    assert not s.exact and s.options["UCI_Elo"] == 1320 and s.swap_kind == "top5" and s.swap == 0.3
+    assert spar.strength(1100).swap_kind == "top5" and 0.3 < spar.strength(1100).swap < 0.6     # interpolated
+    low = spar.strength(800)
+    assert low.swap_kind == "random" and 0.25 < low.swap < 0.32
+    assert spar.strength(400).elo == spar.MIN_ELO and spar.strength(400).swap == 0.40          # the lowest level
+    shares = [(spar.strength(e).swap_kind, spar.strength(e).swap) for e in range(1300, 860, -40)]
+    assert all(k == "top5" for k, _ in shares) and [s for _, s in shares] == sorted(s for _, s in shares)
+    assert spar.strength(1320).swap == 0 and spar.strength(1320).exact
 
 
 def test_the_target_is_my_rating_plus_a_clamped_offset():
@@ -43,7 +50,7 @@ def conn(tmp_path):
                                     analysed_at, end_time)
                  VALUES (1, 'k1', 'me', 'opp', 'white', 'loss', '2026-10-01', '', 60, '', '2026-10-01', '2026-10-01')""")
     rows = [  # ply, phase, my eval (White = me), FEN (White to move)
-        (20, "middlegame", 400, START), (22, "middlegame", 50, START), (24, "middlegame", -20, START),
+        (18, "middlegame", -300, START), (20, "middlegame", 900, START), (22, "middlegame", 250, START),
         (40, "endgame", -400, MATE_IN_ONE), (42, "endgame", 120, MATE_IN_ONE)]
     for ply, phase, cp, fen in rows:
         c.execute("INSERT INTO mistakes (game_id, ply, judgement, phase, is_mine) VALUES (1, ?, 'good', ?, 1)", (ply, phase))
@@ -53,9 +60,9 @@ def conn(tmp_path):
     c.close()
 
 
-def test_positions_are_the_first_equal_middlegame_and_equal_or_better_endgame(conn):
+def test_positions_are_the_first_equal_or_better_middlegame_and_endgame(conn):
     p = spar.positions(conn)
-    assert [x["key"] for x in p["middlegame"]] == ["1:22"]     # +4 isn't equal; the first equal one
+    assert [x["key"] for x in p["middlegame"]] == ["1:22"]     # -3 is worse, +9 is Convert's; +2.5 fits
     assert [x["key"] for x in p["endgame"]] == ["1:42"]        # -4 is lost; +1.2 is fine
     assert p["middlegame"][0]["color"] == "white" and p["middlegame"][0]["opponent"] == "opp"
 
@@ -102,10 +109,37 @@ def test_the_limited_options_never_reach_the_judging_engine(client):
     c, app = client
     c.post("/api/spar/move", json={"fen": START, "color": "black", "moves": [], "offset": 0})
     live = app.extensions["live"]
-    assert live._spar_engine.protocol.config.get("Skill Level") == 0
+    assert live._spar_engine.protocol.config.get("UCI_LimitStrength") is True
     live.analyse(chess.Board())                       # the judging engine starts now
     judge = live._judge_engine.protocol.config
     assert judge.get("Skill Level", 20) == 20 and not judge.get("UCI_LimitStrength", False)
+
+
+def test_the_exact_and_the_approximate_strength_on_one_process(client):
+    """No rated games: 1200. +300 = 1500 uses UCI_Elo 1500; -200 = 1000 is UCI_Elo 1320 with swapped
+    moves, on the same process (options are set every move, so nothing carries over)."""
+    c, app = client
+    live = app.extensions["live"]
+    c.post("/api/spar/move", json={"fen": START, "color": "black", "moves": [], "offset": 300})
+    config = live._spar_engine.protocol.config
+    assert config.get("UCI_LimitStrength") is True and config.get("UCI_Elo") == 1500 and config.get("Skill Level") == 20
+    c.post("/api/spar/move", json={"fen": START, "color": "black", "moves": [], "offset": -200})
+    assert config.get("UCI_LimitStrength") is True and config.get("UCI_Elo") == 1320      # + swapped moves
+
+
+def test_leaving_before_my_first_move_records_nothing(client):
+    c, _ = client
+    r = c.post("/api/spar/move", json={"fen": START, "color": "black", "moves": [], "offset": 0}).get_json()
+    left = c.post("/api/spar/finish", json={"fen": START, "color": "black", "moves": [r["reply_uci"]], "resigned": True})
+    assert left.status_code == 400 and c.get("/api/spar").get_json()["history"]["games"] == []
+
+
+def test_delete_all_clears_sparring(tmp_path):
+    conn = db.connect(tmp_path / "d.db")
+    spar.record(conn, "start", START, "white", 1200, 0, ["e2e4"], "loss", "You resigned.")
+    db.delete_all_games(conn)
+    assert conn.execute("SELECT COUNT(*) FROM spar_games").fetchone()[0] == 0
+    conn.close()
 
 
 def test_finish_review_history_and_streak(client, tmp_path):
@@ -136,3 +170,16 @@ def test_the_offset_is_remembered(client):
     assert c.post("/api/spar/offset", json={"offset": 9999}).get_json() == {"offset": spar.OFFSETS[-1]}
     overview = c.get("/api/spar").get_json()
     assert overview["offset"] == spar.OFFSETS[-1] and len(overview["levels"]) == len(spar.OFFSETS)
+
+
+def test_swapped_moves(client):
+    import random
+    c, app = client
+    live = app.extensions["live"]
+    board = chess.Board()
+    options = spar.strength(1000).options
+    limit = chess.engine.Limit(time=0.05)
+    rnd = {live.play(board, options, limit, 1.0, "random", random.Random(i)) for i in range(8)}
+    assert len(rnd) > 1 and rnd <= set(board.legal_moves)                   # any legal move
+    top = {live.play(board, options, limit, 1.0, "top5", random.Random(i)) for i in range(8)}
+    assert 1 < len(top) <= 5                                                 # one of five

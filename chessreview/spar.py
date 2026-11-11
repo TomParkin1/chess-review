@@ -1,16 +1,20 @@
 """Sparring (E5, F9): play a position out against Stockfish at about my strength.
 
-Start positions come from my games: per game, the first middlegame position that was about
-equal (within EQUAL_CP) and the first endgame position that was equal or better for me, newest
-games first. The standard starting position (either colour) or any FEN works too.
+Start positions come from my games: per game, the first middlegame position that was equal or
+better for me (from -EQUAL_CP up to, not including, "clearly winning": those are Convert's) and
+the first endgame position that was equal or better, newest games first. The standard starting position (either colour) or any FEN works too.
 
 Strength (`strength`): my current rating (level.current_rating) plus an offset I choose
 (OFFSETS, saved in meta `spar_offset`). Stockfish limits itself with UCI_LimitStrength /
-UCI_Elo, but only from ELO_FLOOR (1320 in Stockfish 16-19); below that it plays at Skill Level 0
-with a shallow depth limit (BELOW_FLOOR_DEPTH by target), which is an approximation: the label
-says so, and my results against each level (`record`) show whether to move the offset. The
-limited engine is its own process (live.LiveEngine.play), so these options never reach the
-engine that judges moves.
+UCI_Elo, but only from ELO_FLOOR (1320 in Stockfish 16-19). Below it, it plays at 1320 and swaps
+a share of its moves for weaker ones, a share measured in engine-vs-engine matches against
+UCI_Elo 1320 (100 games each, from my own equal middlegames; E5 calibration):
+  TOP5_CALIBRATION    a random one of its top 5 moves (a plausible mistake): 1320 down to ~860
+  RANDOM_CALIBRATION  a random legal move: below that, down to ~680 (the lowest level)
+Skill Level 0 with a depth cap was measured too and did nothing: depths 1-4 all scored ~1240.
+These numbers are on Stockfish's own Elo scale, so the label says "≈", and my results against
+each level (`history`) show whether to move the offset. The limited engine is its own process
+(live.LiveEngine.play), so these options never reach the engine that judges moves.
 
 Games are stored in `spar_games` (migration 11) and count as training for the streak. After a
 game, `/api/spar/review` judges my moves at full strength (live.analyse + classify.judge at my
@@ -31,8 +35,10 @@ OFFSET_KEY = "spar_offset"
 DEFAULT_RATING = 1200               # before any rated game
 ELO_FLOOR, ELO_MAX = 1320, 3190     # Stockfish's UCI_Elo range
 MOVE_TIME = 0.3                     # seconds per engine move
-# Below the floor: Skill Level 0 searching at most this deep (lower targets, shallower).
-BELOW_FLOOR_DEPTH = [(700, 1), (950, 2), (1150, 3), (ELO_FLOOR, 4)]
+# Below the floor: (share of moves swapped, measured Elo against UCI_Elo 1320).
+TOP5_CALIBRATION = [(0.0, 1320), (0.3, 1201), (0.6, 997), (1.0, 857)]
+RANDOM_CALIBRATION = [(0.25, 938), (0.32, 768), (0.40, 684)]
+MIN_ELO = RANDOM_CALIBRATION[-1][1]
 EQUAL_CP = 150
 MAX_POSITIONS = 40                  # per phase
 PHASES = ("middlegame", "endgame")
@@ -40,14 +46,16 @@ PHASES = ("middlegame", "endgame")
 
 @dataclass(frozen=True)
 class Strength:
-    elo: int                        # the target
+    elo: int                        # the target (clamped to MIN_ELO..ELO_MAX)
     options: dict                   # UCI options for the limited engine
     limit: chess.engine.Limit
-    exact: bool                     # False below ELO_FLOOR: an approximation
+    exact: bool                     # False below ELO_FLOOR: calibrated by matches, not by Stockfish
+    swap: float = 0.0               # share of moves swapped for weaker ones (below the floor)
+    swap_kind: str | None = None    # 'top5' | 'random'
 
     @property
     def label(self) -> str:
-        return f"Stockfish ≈ {self.elo}" + ("" if self.exact else " (approximate below 1320)")
+        return f"Stockfish ≈ {self.elo}"
 
 
 def target_elo(rating: int | None, offset: int) -> int:
@@ -59,13 +67,23 @@ def clamp_offset(offset: int) -> int:
 
 
 def strength(elo: int) -> Strength:
-    elo = min(max(elo, 400), ELO_MAX)
+    elo = min(max(elo, MIN_ELO), ELO_MAX)
+    options = {"UCI_LimitStrength": True, "UCI_Elo": max(elo, ELO_FLOOR), "Skill Level": 20}
+    limit = chess.engine.Limit(time=MOVE_TIME)
     if elo >= ELO_FLOOR:
-        return Strength(elo, {"UCI_LimitStrength": True, "UCI_Elo": elo, "Skill Level": 20},
-                        chess.engine.Limit(time=MOVE_TIME), True)
-    depth = next(d for below, d in BELOW_FLOOR_DEPTH if elo < below)
-    return Strength(elo, {"UCI_LimitStrength": False, "Skill Level": 0},
-                    chess.engine.Limit(time=MOVE_TIME, depth=depth), False)
+        return Strength(elo, options, limit, True)
+    table, kind = (TOP5_CALIBRATION, "top5") if elo >= TOP5_CALIBRATION[-1][1] else (RANDOM_CALIBRATION, "random")
+    return Strength(elo, options, limit, False, round(_share_for(elo, table), 3), kind)
+
+
+def _share_for(elo: int, table: list[tuple[float, int]]) -> float:
+    """The swap share that measured `elo`, interpolated (the table falls as the share rises)."""
+    if elo >= table[0][1]:
+        return table[0][0]
+    for (s1, e1), (s2, e2) in zip(table, table[1:]):
+        if e2 <= elo <= e1:
+            return s1 + (s2 - s1) * (e1 - elo) / (e1 - e2)
+    return table[-1][0]
 
 
 def levels(conn: sqlite3.Connection) -> list[dict]:
@@ -91,8 +109,10 @@ def save_offset(conn: sqlite3.Connection, offset: int) -> None:
 # ------------------------------------------------------------ start positions
 
 def positions(conn: sqlite3.Connection) -> dict[str, list[dict]]:
-    """Per game, the first about-equal middlegame position and the first equal-or-better endgame
-    position where it was my move; newest games first, MAX_POSITIONS per phase."""
+    """Per game, the first equal-or-better middlegame position short of clearly winning (Convert
+    has those) and the first equal-or-better endgame position where it was my move; newest games
+    first, MAX_POSITIONS per phase."""
+    winning = level.winning_cp(level.current_rating(conn))
     rows = conn.execute("""
         SELECT m.game_id, m.ply, m.phase, g.my_color, g.my_result, g.white, g.black, g.date, g.end_time,
                p.fen, p.score_cp, p.score_mate
@@ -109,7 +129,7 @@ def positions(conn: sqlite3.Connection) -> dict[str, list[dict]]:
         if chess.Board(r["fen"]).turn != me:
             continue
         ev = Eval.from_row(r, me)
-        fits = (ev.mate is None and abs(ev.cp or 0) <= EQUAL_CP) if r["phase"] == "middlegame" \
+        fits = (ev.mate is None and -EQUAL_CP <= (ev.cp or 0) < winning) if r["phase"] == "middlegame" \
             else (ev.mate is None and (ev.cp or 0) >= -EQUAL_CP) or (ev.mate is not None and ev.mate > 0)
         if not fits:
             continue

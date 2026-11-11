@@ -67,15 +67,20 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   Insights' Endgames card (5 tiles: reached, conversion at any point with W/D/L, endgame conversion, saves, accuracy); Puzzles
   takes `?theme=`. Progress already compares conversion between game windows.
 - Sparring (E5, F9): `chessreview/spar.py` + `/spar` (`static/spar.js`, sidebar "Spar"). Start positions per game: the
-  first about-equal middlegame (|eval| <= `EQUAL_CP`) and first equal-or-better endgame position on my move, newest
-  first (`positions`); or the start (either colour) or any legal FEN. Strength = `level.current_rating` + offset
-  (`OFFSETS` -200..+300, meta `spar_offset`): from `ELO_FLOOR` 1320 `UCI_LimitStrength`/`UCI_Elo`; below it Skill
-  Level 0 with `BELOW_FLOOR_DEPTH` (approximate; the label says so and my record per offset shows the fit).
-  `LiveEngine.play` = its own 1-thread process (options set every move; never the judging engine). Stateless loop
-  `/api/spar/move` ({fen, color, moves, uci|null: Stockfish moves first}); draws by rule end at once
-  (`spar.outcome`). `/api/spar/finish` stores `spar_games` (migration 11; result from the board, else only a
-  resignation) -> streak (`srs.TRAINING_SOURCES`). `/api/spar/review` {id, from}: my moves judged at full strength
-  (`live.analyse` + `classify.judge`, current thresholds), `REVIEW_CHUNK` plies per request; click -> analysis board.
+  first equal-or-better middlegame short of Convert's "clearly winning" and the first equal-or-better endgame
+  position on my move, newest first (`positions`); or the start (either colour) or any legal FEN. Strength =
+  `level.current_rating` + offset (`OFFSETS` -200..+300, meta `spar_offset`): from `ELO_FLOOR` 1320
+  `UCI_LimitStrength`/`UCI_Elo`; below it UCI_Elo 1320 with a share of moves swapped (`Strength.swap`): a random one
+  of the top 5 (`TOP5_CALIBRATION`, 1320 -> ~860) then a random legal move (`RANDOM_CALIBRATION`, down to `MIN_ELO`
+  ~680). Shares measured in engine matches against UCI_Elo 1320 (100 games a level, the user's equal middlegames);
+  Skill Level 0 + a depth cap measured ~1240 at every depth (useless). Opt-in re-check:
+  `CHESSREVIEW_CALIBRATION=1 .venv/bin/pytest tests/test_spar_calibration.py`. `LiveEngine.play` = its own 1-thread
+  process (options set every move; never the judging engine). Stateless loop `/api/spar/move` ({fen, color, moves,
+  uci|null: Stockfish moves first}); draws by rule end at once (`spar.outcome`). `/api/spar/finish` stores
+  `spar_games` (migration 11; result from the board, else a resignation; nothing before my first move: "Leave") ->
+  streak (`srs.TRAINING_SOURCES`); Delete all clears it. `/api/spar/review` {id, from}: my moves judged at full
+  strength (`live.analyse` + `classify.judge`, current thresholds), `REVIEW_CHUNK` plies per request; click ->
+  analysis board.
 - Clock rules (Finish M5, F7) live in `report.py`: shares of the estimated game duration `game_budget_ms` = base +
   40 × increment (none for daily/unknown). Time trouble < 10% (`is_low_clock`; 60 s at 10+0, 18 s at 3+0, 130 s at
   15+10), a very fast move < 1/120 (5 s at 10+0), buckets `CLOCK_BUCKETS` 30/10/3%. `insights.in_time_trouble(clocks,
