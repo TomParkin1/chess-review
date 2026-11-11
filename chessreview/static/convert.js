@@ -207,6 +207,7 @@ async function onMove(orig, dest) {
   p.fen = r.fen;
   p.last = lastMove(r.reply_uci || uci);
   if (r.reply_source === 'tablebase') showSource('♾ Perfect defence: with 7 pieces or fewer, Stockfish plays the Lichess tablebase\'s moves.');
+  else if (r.reply_source) $('play-source').hidden = true;     // more pieces, or the tablebase couldn't be reached
   renderMoves();
   setTimeout(() => {
     if (play !== p || p.phase !== 'waiting') return;
@@ -296,19 +297,13 @@ function worstMove(p) {
   return tablebaseSlip(p) || evalSlip(p);
 }
 
+// Only a move whose position before is in the tablebase too can be blamed exactly.
 function tablebaseSlip(p) {
-  let prev = null;
-  for (let i = 0; i < p.tbs.length; i++) {
-    const t = p.tbs[i];
-    if (!t) continue;
-    const before = prev || { wdl: t.start_wdl, verdict: t.start_verdict };
-    if (t.wdl < before.wdl) {
-      return { at: 2 * i, drop: 1, before: i ? p.evalTexts[i - 1] : p.task.start_eval, after: p.evalTexts[i],
-               tablebase: `${before.verdict} → ${t.verdict}` };
-    }
-    prev = t;
-  }
-  return null;
+  const i = p.tbs.findIndex(t => t && t.before_wdl !== null && t.wdl < t.before_wdl);
+  if (i < 0) return null;
+  const t = p.tbs[i];
+  return { at: 2 * i, drop: 1, before: i ? p.evalTexts[i - 1] : p.task.start_eval, after: p.evalTexts[i],
+           tablebase: `${t.before_verdict} → ${t.verdict}` };
 }
 
 // The move of mine after which my winning chances fell the most: {at (index into moves), drop,

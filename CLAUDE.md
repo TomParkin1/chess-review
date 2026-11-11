@@ -167,16 +167,21 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   <= 7 pieces and no castling rights (`eligible`); `probe(conn, board)` -> `TbResult` (WDL from the side to move: 2 win,
   1 cursed win, 0 draw, -1 blessed loss, -2 loss; cursed/blessed count as almost draws since playouts apply the 50-move
   rule) or None (ineligible, game over, Settings off = meta `tablebase` 'off', or any failure -> Stockfish). Cache: LRU
-  in memory + `tablebase_cache` (migration 10, EPD -> compact JSON), so played endgames work offline. 3 s timeout;
+  in memory + `tablebase_cache` (migration 10, EPD + halfmove clock -> compact JSON: the API's answer depends on the
+  clock, a win turns "cursed" near the 50-move limit), so played endgames work offline. 3 s timeout;
   after a failure no requests for `BACKOFF` 30 s (`RATE_LIMIT_BACKOFF` 60 s after 429). `TbResult.best` = quickest win
-  (DTM, else DTZ) / longest defence; `reply()` keeps the engine's move among equal draws (sets problems).
-  `/api/play/move`: defender = `tablebase.reply`, `reply_source`, `tablebase.verdict`; `convert.state(..., tb=(start WDL,
-  WDL after my move))` (start from `_start_wdl`: the probe, else 2 for win goals / 0 for draw goals): a drop below the
-  start fails at once with an exact reason ("throws away the win ... (tablebase)") and replaces the 40%-slip and
-  -60% losing eval rules; a start the tablebase calls no better is judged by the eval. `/api/play/hint` = tablebase
-  best (`source`), so "Watch Stockfish play it" is perfect play too. Convert page `#play-source` says so. Settings
+  (a mating move first: the API gives it no DTM; then DTM, else DTZ) / longest defence; `choose()` keeps the engine's
+  move among equal draws (defender reply and hints). `/api/play/move`: defender = `choose`, `reply_source`;
+  `convert.state(..., tb=(start, before my move, after it))` (WDL from my side; start/before None when not in the
+  tablebase): the result after my move, when known, replaces the 40%-slip and -60% losing eval rules; below the goal it
+  fails at once: "That move throws away the win" only when the position before my move is known to be won, else "The
+  win is gone" (a game position entering the tablebase already drawn); a start the tablebase calls no better than the
+  goal is judged by the eval. Response `tablebase` {wdl, before_wdl, verdicts}; the Convert lesson blames the first
+  move with a known drop, else the biggest eval drop. `/api/play/hint` = `choose` (`source`), so "Watch Stockfish play
+  it" is perfect play too. Convert page `#play-source` says so. Settings
   card toggle (`/api/settings/tablebase`). Tests never touch the network: `tests/conftest.py` replaces
-  `tablebase.fetch`; the opt-in playouts run every endgame twice (Stockfish alone, real tablebase).
+  `tablebase.fetch`; the opt-in playouts run every endgame twice (Stockfish alone, real tablebase: rate limits waited out, every hint
+  and reply asserted to come from the tablebase).
 - v3 puzzle library (Milestone 4): `library.py` streams the Lichess puzzle DB (`lichess_db_puzzle.csv.zst`, ~300 MB,
   stdlib `compression.zstd`) and keeps a reservoir sample per (100-point bucket, theme in `THEMES`), 400-3100, well-tested
   only (~19k puzzles) in `puzzles`; attempts in `puzzle_attempts`. Puzzle rating (meta) starts at my chess.com rating,

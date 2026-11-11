@@ -238,11 +238,11 @@ class State:
 
 
 def state(task: Task, board: chess.Board, ev: Eval | None, streak: int, rating: int | None,
-          tb: tuple[int, int] | None = None) -> State:
+          tb: tuple[int | None, int | None, int] | None = None) -> State:
     """Where the playout stands after a move (`ev`: engine eval from my side, None if the game is over).
-    `tb` = (WDL at the start, WDL after my last move), both from my side, when the tablebase knows
-    them (E3): then the result is exact and replaces the eval thresholds (a win thrown away, a
-    lost draw), and the reason says so."""
+    `tb` = (WDL at the task's start, before my last move, after it), from my side, when the tablebase
+    knows the position after my move (E3; the others are None when it doesn't know them: more than
+    7 pieces). Then the result is exact and replaces the eval thresholds, and the reason says so."""
     me = chess.WHITE if task.color == "white" else chess.BLACK
     plies = len(board.move_stack)
     if board.is_checkmate():
@@ -256,6 +256,8 @@ def state(task: Task, board: chess.Board, ev: Eval | None, streak: int, rating: 
     exact = _exact(task, tb)
     if exact:
         return State("failed", exact, streak)
+    if tb is not None and not _judged_exactly(task, tb):
+        tb = None              # a start the tablebase calls no better than the goal: the eval rules judge
     if ev.mate is not None and ev.mate < 0:
         return State("failed", "You are getting mated.")
     if task.goal == "draw":
@@ -282,23 +284,30 @@ def state(task: Task, board: chess.Board, ev: Eval | None, streak: int, rating: 
     return State("playing", streak=streak)
 
 
-def _exact(task: Task, tb: tuple[int, int] | None) -> str | None:
-    """Why the tablebase says this attempt failed (my last move made the result worse than the
-    task's start), or None. Not when the start was already no better (e.g. a won position from a
-    game that is a tablebase draw: then the eval rules judge it)."""
-    if tb is None:
+def _judged_exactly(task: Task, tb: tuple[int | None, int | None, int]) -> bool:
+    """The tablebase judges this task unless it calls the start no better than the goal needs (a
+    won position from a game that is really a tablebase draw: the eval rules judge that one)."""
+    start = tb[0]
+    return start is None or start >= (2 if task.goal == "win" else 0)
+
+
+def _exact(task: Task, tb: tuple[int | None, int | None, int] | None) -> str | None:
+    """Why the tablebase says this attempt failed, or None. My last move is blamed only when the
+    position before it is known to have been better; a won position from a game that enters the
+    tablebase already drawn (more than 7 pieces before) just "is gone"."""
+    if tb is None or not _judged_exactly(task, tb):
         return None
-    start, now = tb
-    if now >= start:
-        return None
-    if task.goal == "win" and start == 2:
-        if now == 1:
-            return "That move throws away the win: it still wins, but not within the 50-move rule (tablebase)."
-        if now == 0:
-            return "That move throws away the win: with perfect defence it's a draw now (tablebase)."
-        return "That move loses: with perfect play you are lost now (tablebase)."
-    if task.goal == "draw" and start >= 0 and now < 0:
-        return "That move loses: against perfect play the position is lost now (tablebase)."
+    _, before, now = tb
+    if task.goal == "win" and now < 2:
+        what = ("it still wins, but not within the 50-move rule" if now == 1
+                else "with perfect defence it's a draw now" if now >= 0 else "with perfect play you are lost now")
+        if before == 2:
+            return f"That move throws away the win: {what} (tablebase)."
+        return f"The win is gone: {what} (tablebase)."
+    if task.goal == "draw" and now < 0:
+        if before is not None and before >= 0:
+            return "That move loses: against perfect play the position is lost now (tablebase)."
+        return "The position is lost now against perfect play (tablebase)."
     return None
 
 

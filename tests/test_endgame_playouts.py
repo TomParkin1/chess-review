@@ -40,7 +40,18 @@ def mode(request):
 
 @pytest.fixture(autouse=True)
 def network(mode, monkeypatch):
-    monkeypatch.setattr(tablebase, "fetch", REAL_FETCH if mode == "tablebase" else conftest_offline)
+    # Tablebase mode: a rate limit is waited out, so no game silently falls back to Stockfish.
+    monkeypatch.setattr(tablebase, "fetch", patient_fetch if mode == "tablebase" else conftest_offline)
+
+
+def patient_fetch(url):
+    for attempt in range(3):
+        try:
+            return REAL_FETCH(url)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 or attempt == 2:
+                raise
+            time.sleep(61)
 
 
 def conftest_offline(url):
@@ -73,12 +84,20 @@ def play(client, key: str, moves: list[str], uci: str, streak: int) -> dict:
     return r.get_json()
 
 
-def strong_playout(client, key: str) -> dict:
+def strong_playout(client, key: str, mode: str) -> dict:
     task = client.get(f"/api/convert/task?key={key}").get_json()
     moves, streak = [], 0
+    board = chess.Board(task["fen"])
     for _ in range(task["max_plies"] // 2 + 2):
         hint = client.post("/api/play/hint", json={"key": key, "moves": moves}).get_json()
+        if mode == "tablebase":     # every move of a <= 7-piece position comes from the tablebase
+            assert hint["source"] == "tablebase", f"{key}: hint {hint} at {board.fen()}"
         r = play(client, key, moves, hint["uci"], streak)
+        if mode == "tablebase" and r.get("reply_uci"):
+            assert r["reply_source"] == "tablebase", f"{key}: reply {r['reply_san']} at {board.fen()}"
+        board.push_uci(hint["uci"])
+        if r.get("reply_uci"):
+            board.push_uci(r["reply_uci"])
         moves += [hint["uci"]] + ([r["reply_uci"]] if r.get("reply_uci") else [])
         streak = r["streak"]
         if r["status"] != "playing":
@@ -149,8 +168,8 @@ def safe_playout(client, engine, key: str, mode: str, n: int = SAFE_MOVES) -> li
 
 
 @pytest.mark.parametrize("key", KEYS)
-def test_strong_moves_win_or_hold(client, key):
-    r = strong_playout(client, key)
+def test_strong_moves_win_or_hold(client, key, mode):
+    r = strong_playout(client, key, mode)
     assert r["status"] == "won", f"{key}: {r['reason']} after {r['my_moves']} moves"
 
 

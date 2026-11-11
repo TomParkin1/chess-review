@@ -86,6 +86,15 @@ def test_answers_are_cached_in_memory_and_in_the_database(conn, fake):
     assert set(stored) == {"category", "dtm", "dtz", "moves"}     # only what we use
 
 
+def test_the_cache_key_has_the_halfmove_clock(conn, fake):
+    """The API's answer depends on it: the same position is a "cursed" win near the 50-move limit."""
+    tablebase.probe(conn, START)
+    late = START.copy()
+    late.halfmove_clock = 90
+    tablebase.probe(conn, late)
+    assert fake.calls == 2
+
+
 def test_only_small_positions_without_castling_rights_are_asked(conn, fake):
     assert tablebase.probe(conn, chess.Board()) is None
     assert tablebase.probe(conn, chess.Board("r3k3/8/8/8/8/8/8/4K3 b q - 0 1")) is None   # castling rights
@@ -136,11 +145,11 @@ def test_in_a_draw_the_defender_keeps_the_engines_move():
                                           {"uci": "a1a3", "san": "Ra3", "category": "draw"},
                                           {"uci": "a1a4", "san": "Ra4", "category": "win"}]}
     tb = tablebase._parse(data)
-    assert tablebase.reply(tb, chess.Move.from_uci("a1a3")).uci == "a1a3"    # also a draw: the engine's
-    assert tablebase.reply(tb, chess.Move.from_uci("a1a4")).uci == "a1a2"    # it loses: perfect play
+    assert tablebase.choose(tb, chess.Move.from_uci("a1a3")).uci == "a1a3"    # also a draw: the engine's
+    assert tablebase.choose(tb, chess.Move.from_uci("a1a4")).uci == "a1a2"    # it loses: perfect play
     losing = tablebase._parse({"category": "loss", "moves": [{"uci": "a1a2", "san": "Ra2", "category": "win", "dtm": 3},
                                                              {"uci": "a1a3", "san": "Ra3", "category": "win", "dtm": 9}]})
-    assert tablebase.reply(losing, chess.Move.from_uci("a1a2")).uci == "a1a3"  # lost: the longest defence
+    assert tablebase.choose(losing, chess.Move.from_uci("a1a2")).uci == "a1a3"  # lost: the longest defence
 
 
 def test_mate_in_one_is_the_quickest_win():
@@ -173,11 +182,22 @@ def test_a_win_thrown_away_fails_with_the_exact_reason():
     from chessreview.classify import Eval
     t = task()
     board = after(START, BLUNDER, "e5e4")
-    st = convert.state(t, board, Eval(900, None), 0, 1000, tb=(2, 0))
+    st = convert.state(t, board, Eval(900, None), 0, 1000, tb=(2, 2, 0))
     assert st.status == "failed" and "throws away the win" in st.reason and "draw" in st.reason
-    assert "50-move rule" in convert.state(t, board, Eval(900, None), 0, 1000, tb=(2, 1)).reason
-    assert "loses" in convert.state(t, board, Eval(900, None), 0, 1000, tb=(2, -2)).reason
-    assert convert.state(t, board, Eval(900, None), 0, 1000, tb=(2, 2)).status == "playing"
+    assert "50-move rule" in convert.state(t, board, Eval(900, None), 0, 1000, tb=(2, 2, 1)).reason
+    assert "lost" in convert.state(t, board, Eval(900, None), 0, 1000, tb=(2, 2, -2)).reason
+    assert convert.state(t, board, Eval(900, None), 0, 1000, tb=(2, 2, 2)).status == "playing"
+
+
+def test_a_move_is_blamed_only_when_the_position_before_it_is_known():
+    """A won position from a game (8+ pieces) entering the tablebase already drawn: the win went
+    earlier (or the start was never a tablebase win), so this move isn't "the one"."""
+    from chessreview.classify import Eval
+    convert_task = replace(task(), kind="convert", finish="resign", resign_cp=900)
+    board = after(START, "a1a4", "e5d5")
+    st = convert.state(convert_task, board, Eval(900, None), 0, 1000, tb=(None, None, 0))
+    assert st.status == "failed" and st.reason.startswith("The win is gone") and "throws" not in st.reason
+    assert "throws away" in convert.state(convert_task, board, Eval(900, None), 0, 1000, tb=(None, 2, 0)).reason
 
 
 def test_the_tablebase_replaces_the_eval_thresholds():
@@ -187,18 +207,22 @@ def test_the_tablebase_replaces_the_eval_thresholds():
     convert_task = replace(task(), kind="convert", finish="resign", goal="win", resign_cp=900)
     board = after(START, "a1a4", "e5d5")
     assert convert.state(convert_task, board, Eval(50, None), 0, 1000).status == "failed"        # eval rule
-    assert convert.state(convert_task, board, Eval(50, None), 0, 1000, tb=(2, 2)).status == "playing"
+    assert convert.state(convert_task, board, Eval(50, None), 0, 1000, tb=(2, 2, 2)).status == "playing"
     hold = replace(task(), goal="draw", finish="hold")
     assert convert.state(hold, board, Eval(-900, None), 0, 1000).status == "failed"
-    assert convert.state(hold, board, Eval(-900, None), 0, 1000, tb=(0, 0)).status == "playing"
-    assert "lost now" in convert.state(hold, board, Eval(-900, None), 0, 1000, tb=(0, -2)).reason
+    assert convert.state(hold, board, Eval(-900, None), 0, 1000, tb=(0, 0, 0)).status == "playing"
+    assert "lost now" in convert.state(hold, board, Eval(-900, None), 0, 1000, tb=(0, 0, -2)).reason
 
 
 def test_a_start_the_tablebase_calls_drawn_is_judged_by_the_eval():
     """A won position from a game that is really a tablebase draw: reaching a draw isn't "throwing
     the win away" (it was never there); the eval rules decide."""
     from chessreview.classify import Eval
-    assert convert.state(task(), after(START, "a1a4", "e5d5"), Eval(900, None), 0, 1000, tb=(0, 0)).status == "playing"
+    board = after(START, "a1a4", "e5d5")
+    assert convert.state(task(), board, Eval(900, None), 0, 1000, tb=(0, 0, 0)).status == "playing"
+    assert convert.state(task(), board, Eval(50, None), 0, 1000, tb=(0, 0, 0)).status == "playing"   # endgame: no slip rule
+    conv = replace(task(), kind="convert", finish="resign", resign_cp=900)
+    assert "slipped" in convert.state(conv, board, Eval(50, None), 0, 1000, tb=(0, 0, 0)).reason      # the eval rule
 
 
 # ------------------------------------------------------------ the play API
@@ -219,7 +243,7 @@ def test_stockfish_defends_with_the_tablebase_move(client, fake):
     longest = list(after(START, "a1a4").legal_moves)[-1].uci()
     assert r["reply_source"] == "tablebase" and r["reply_uci"] == longest
     assert r["status"] == "playing"
-    assert r["tablebase"] == {"verdict": "win", "wdl": 2, "start_verdict": "win", "start_wdl": 2}
+    assert r["tablebase"] == {"verdict": "win", "wdl": 2, "before_verdict": "win", "before_wdl": 2}
 
 
 def test_the_move_that_throws_the_win_away_fails_at_once(client, fake):

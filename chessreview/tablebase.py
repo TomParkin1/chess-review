@@ -9,7 +9,8 @@ Asks the free Lichess tablebase API (Syzygy up to 7 pieces, DTM up to 5; https:/
 "cursed-win" wins only by ignoring the 50-move rule and "blessed-loss" loses only that way: our
 playouts apply the rule, so both count as (almost) draws: WDL +1 / -1.
 
-Answers are cached in memory and in SQLite (`tablebase_cache`, keyed by EPD), so an endgame
+Answers are cached in memory and in SQLite (`tablebase_cache`, keyed by EPD + halfmove clock: the
+API's answer depends on it, a win turns "cursed" near the 50-move limit), so an endgame
 played once works offline afterwards. Every failure (offline, timeout, HTTP error, rate limit)
 gives None and the caller falls back to Stockfish; after one, the API is left alone for a while
 (BACKOFF seconds, RATE_LIMIT_BACKOFF after HTTP 429) so a dead network doesn't slow every move.
@@ -81,9 +82,10 @@ class TbResult:
         return max(self.moves, key=key)
 
 
-def reply(tb: TbResult, engine_move: chess.Move | None) -> Move | None:
-    """The defender's move: the engine's own choice when it keeps the tablebase result (in a draw
-    every drawing move scores the same, and the engine's sets the most problems), else perfect play."""
+def choose(tb: TbResult, engine_move: chess.Move | None) -> Move | None:
+    """The move to play (the defender's reply, a hint): perfect play, but in a draw the engine's own
+    choice when it keeps the draw (every drawing move scores the same; the engine's sets the most
+    problems, or is the natural defence)."""
     best = tb.best
     if best is None or engine_move is None:
         return best
@@ -132,7 +134,7 @@ def probe(conn: sqlite3.Connection, board: chess.Board) -> TbResult | None:
     or the API can't be reached: use Stockfish)."""
     if not eligible(board) or board.is_game_over() or not enabled(conn):
         return None
-    key = board.epd()
+    key = f"{board.epd()} {board.halfmove_clock}"
     with _lock:
         if key in _memory:
             _memory.move_to_end(key)

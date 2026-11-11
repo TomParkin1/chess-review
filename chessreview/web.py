@@ -655,23 +655,25 @@ def create_app(cfg: Config | None = None) -> Flask:
         me = chess.WHITE if task.color == "white" else chess.BLACK
         rating = level.current_rating(c)
         out = {"san": board.san(move), "uci": move.uci()}
+        before = tablebase.probe(c, board)          # the position I moved in (E3: blame a move only if known)
         board.push(move)
         st = convert.state(task, board, None, streak, rating)
         if st.status == "playing":
             analysis = live.analyse(board)      # Stockfish's eval of the position after its best reply
             # With 7 pieces or fewer the tablebase defends perfectly and judges my move exactly (E3).
             tb = tablebase.probe(c, board)
-            best = tablebase.reply(tb, analysis.best) if tb else None
+            best = tablebase.choose(tb, analysis.best) if tb else None
             reply = chess.Move.from_uci(best.uci) if best else analysis.best
             out |= {"reply_uci": reply.uci(), "reply_san": board.san(reply),
                     "reply_source": "tablebase" if best else "stockfish"}
             board.push(reply)
             ev = analysis.for_side(me)
             out |= {"eval": str(ev), "cp": ev.as_cp()}
-            exact = (_start_wdl(c, task), -tb.wdl) if tb else None
-            if exact:       # my side: the start, and after my move (the Convert lesson finds the slip by it)
-                out["tablebase"] = {"wdl": exact[1], "verdict": tablebase.verdict(exact[1]),
-                                    "start_wdl": exact[0], "start_verdict": tablebase.verdict(exact[0])}
+            exact = (_start_wdl(c, task), before.wdl if before else None, -tb.wdl) if tb else None
+            if exact:       # my side, before and after my move (the Convert lesson finds the slip by it)
+                out["tablebase"] = {"wdl": exact[2], "verdict": tablebase.verdict(exact[2]),
+                                    "before_wdl": exact[1],
+                                    "before_verdict": tablebase.verdict(exact[1]) if exact[1] is not None else None}
             st = convert.state(task, board, ev, st.streak, rating, tb=exact)
         out |= {"fen": board.fen(), "status": st.status, "reason": st.reason, "streak": st.streak}
         return jsonify(out)
@@ -688,16 +690,16 @@ def create_app(cfg: Config | None = None) -> Flask:
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         tb = tablebase.probe(c, board)
-        if tb and tb.best:      # perfect play (E3)
-            return jsonify(uci=tb.best.uci, san=tb.best.san, source="tablebase")
+        if tb and tb.best:      # perfect play (E3); in a draw, the engine's drawing move
+            move = tablebase.choose(tb, live.analyse(board).best if tb.best.wdl == 0 else None)
+            return jsonify(uci=move.uci, san=move.san, source="tablebase")
         best = live.analyse(board).best
         return jsonify(uci=best.uci() if best else None, san=board.san(best) if best else None, source="stockfish")
 
-    def _start_wdl(c: sqlite3.Connection, task: convert.Task) -> int:
-        """The task's start from my side in the tablebase; when it isn't in it (more than 7 pieces),
-        what the goal assumes: a win for a win goal, a draw for a draw goal."""
+    def _start_wdl(c: sqlite3.Connection, task: convert.Task) -> int | None:
+        """The task's start from my side in the tablebase (None: more than 7 pieces, or unknown)."""
         tb = tablebase.probe(c, chess.Board(task.fen))
-        return tb.wdl if tb else (2 if task.goal == "win" else 0)
+        return tb.wdl if tb else None
 
     @app.post("/api/convert/result")
     def convert_result():
