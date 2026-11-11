@@ -528,6 +528,20 @@ a.chip { text-decoration: none; }
   background: var(--panel-2); color: var(--text); border: 0; border-radius: 8px; padding: 10px 12px; font: inherit; cursor: pointer; }
 .convert-row:hover:not(:disabled) { background: var(--panel-3); }
 .convert-row.locked { opacity: .5; cursor: not-allowed; }
+/* Spar (E5) */
+.spar-level { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 40%); align-items: center; gap: 12px;
+  margin-bottom: 8px; }
+.spar-level input[type=range] { width: 100%; accent-color: var(--series-you); }
+.fen-row { display: flex; gap: 8px; margin: 6px 0; }
+.fen-row input { flex: 1; min-width: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--panel-3);
+  border-radius: 6px; padding: 6px 8px; font-family: ui-monospace, monospace; font-size: 12px; }
+.chip.inaccuracy { color: var(--inaccuracy); }
+.chip.mistake { color: var(--mistake); }
+.chip.blunder { color: var(--blunder); }
+.sm.mark-inaccuracy { color: var(--inaccuracy); }
+.sm.mark-mistake { color: var(--mistake); }
+.sm.mark-blunder { color: var(--blunder); }
+.spar-review { margin-top: 8px; }
 .convert-row .chip { justify-self: start; }
 .chip.new { background: var(--panel-3); }
 .chip.mastered { background: var(--green); color: #fff; }

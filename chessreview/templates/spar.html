@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Spar · Chess Review{% endblock %}
+{% block content %}
+<div class="layout game-layout">
+  <div class="board-col">
+    <div class="board-wrap"><div id="board" class="board"></div></div>
+  </div>
+
+  <div class="side-col">
+    <div class="report-panel">
+      <div class="report-head">
+        <h1>Spar</h1>
+        <p class="muted small">Play positions from your games out against Stockfish at about your strength: a real
+          game, no hints, then a review of your moves at full strength.</p>
+      </div>
+
+      <div class="report-body" data-panel="setup">
+        <label class="spar-level" for="offset">
+          <span><strong id="level-label">Stockfish</strong><br><span class="muted small" id="level-note"></span></span>
+          <input type="range" id="offset" aria-describedby="level-note">
+        </label>
+        <p class="muted small" id="level-record"></p>
+        <div class="report-tabs" id="tabs">
+          <button data-tab="middlegame" class="active">Equal middlegames</button>
+          <button data-tab="endgame">Endgames</button>
+          <button data-tab="other">Other</button>
+        </div>
+        <div data-list="middlegame"><div class="convert-list" id="list-middlegame"></div></div>
+        <div data-list="endgame" hidden><div class="convert-list" id="list-endgame"></div></div>
+        <div data-list="other" hidden>
+          <div class="actions">
+            <button class="btn" id="start-white">Starting position as White</button>
+            <button class="btn" id="start-black">… as Black</button>
+          </div>
+          <label class="muted small" for="fen-input">Or any position (FEN); you play the side to move:</label>
+          <div class="fen-row">
+            <input type="text" id="fen-input" spellcheck="false" placeholder="8/8/8/4k3/8/8/4P3/4K3 w - - 0 1">
+            <button class="btn" id="fen-btn">Play</button>
+          </div>
+          <p class="muted small" id="fen-error" role="alert"></p>
+        </div>
+      </div>
+
+      <div class="report-body" data-panel="play" hidden>
+        <div class="review-head"><h2 id="play-title"></h2><span id="play-chip" class="chip"></span></div>
+        <p class="muted small" id="play-sub"></p>
+        <div class="prompt" id="play-prompt" aria-live="polite"></div>
+        <div class="feedback" id="play-feedback" role="status" aria-live="polite" hidden></div>
+        <div class="solution-moves" id="play-moves"></div>
+        <div class="actions" id="play-actions">
+          <button class="btn" id="flip-btn">Flip board</button>
+          <button class="btn" id="resign-btn">Resign</button>
+        </div>
+        <div id="play-done" hidden>
+          <div class="actions">
+            <button class="btn primary" id="review-btn">Review this game</button>
+            <button class="btn" id="rematch-btn">Rematch</button>
+            <button class="btn" id="new-btn">New position</button>
+          </div>
+          <div id="review" hidden>
+            <p class="small" id="review-summary" aria-live="polite"></p>
+            <div class="spar-review" id="review-moves"></div>
+          </div>
+        </div>
+        <div id="analysis" hidden></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='spar.js') }}"></script>{% endblock %}

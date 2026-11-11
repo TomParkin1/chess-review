@@ -16,8 +16,8 @@ from flask import Flask, Response, g, jsonify, render_template, request
 from werkzeug.exceptions import BadRequest, HTTPException
 
 from . import (backup, chesscom, coach, convert, db, insights, level, library, progress, report, repertoire,
-               session, srs, tablebase)
-from .classify import (ADAPTIVE_BANDS, MODE_KEY, REBUILD, Eval, adaptive_enabled, capture_square, refresh,
+               session, spar, srs, tablebase)
+from .classify import (ADAPTIVE_BANDS, MODE_KEY, REBUILD, Eval, adaptive_enabled, capture_square, judge, refresh,
                        thresholds_for)
 from .config import PROJECT_ROOT, Config, effective_workers, load_config
 from .engine import AnalysisJob, count_pending
@@ -714,6 +714,122 @@ def create_app(cfg: Config | None = None) -> Flask:
             return jsonify(error="unknown position or result"), 400
         srs.record_key(conn(), task.kind, task.card_key, data["result"])
         return jsonify(ok=True)
+
+    # ------------------------------------------------------------ sparring (E5)
+
+    REVIEW_CHUNK = 12        # plies judged per /api/spar/review request
+
+    @app.get("/spar")
+    def spar_page():
+        return render_template("spar.html")
+
+    @app.get("/api/spar")
+    def spar_overview():
+        c = conn()
+        refresh(c, cfg)
+        return jsonify(positions=spar.positions(c), levels=spar.levels(c), offset=spar.saved_offset(c),
+                       rating=level.current_rating(c), history=spar.history(c))
+
+    @app.post("/api/spar/offset")
+    def spar_offset():
+        c = conn()
+        spar.save_offset(c, _int(_body(), "offset"))
+        return jsonify(offset=spar.saved_offset(c))
+
+    def _spar_game(data: dict) -> tuple[chess.Board, chess.Color, list[str]]:
+        start = _board(data.get("fen"))
+        if not start.is_valid():        # e.g. no kings, pawns on the back rank: the engine can't play it
+            raise BadRequest("that position isn't legal")
+        moves = _moves(data)
+        try:
+            board = spar.replay(start.fen(), moves)
+        except ValueError as exc:
+            raise BadRequest(str(exc)) from exc
+        return board, chess.WHITE if _color(data.get("color")) == "white" else chess.BLACK, moves
+
+    @app.post("/api/spar/move")
+    def spar_move():
+        """Body: {fen (start), color (mine), moves (so far), uci (mine; omitted when Stockfish is to
+        move, e.g. I play Black from the start), offset}. Stockfish replies at the chosen strength."""
+        data = _body()
+        board, me, _ = _spar_game(data)
+        c = conn()
+        st = spar.strength(spar.target_elo(level.current_rating(c), _int(data, "offset", 0)))
+        out: dict = {}
+        if data.get("uci") is not None:
+            if board.turn != me:
+                return jsonify(error="it isn't your move"), 400
+            try:
+                move = chess.Move.from_uci(str(data["uci"]))
+            except ValueError:
+                move = None
+            if move is None or move not in board.legal_moves:
+                return jsonify(error=f"illegal move {data['uci']}"), 400
+            out |= {"uci": move.uci(), "san": board.san(move)}
+            board.push(move)
+        elif board.turn == me:
+            return jsonify(error="your move"), 400
+        over = spar.outcome(board, me)
+        if over is None:
+            reply = live.play(board, st.options, st.limit)
+            out |= {"reply_uci": reply.uci(), "reply_san": board.san(reply)}
+            board.push(reply)
+            over = spar.outcome(board, me)
+        out |= {"fen": board.fen(), "status": over[0] if over else "playing", "reason": over[1] if over else "",
+                "elo": st.elo}
+        return jsonify(out)
+
+    @app.post("/api/spar/finish")
+    def spar_finish():
+        """Store a finished game: {source, fen, color, moves, offset, resigned}. The result comes from
+        the position (a game not over yet can only be resigned: a loss)."""
+        data = _body()
+        board, me, moves = _spar_game(data)
+        over = spar.outcome(board, me)
+        if over is None:
+            if not data.get("resigned"):
+                return jsonify(error="the game isn't over"), 400
+            over = ("loss", "You resigned.")
+        c = conn()
+        offset = spar.clamp_offset(_int(data, "offset", 0))
+        elo = spar.strength(spar.target_elo(level.current_rating(c), offset)).elo
+        source = str(data.get("source") or "fen")[:40]
+        game_id = spar.record(c, source, chess.Board(data["fen"]).fen(), "white" if me == chess.WHITE else "black",
+                              elo, offset, moves, over[0], over[1])
+        return jsonify(id=game_id, result=over[0], reason=over[1], history=spar.history(c))
+
+    @app.post("/api/spar/review")
+    def spar_review():
+        """Judge my moves of a stored game at full strength: {id, from} -> REVIEW_CHUNK plies from
+        `from` ({ply, san, uci, mine, judgement, before, after, best_san}), and `next` (or None)."""
+        data = _body()
+        c = conn()
+        g = spar.game(c, _int(data, "id"))
+        if g is None:
+            return jsonify(error="no such game"), 404
+        moves = g["moves"].split()
+        start = max(0, _int(data, "from", 0))
+        me = chess.WHITE if g["color"] == "white" else chess.BLACK
+        th = level.current_thresholds(c, cfg)
+        board = spar.replay(g["start_fen"], moves[:start])
+        out = []
+        for ply in range(start, min(len(moves), start + REVIEW_CHUNK)):
+            move = chess.Move.from_uci(moves[ply])
+            entry = {"ply": ply, "uci": move.uci(), "san": board.san(move), "mine": board.turn == me}
+            if entry["mine"]:
+                before = live.analyse(board)
+                after_board = board.copy()
+                after_board.push(move)
+                after = live.analyse(after_board)
+                verdict, _, _ = judge(before.for_side(me), after.for_side(me), cfg, th)
+                is_best = before.best == move
+                entry |= {"judgement": "good" if is_best else verdict, "before": str(before.for_side(me)),
+                          "after": str(after.for_side(me)),
+                          "best_san": board.san(before.best) if before.best and not is_best else None}
+            out.append(entry)
+            board.push(move)
+        nxt = start + REVIEW_CHUNK
+        return jsonify(moves=out, next=nxt if nxt < len(moves) else None, total=len(moves))
 
     @app.get("/progress")
     def progress_page():

@@ -26,6 +26,8 @@ Everything runs on your own machine. Your games and progress live in a SQLite da
   With 7 pieces or fewer the free [Lichess tablebase](https://tablebase.lichess.ovh) takes over: perfect defence,
   perfect hints, and an exact verdict the moment a move throws a win away. Answers are kept, so endgames you've
   played work offline; Settings can switch it off.
+- **Spar**: play positions from your own games (or the start, or any FEN) out against Stockfish at about your
+  rating, adjustable from -200 to +300, then review your moves at full strength.
 - **Puzzle library**: about 19k Lichess puzzles (optional download), with your own puzzle rating.
 - **Insights and Progress**: trends, accuracy by phase, clock use, openings, endgames (results by type of endgame,
   how often you convert winning endgames and save losing ones, your endgame training) and your top weaknesses

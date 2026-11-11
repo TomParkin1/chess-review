@@ -253,12 +253,12 @@ def spread(cards: list, calm: list) -> list:
 
 
 # Everything that counts as training, with its timestamp column.
-TRAINING_SOURCES = ("review_results", "puzzle_attempts", "self_reviews", "training_log")
+TRAINING_SOURCES = ("review_results", "puzzle_attempts", "self_reviews", "training_log", "spar_games")
 
 
 def training_days(conn: sqlite3.Connection) -> set[date]:
     """Training days with any training: positions (Today, Practice, sessions), library puzzles,
-    self-reviews, opening drills and Convert/endgames (training_log)."""
+    self-reviews, opening drills and Convert/endgames (training_log), sparring games (E5)."""
     union = " UNION ".join(f"SELECT DISTINCT {day_sql('at')} FROM {t}" for t in TRAINING_SOURCES)
     return {date.fromisoformat(r[0]) for r in conn.execute(union) if r[0]}
 

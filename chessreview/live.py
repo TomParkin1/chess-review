@@ -73,6 +73,8 @@ class LiveEngine:
         self.cfg = cfg
         self._judge_engine: chess.engine.SimpleEngine | None = None
         self._stream_engine: chess.engine.SimpleEngine | None = None
+        self._spar_engine: chess.engine.SimpleEngine | None = None   # rating-limited play (E5), never judges
+        self._spar_lock = threading.Lock()
         self._judge_lock = threading.Lock()
         self._stream_lock = threading.Lock()
         self._current_stream: _Stream | None = None
@@ -224,12 +226,29 @@ class LiveEngine:
         finally:
             out.put(None)
 
+    # ------------------------------------------------------------ sparring (E5)
+
+    def play(self, board: chess.Board, options: dict, limit: chess.engine.Limit) -> chess.Move:
+        """A move at limited strength (spar.strength): its own process, so UCI_LimitStrength and
+        Skill Level never reach the judging or streaming engines. Options are set on every move
+        (games at different levels share the process)."""
+        with self._spar_lock:
+            if self._spar_engine is None:
+                self._spar_engine = open_engine(self.cfg, threads=1)
+            try:
+                self._spar_engine.configure(options)
+                return self._spar_engine.play(board, limit).move
+            except chess.engine.EngineError:
+                _quit(self._spar_engine)
+                self._spar_engine = None
+                raise
+
     def close(self) -> None:
         if self._current_stream is not None:
             self._current_stream.cancel.set()
-        for engine in (self._judge_engine, self._stream_engine):
+        for engine in (self._judge_engine, self._stream_engine, self._spar_engine):
             _quit(engine)
-        self._judge_engine = self._stream_engine = None
+        self._judge_engine = self._stream_engine = self._spar_engine = None
 
 
 def _quit(engine: chess.engine.SimpleEngine | None) -> None:

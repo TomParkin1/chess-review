@@ -66,6 +66,16 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   endgame" phase card, keeping the higher severity; trains `phase=endgame` (Today's focus: endgame mistakes + puzzles).
   Insights' Endgames card (5 tiles: reached, conversion at any point with W/D/L, endgame conversion, saves, accuracy); Puzzles
   takes `?theme=`. Progress already compares conversion between game windows.
+- Sparring (E5, F9): `chessreview/spar.py` + `/spar` (`static/spar.js`, sidebar "Spar"). Start positions per game: the
+  first about-equal middlegame (|eval| <= `EQUAL_CP`) and first equal-or-better endgame position on my move, newest
+  first (`positions`); or the start (either colour) or any legal FEN. Strength = `level.current_rating` + offset
+  (`OFFSETS` -200..+300, meta `spar_offset`): from `ELO_FLOOR` 1320 `UCI_LimitStrength`/`UCI_Elo`; below it Skill
+  Level 0 with `BELOW_FLOOR_DEPTH` (approximate; the label says so and my record per offset shows the fit).
+  `LiveEngine.play` = its own 1-thread process (options set every move; never the judging engine). Stateless loop
+  `/api/spar/move` ({fen, color, moves, uci|null: Stockfish moves first}); draws by rule end at once
+  (`spar.outcome`). `/api/spar/finish` stores `spar_games` (migration 11; result from the board, else only a
+  resignation) -> streak (`srs.TRAINING_SOURCES`). `/api/spar/review` {id, from}: my moves judged at full strength
+  (`live.analyse` + `classify.judge`, current thresholds), `REVIEW_CHUNK` plies per request; click -> analysis board.
 - Clock rules (Finish M5, F7) live in `report.py`: shares of the estimated game duration `game_budget_ms` = base +
   40 × increment (none for daily/unknown). Time trouble < 10% (`is_low_clock`; 60 s at 10+0, 18 s at 3+0, 130 s at
   15+10), a very fast move < 1/120 (5 s at 10+0), buckets `CLOCK_BUCKETS` 30/10/3%. `insights.in_time_trouble(clocks,
@@ -338,7 +348,7 @@ Openings are practised on Chessly: Today drops opening lines (the /openings page
    backlog), endgames 27-29% of planned time, Lichess endgame puzzles on ~2/3 of days at 10 min, all at 20/30.
 3. [x] E3 Lichess tablebase API (<= 7 pieces) for endgame play: perfect defence, exact verdicts, cached
 4. [x] E4 Endgame insights (conversion rate, results by endgame type, saves, drill progress, "Endgames" weakness)
-5. [ ] E5 Sparring vs a rating-limited Stockfish from my positions (F9)
+5. [x] E5 Sparring vs a rating-limited Stockfish from my positions (F9)
 6. [ ] E6 Calculation trainer (F10)
 Still deferred: the deeper re-check of card positions (M3); idempotent old migrations (rule: never edit old ones;
 new migrations use `conn.execute` per statement, not `executescript`, so they stay atomic).
