@@ -357,7 +357,7 @@ def test_today_and_progress_api(client):
     plan = today["plan"]
     assert plan["total"] > 0 and all("items" not in b for b in plan["blocks"])
     for b in plan["blocks"]:
-        if b["id"] in ("opening", "convert"):    # played on their own pages
+        if b["id"] == "convert":    # played on the Convert page
             continue
         items = c.get(f"/api/today/{b['id']}").get_json()["items"]
         assert len(items) == b["count"]
@@ -389,6 +389,7 @@ def test_library_api_without_a_library(client):
     c, _app = client
     s = c.get("/api/library/status").get_json()
     assert s["count"] == 0 and s["progress"]["state"] == "idle" and s["rating"] == 1500   # no games: default
+    assert s["outdated"] is False                       # nothing to update before the first download
     assert c.get("/api/library/next").get_json()["items"] == []
     assert c.post("/api/library/result", json={"puzzle_id": "nope", "result": "solved"}).status_code == 404
 
@@ -540,8 +541,9 @@ def test_today_refresh_api(client):
     assert today["games"] == {"total": 3, "analysed": 3} and not today["plan"]["stale"]
 
 
-def test_today_budget_and_todays_opening_lines(client):
-    """F4: the Today page sets the time budget; the plan is rebuilt for it."""
+def test_today_budget_and_no_opening_lines(client):
+    """F4: the Today page sets the time budget; the plan is rebuilt for it. E2: Today has no
+    opening lines any more, so the drill has no "today" mode (it serves the usual lines)."""
     c, _app = client
     r = c.post("/api/today/budget", json={"minutes": 30})
     assert r.status_code == 200
@@ -549,7 +551,8 @@ def test_today_budget_and_todays_opening_lines(client):
     assert body["plan"]["budget"] == 30 and body["budgets"] == [10, 20, 30] and "minutes_left" in body["plan"]
     assert c.get("/api/today").get_json()["plan"]["budget"] == 30
     assert c.post("/api/today/budget", json={"minutes": 15}).status_code == 400
-    assert c.get("/api/openings/drill?mode=today").get_json() == {"lines": [], "colors": []}
+    assert c.get("/api/openings/drill?mode=today").get_json() == {"lines": []}
+    assert all(b["id"] != "opening" for b in c.get("/api/today").get_json()["plan"]["blocks"])
 
 
 # ------------------------------------------------------------ E1 (audit of 10 Nov 2026): bad input is a 400/404

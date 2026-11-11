@@ -170,17 +170,31 @@ def convert_overview(conn: sqlite3.Connection) -> list[dict]:
 
 def next_convert(conn: sqlite3.Connection, on=None) -> str | None:
     """A due convert card, else the first won position never tried."""
+    return _due(conn, "convert", on) or _untried_convert(conn)
+
+
+def next_endgame(conn: sqlite3.Connection, on=None) -> str | None:
+    """Today's endgame to play (E2): a due essential endgame, else a due Convert position, else the
+    next essential endgame never played (in unlock order), else a won position never tried."""
+    return (_due(conn, "endgame", on) or _due(conn, "convert", on)
+            or next((e["key"] for e in endgame_overview(conn) if e["unlocked"] and e["status"] == "new"), None)
+            or _untried_convert(conn))
+
+
+def _due(conn: sqlite3.Connection, kind: str, on=None) -> str | None:
+    """The most overdue card of a kind ('convert' | 'endgame') whose task still exists."""
     on = on or srs.today()
-    due = conn.execute("""SELECT key FROM cards WHERE kind = 'convert' AND mastered_on IS NULL
-                          AND due_on IS NOT NULL AND due_on <= ? ORDER BY due_on, box""",
-                       (on.isoformat(),)).fetchone()
-    if due:
-        return f"convert/{due['key']}"
-    tried = {r["key"] for r in conn.execute("SELECT key FROM cards WHERE kind = 'convert'")}
-    for e in convert_positions(conn):
-        if e["key"].split("/", 1)[1] not in tried:
-            return e["key"]
+    for r in conn.execute("""SELECT key FROM cards WHERE kind = ? AND mastered_on IS NULL
+                             AND due_on IS NOT NULL AND due_on <= ? ORDER BY due_on, box""",
+                          (kind, on.isoformat())):
+        if task_for(conn, f"{kind}/{r['key']}") is not None:
+            return f"{kind}/{r['key']}"
     return None
+
+
+def _untried_convert(conn: sqlite3.Connection) -> str | None:
+    tried = {r["key"] for r in conn.execute("SELECT key FROM cards WHERE kind = 'convert'")}
+    return next((e["key"] for e in convert_positions(conn) if e["key"].split("/", 1)[1] not in tried), None)
 
 
 def task_for(conn: sqlite3.Connection, key: str) -> Task | None:

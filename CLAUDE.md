@@ -138,16 +138,17 @@ and lets me review them across all games. chess.com username: `sampleplayer`
     first (`/api/threat/check`); Today's real-game block mixes in `srs.calm_positions()` (`coach.calm_ratio`; good moves,
     half with a real threat). Failed calm positions become `cards.kind='position'`. `review_results.mode/threat_result` record it.
 - v3 Today + Progress (Milestone 2):
-  - `coach.py`: `today_plan()` builds the day's blocks (reviews, real-game = new cards + calm positions, focus = my
-    #1 weakness from `insights.weaknesses(last=100)`, convert, opening lines) and freezes it in meta `today_plan`; an
-    item is done once it has a review result today (`attempted_today`); the opening block once its planned `keys`
-    were drilled today or aren't due (`pending_lines`), served by `/api/openings/drill?mode=today` (both colours).
+  - `coach.py`: `today_plan()` builds the day's blocks (reviews, convert = the endgame to play, endgame puzzles,
+    real-game = new cards + calm positions, focus = my #1 weakness from `insights.weaknesses(last=100)`; no opening
+    lines since E2) and freezes it in meta `today_plan`; an item is done once it has a review result today
+    (`attempted_today`); the convert block once its planned `key`'s card was played today (`_block_done`).
     API `/api/today`, `/api/today/<block>`; the Train page (`/train`, sidebar "Today") is the block checklist + runner.
     Same-day rebuilds (Finish M1, B6): plan `basis` = analysed-game count; rebuilt on `refresh` (POST
-    `/api/today/refresh`, or a new budget), when the plan has no `budget` yet, when an item can't be served
+    `/api/today/refresh`, or a new budget), when the plan has no `budget` yet or another `version` (`PLAN_VERSION`,
+    2 = E2), when an item can't be served
     (`_servable`: Delete all, restore, missing puzzle) or when the basis changed and nothing was tried yet; otherwise
     `stale`/`new_games` -> "Refresh plan" prompt. `_rebuild` keeps today's tried items (their time counts against the
-    budget) and done opening/convert blocks.
+    budget, endgame items against the endgame share) and a played convert block; unknown blocks (opening) go.
   - `progress.py`: last N games vs the N before (`coach.progress_window`, game windows not weeks), metrics at my current
     level (`level.winning_chance` bands for conversion), rolling series, kinds per game, weekly training. `/progress`,
     `/api/progress/report`, summary sentence on Home. (Route fn for `/api/progress` is `analysis_progress`.)
@@ -167,7 +168,8 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   only (~19k puzzles) in `puzzles`; attempts in `puzzle_attempts`. Puzzle rating (meta) starts at my chess.com rating,
   Elo update, first try only: score 1 clean, 1/2 solved with help (hint or a wrong try), 0 otherwise (`SCORES`);
   K = max(40 -> 16 over 100 puzzles, 120 × 0.8^n) so the first puzzles correct a bad seed (provisional rating); `pick()` chooses unseen puzzles around it. Failed puzzles become
-  `cards.kind='library'` (due ones join Today's Review). `KIND_THEMES` maps my mistake kinds to themes; Today's Focus
+  `cards.kind='library'` (due ones join Today's Review). `THEMES` gained queen/bishop/knight/queenRook endgames (E2;
+  meta `puzzle_library_themes` stamps the sampled set, `outdated()` -> Settings suggests an update). `KIND_THEMES` maps my mistake kinds to themes; Today's Focus
   = half my mistakes, half themed library puzzles. puzzle.js `mode: 'library'` judges locally against the solution
   (any mate counts). UI: `/puzzles` (Practice switch), Settings card, CLI `puzzles`. Block items for the library are
   `["lib", puzzle_id, tag]` in the Today plan.
@@ -183,15 +185,21 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   - `explain_best` only adds what the explanation of my move doesn't already say (no repeated line or gain).
   - Misses (report mark `miss`) are shown as "miss" in puzzles; Practice severity filter `judgement=miss`.
   - Sidebar badge (`shell.js` `showTodayBadge`) = items left in today's plan, gone when complete.
-  - Today continues into Convert/Openings (`?from=today` -> "Back to Today" there).
+  - Today continues into Convert (`?from=today&key=` -> "Back to Today" there; Openings no longer, E2).
   - `analysis.start(fen, {history})`: moves that led to the position (greyed, ◀ steps back through them).
   - Convert after a failure: biggest win-chance drop of my moves + Stockfish's move there, drawn on the position
     before that move (B14; "Final position" toggles), "Try again from there" (counts as solved_with_help at best;
     the prompt gives the eval there), "Watch Stockfish play it" (hint + play/move loop, nothing recorded).
 - Today's time budget (Finish M2, F4; `build_plan`): 10/20/30 min (meta `today_budget`, POST `/api/today/budget`,
-  default `coach.budget_minutes`). Opening lines (15 s each, <= 15% of the budget) and Convert (3 min, budgets >= 20,
-  not while reviews wait) first; the rest = puzzle slots at `coach.pace()` (my time per attempt x attempts per puzzle,
-  last 200). Reviews <= `review_share` of the slots, all of them when more is due than fits; new cards only while due
+  default `coach.budget_minutes`). Endgames first (E2): `ENDGAME_SHARE` 30% of the budget = the endgame to play
+  (`convert.next_endgame`: due essential endgame > due won position > next essential in unlock order > untried won
+  position; 2 min essential / 3 min convert, `drill_seconds`; none before the first analysed game) + the endgame
+  puzzle block (`_endgame_items`: due endgame cards (endgame-phase mistakes, endgame-tagged library cards; they leave
+  Review; all of them may fill the block: capped at half, they piled up, 30-min backlog 55 -> 104 in `simulate`), new
+  endgame mistakes from all games (part of the new-card allowance) up to half, `library.pick_endgames` for the rest:
+  `ENDGAME_ROTATION` over `ENDGAME_THEMES`, rook most; tag "endgame"). Places it can't fill go back to the other
+  blocks. `simulate` reports the endgame share and the days with Lichess endgame puzzles. The rest = puzzle slots at `coach.pace()` (my time per attempt x
+  attempts per puzzle, last 200). Reviews <= `review_share` of the slots, all of them when more is due than fits; new cards only while due
   < `new_share` of the slots (focus mistakes never studied count too); rest half real-game, half focus; what focus
   can't fill goes to waiting reviews, then calm positions. A rebuild counts tried items' time as spent.
   `chessreview/simulate.py` runs the real planner day by day on a copy (`simulate` CLI; test in
@@ -295,8 +303,10 @@ Openings are practised on Chessly: Today drops opening lines (the /openings page
    tallies, analysis/convert/Today/Insights/Puzzles races, Today badge + games table at 1024 px, keyboard moves,
    clickable/aria-live. Browser regression: scratchpad `regress/run.sh` (fresh DB copy, port 8765, `drive.mjs`:
    every page at 1024/1280/1440/1920 + drill Stop, rapid Openings clicks, a typed move in Practice).
-2. [ ] E2 Today without openings; Endgame block (~30%: essential endgame or Convert, my endgame mistakes, Lichess
-   endgame puzzles by type)
+2. [x] E2 Today without openings (old plans rebuilt via `PLAN_VERSION`; Openings' Today mode gone); endgames first
+   (~30%: the endgame to play + endgame puzzle block), convert block done only for its planned key; library endgame
+   types. `simulate --days 90`: 0 days over budget at 10/20/30, backlog as before E2 (max 55 = the starting
+   backlog), endgames 27-29% of planned time, Lichess endgame puzzles on ~2/3 of days at 10 min, all at 20/30.
 3. [ ] E3 Lichess tablebase API (<= 7 pieces) for endgame play: perfect defence, exact verdicts, cached
 4. [ ] E4 Endgame insights (conversion rate, results by endgame type, "Endgames" weakness)
 5. [ ] E5 Sparring vs a rating-limited Stockfish from my positions (F9)

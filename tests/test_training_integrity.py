@@ -1,6 +1,7 @@
 """Finish M2, training integrity: one box change per card per day (B3), the time budget and the
 load it keeps (F4), the streak (B9), the 04:00 training day (B13) and sessions that never block
 Today (B5). B12 (double clicks) is front-end only: see the browser scenario."""
+import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -148,8 +149,9 @@ def test_the_plan_fits_the_budget(conn, cfg, minutes):
     coach.set_budget(conn, minutes)
     plan = coach.today_plan(conn, cfg, DAY)
     assert plan["budget"] == minutes and plan["pace"] == 60
-    assert plan["total"] == minutes          # 60 s a puzzle, nothing due yet: one puzzle a minute
-    assert planned_minutes(plan) <= minutes and plan["minutes_left"] == minutes
+    assert blocks(plan)["convert"]["key"] == "endgame/kq_k"      # the first essential endgame: 2 minutes
+    assert plan["total"] == minutes - 1      # that, then 60 s a puzzle, nothing due yet: one puzzle a minute
+    assert planned_minutes(plan) == minutes and plan["minutes_left"] == minutes
 
 
 def test_a_budget_outside_the_choices_is_refused(conn):
@@ -163,20 +165,20 @@ def test_reviews_fill_the_day_when_more_is_due_than_it_holds(conn, cfg):
                  (DAY.isoformat(),))
     plan = coach.today_plan(conn, cfg, DAY)
     b = blocks(plan)
-    assert len(b["reviews"]["items"]) == 10 and set(b) == {"reviews"}     # 18 due, 10 places: no new cards
-    assert "8 more are waiting" in b["reviews"]["subtitle"]
+    assert len(b["reviews"]["items"]) == 8 and set(b) == {"reviews", "convert"}   # 18 due, 8 places: no new cards
+    assert "10 more are waiting" in b["reviews"]["subtitle"]
 
 
 def test_new_cards_wait_until_the_reviews_leave_room(conn, cfg):
     srs.ensure_cards(conn, cfg)
-    conn.execute("UPDATE cards SET box = 1, due_on = ?, introduced_on = '2026-10-01' WHERE game_id = 1 AND ply <= 12",
-                 (DAY.isoformat(),))       # 6 due: room for 7 - 6 = 1 new card (new share 0.7 of 10)
+    conn.execute("UPDATE cards SET box = 1, due_on = ?, introduced_on = '2026-10-01' WHERE game_id = 1 AND ply <= 10",
+                 (DAY.isoformat(),))       # 5 due: room for 6 - 5 = 1 new card (new share 0.7 of 8 slots)
     plan = coach.today_plan(conn, cfg, DAY)
     tags = [i[2] for b in plan["blocks"] for i in b["items"]]
-    assert tags.count("due") == 6 and tags.count("new") == 1
+    assert tags.count("due") == 5 and tags.count("new") == 1
     conn.execute("UPDATE cards SET box = 1, due_on = ? WHERE game_id = 2 AND ply = 2", (DAY.isoformat(),))
     tags = [i[2] for b in coach.today_plan(conn, cfg, DAY, refresh=True)["blocks"] for i in b["items"]]
-    assert tags.count("due") == 7 and tags.count("new") == 0                    # 7 due: no room left
+    assert tags.count("due") == 6 and tags.count("new") == 0                    # 6 due: no room left
     focus = blocks(coach.today_plan(conn, cfg, DAY)).get("focus", {"items": []})["items"]
     assert all(card(conn, g, p)["due_on"] for g, p, _ in focus if g != "lib")  # no unseen ones there either
 
@@ -209,10 +211,10 @@ def test_a_new_budget_rebuilds_the_plan_and_keeps_what_was_done(conn, cfg):
     conn.commit()
     coach.set_budget(conn, 30)
     bigger = coach.today_plan(conn, cfg, srs.today(), refresh=True)
-    assert bigger["total"] == 30 and bigger["finished"] == 4
+    assert bigger["total"] == 29 and bigger["finished"] == 4        # an endgame (2 min) + 28 puzzles
     coach.set_budget(conn, 10)
     smaller = coach.today_plan(conn, cfg, srs.today(), refresh=True)
-    assert smaller["total"] == 10 and smaller["finished"] == 4
+    assert smaller["total"] == 9 and smaller["finished"] == 4
 
 
 def test_ninety_days_stay_inside_the_budget(conn, cfg):
@@ -240,24 +242,116 @@ def test_repeated_solves_cannot_master_a_card_early(conn, cfg):
     assert all((date.fromisoformat(r["mastered_on"]) - date.fromisoformat(r["introduced_on"])).days >= 115 for r in rows)
 
 
-# ------------------------------------------------------------ the opening block
+# ------------------------------------------------------------ E2: no opening block, endgames first
 
-def test_the_opening_block_is_done_when_its_lines_are_done(conn, cfg, monkeypatch):
-    keys = [f"white:{i}" for i in range(8)]
-    for k in keys:
-        conn.execute("INSERT INTO cards (kind, key, box, due_on) VALUES ('line', ?, 1, ?)", (k, DAY.isoformat()))
+def test_today_has_no_opening_block_even_with_lines_due(conn, cfg):
+    """Openings are practised on Chessly: due line cards stay on /openings, out of Today."""
+    for i in range(8):
+        conn.execute("INSERT INTO cards (kind, key, box, due_on) VALUES ('line', ?, 1, ?)", (f"white:{i}", DAY.isoformat()))
     conn.commit()
-    monkeypatch.setattr(coach, "_due_line_keys", lambda c, on: keys)
+    for minutes in coach.BUDGETS:
+        coach.set_budget(conn, minutes)
+        plan = coach.today_plan(conn, cfg, DAY, refresh=True)
+        assert "opening" not in blocks(plan) and "convert" in blocks(plan)
+
+
+def test_a_plan_with_an_opening_block_is_rebuilt_keeping_progress(conn, cfg):
+    """A plan stored by the old planner (today, before the update) is rebuilt once: the opening
+    block goes, the endgame comes in, and what was already tried today is kept."""
+    old = {"day": DAY.isoformat(), "budget": 10, "pace": 60, "basis": coach.analysed_games(conn),
+           "blocks": [{"id": "reviews", "title": "Review", "items": [[5, 2, "new"], [5, 4, "new"]]},
+                      {"id": "opening", "title": "Opening lines", "items": [], "keys": ["white:x"], "lines_due": 1}]}
+    conn.execute("INSERT INTO review_results (game_id, ply, result, at) VALUES (5, 2, 'solved', ?)", (local_noon(DAY),))
+    db.set_meta(conn, coach.PLAN_KEY, json.dumps(old))
+    conn.commit()
     plan = coach.today_plan(conn, cfg, DAY)
-    opening = blocks(plan)["opening"]
-    assert opening["lines_due"] == 6 and opening["lines_left"] == 6          # 15% of 10 minutes
-    assert plan["total"] - plan["finished"] == 8 + 1                         # 90 s of lines leave 8 puzzles
-    srs.record_line(conn, opening["keys"][0], "solved", DAY)
-    assert not blocks(coach.today_plan(conn, cfg, DAY))["opening"]["done"]   # one drilled isn't enough
-    for k in opening["keys"][1:]:
-        srs.record_line(conn, k, "failed", DAY)                             # failed counts as drilled
-    opening = blocks(coach.today_plan(conn, cfg, DAY))["opening"]
-    assert opening["done"] and opening["lines_left"] == 0
+    assert plan["version"] == coach.PLAN_VERSION and "opening" not in blocks(plan)
+    assert blocks(plan)["convert"]["key"] == "endgame/kq_k"
+    assert blocks(plan)["reviews"]["items"][0] == [5, 2, "new"] and plan["finished"] == 1
+    assert planned_minutes(plan) <= 10
+
+
+def endgames_in(c, library_puzzles: int = 10) -> None:
+    """Endgame mistakes in games 1-3 (game 1's is due today) and endgame puzzles at my rating."""
+    c.execute("UPDATE mistakes SET phase = 'endgame' WHERE game_id <= 3 AND ply = 2")
+    srs.ensure_cards(c, load_config())
+    c.execute("UPDATE cards SET box = 1, due_on = ?, introduced_on = '2026-10-01' WHERE game_id = 1 AND ply = 2",
+              (DAY.isoformat(),))
+    for i in range(library_puzzles):
+        theme = ["rookEndgame", "pawnEndgame"][i % 2]
+        c.execute("""INSERT INTO puzzles (id, fen, moves, rating, deviation, popularity, plays, themes, game_url)
+                     VALUES (?, ?, 'h8h4 h4h8', 1000, 80, 90, 1000, ?, '')""",
+                  (f"eg{i}", FEN, f" endgame {theme} hangingPiece "))
+    c.commit()
+
+
+def test_the_endgame_block_takes_its_share_of_the_budget(conn, cfg):
+    endgames_in(conn)
+    coach.set_budget(conn, 30)
+    plan = coach.today_plan(conn, cfg, DAY)
+    b = blocks(plan)
+    assert [x["id"] for x in plan["blocks"]][:2] == ["convert", "endgame"]     # endgames first (Review is empty)
+    # 30% of 30 minutes = 9: the essential endgame (2) and 7 endgame puzzles at 60 s each.
+    items = b["endgame"]["items"]
+    assert len(items) == 7 and coach.drill_seconds(b["convert"]["key"]) + 60 * len(items) == 0.3 * 30 * 60
+    mine = [tuple(i) for i in items if i[0] != "lib"]
+    assert set(mine) == {(1, 2, "due"), (2, 2, "new"), (3, 2, "new")}      # the due endgame card is here...
+    assert "reviews" not in b                                               # ...not in Review (nothing else due)
+    lib = {i[1] for i in items if i[0] == "lib"}
+    assert len(lib) == 4 and all(i[2] == "endgame" for i in items if i[0] == "lib")
+    assert not lib & {i[1] for i in b.get("focus", {"items": []})["items"] if i[0] == "lib"}   # no puzzle twice
+    assert b["endgame"]["subtitle"] == "3 from your own games. Rook endgame, pawn endgame puzzles near your rating."
+    assert planned_minutes(plan) <= 30
+
+
+def test_due_endgame_cards_can_fill_the_whole_endgame_block(conn, cfg):
+    """Simulation finding: with due endgame cards capped at half the block (the rest Lichess
+    puzzles), they piled up and the 30-minute backlog grew from 55 to 104."""
+    endgames_in(conn)
+    conn.execute("UPDATE mistakes SET phase = 'endgame' WHERE game_id <= 8 AND ply = 2")
+    conn.execute("UPDATE cards SET box = 1, due_on = ?, introduced_on = '2026-10-01' WHERE game_id <= 8 AND ply = 2",
+                 (DAY.isoformat(),))       # 8 due endgame cards
+    conn.commit()
+    coach.set_budget(conn, 30)
+    endgame = blocks(coach.today_plan(conn, cfg, DAY))["endgame"]["items"]
+    assert len(endgame) == 7 and all(tag == "due" and g != "lib" for g, _, tag in endgame)
+
+
+def test_without_the_library_my_own_endgames_fill_the_block(conn, cfg):
+    endgames_in(conn, library_puzzles=0)
+    plan = coach.today_plan(conn, cfg, DAY)
+    assert [i[:2] for i in blocks(plan)["endgame"]["items"]] == [[1, 2]]   # 10 min: 3 - 2 = 1 minute of puzzles
+    assert plan["total"] == 9 and planned_minutes(plan) == 10
+
+
+def test_the_endgame_block_is_done_only_for_its_planned_endgame(conn, cfg):
+    """Audit finding: any Convert game played today used to tick the block."""
+    plan = coach.today_plan(conn, cfg, DAY)
+    assert blocks(plan)["convert"]["key"] == "endgame/kq_k"
+    srs.record_key(conn, "convert", "1:4", "solved", DAY)          # another task played today
+    srs.record_key(conn, "endgame", "kr_k", "solved", DAY)
+    assert not blocks(coach.today_plan(conn, cfg, DAY))["convert"]["done"]
+    srs.record_key(conn, "endgame", "kq_k", "failed", DAY)         # played (a failure still counts)
+    assert blocks(coach.today_plan(conn, cfg, DAY))["convert"]["done"]
+
+
+def test_next_endgame_order(conn):
+    level1 = [t.card_key for t in convert.endgames() if t.level == 1]
+    assert convert.next_endgame(conn, DAY) == "endgame/kq_k"                 # the first one, in unlock order
+    srs.record_key(conn, "endgame", "kq_k", "solved", DAY)
+    assert convert.next_endgame(conn, DAY) == f"endgame/{level1[1]}"         # solved, not due yet: the next one
+    for key in level1[1:]:
+        srs.record_key(conn, "endgame", key, "solved", DAY)
+    assert convert.next_endgame(conn, DAY) == "endgame/lucena"               # level 2 unlocked
+    conn.execute("INSERT INTO cards (kind, key, box, due_on) VALUES ('convert', '1:4', 1, ?)", (DAY.isoformat(),))
+    conn.commit()
+    assert convert.next_endgame(conn, DAY) == "convert/1:4"                  # a due won position comes first
+    conn.execute("UPDATE cards SET due_on = ? WHERE kind = 'endgame' AND key = 'kq_k'", (DAY.isoformat(),))
+    conn.commit()
+    assert convert.next_endgame(conn, DAY) == "endgame/kq_k"                 # a due essential before that
+    conn.execute("INSERT INTO cards (kind, key, box, due_on) VALUES ('endgame', 'gone', 1, '2026-01-01')")
+    conn.commit()
+    assert convert.next_endgame(conn, DAY) == "endgame/kq_k"                 # a card whose endgame is gone is skipped
 
 
 # ------------------------------------------------------------ B9: the streak counts all training

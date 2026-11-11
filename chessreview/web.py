@@ -500,18 +500,6 @@ def create_app(cfg: Config | None = None) -> Flask:
         refresh(c, cfg)
         color = _color(request.args.get("color"))
         mode = request.args.get("mode")
-        if mode == "today":
-            # Today's opening block: the planned lines not drilled yet, both colours.
-            block = next((b for b in coach.today_plan(c, cfg)["blocks"] if b["id"] == "opening"), {})
-            pending = coach.pending_lines(c, block.get("keys", []), srs.today())
-            lines, colors = [], []
-            for side in ("white", "black"):
-                keys = [k for k in pending if k.startswith(f"{side}:")]
-                if keys:
-                    found = repertoire.due_exercises(repertoire.build(c, side), side, keys)
-                    lines += found
-                    colors += [side] * len(found)
-            return jsonify(lines=lines, colors=colors)
         tree = _tree(color)
         if mode == "due":
             lines = repertoire.due_exercises(tree, color, srs.due_lines(c, color))
@@ -574,7 +562,6 @@ def create_app(cfg: Config | None = None) -> Flask:
     def _today_json(c: sqlite3.Connection, plan: dict):
         for block in plan["blocks"]:
             del block["items"]      # the keys are internal; /api/today/<block> serves the puzzles
-            block.pop("keys", None)
         games = c.execute("SELECT COUNT(*) AS total, SUM(analysed_at IS NOT NULL) AS analysed FROM games").fetchone()
         return jsonify(plan=plan, streak=srs.streak(c), blind=cfg.training.blind, budgets=coach.BUDGETS,
                        session=session.status(c, cfg), username=db.username(c, cfg),
@@ -729,6 +716,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     def library_status():
         c = conn()
         return jsonify(count=library.count(c), fetched_on=db.get_meta(c, library.FETCHED_KEY),
+                       outdated=library.outdated(c),
                        rating=library.rating(c), played=int(db.get_meta(c, library.COUNT_KEY) or 0),
                        progress=state["library"].as_dict())
 

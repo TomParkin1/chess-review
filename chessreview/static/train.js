@@ -6,11 +6,11 @@ import { showTodayBadge } from './shell.js';
 import { progressRing } from './widgets.js';
 
 const $ = id => document.getElementById(id);
-const ICONS = { reviews: '🔁', real: '⚔️', focus: '🎯', convert: '🏁', opening: '📖' };
+const ICONS = { reviews: '🔁', convert: '🏁', endgame: '♟️', real: '⚔️', focus: '🎯' };
 // Blocks played on another page: [link, label to start, label when done]. `from=today` makes
-// that page offer a way back here when it is done.
+// that page offer a way back here when it is done. The endgame to play (an essential endgame or
+// a won position) is played on the Convert page.
 const ELSEWHERE = {
-  opening: b => ['/openings?from=today#drill', 'Drill on Openings →', 'Drill again'],
   convert: b => [`/convert?from=today&key=${encodeURIComponent(b.key)}`, 'Play it →', 'Play again'],
 };
 let plan = null;
@@ -147,8 +147,7 @@ function renderBlock(b) {
     ? el('a', { class: `btn ${b.done ? '' : 'primary'}`, href: elsewhere[0] }, b.done ? elsewhere[2] : elsewhere[1])
     : b.done ? el('span', { class: 'chip solved' }, 'Done')
       : el('button', { class: 'btn', onclick: () => startBlock(b) }, b.finished ? 'Continue' : 'Start');
-  const count = b.id === 'opening' ? (b.done ? 'done' : `${b.lines_left ?? b.lines_due} to drill`)
-    : b.id === 'convert' ? (b.done ? '1 / 1' : '0 / 1')
+  const count = b.id === 'convert' ? (b.done ? '1 / 1' : '0 / 1')
     : `${b.finished} / ${b.count}`;
   return el('li', { class: `block-row ${b.done ? 'done' : ''}` },
     el('span', { class: 'block-icon' }, status),
@@ -161,7 +160,7 @@ function nextBlock() {
   return plan.blocks.find(b => !b.done) || null;
 }
 
-// Start a block: here for puzzles, on its own page for convert and opening lines.
+// Start a block: here for puzzles, on the Convert page for the endgame to play.
 function goTo(b) {
   const elsewhere = ELSEWHERE[b.id]?.(b);
   if (elsewhere) location.href = elsewhere[0];
@@ -211,7 +210,7 @@ function showCurrent() {
   // "New"/"Review" would give calm positions away in real-game mode; "Again" is fine.
   $('status-chip').hidden = !item.again && item.mode === 'blind';
   if (item.again || item.mode !== 'blind') {
-    const tag = item.again ? 'Again' : item.queue === 'new' ? 'New' : item.queue === 'focus' ? 'Focus' : 'Review';
+    const tag = item.again ? 'Again' : { new: 'New', focus: 'Focus', endgame: 'Endgame' }[item.queue] || 'Review';
     $('status-chip').textContent = tag;
     $('status-chip').className = `chip ${item.again ? 'failed' : ''}`;
   }

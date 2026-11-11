@@ -39,6 +39,7 @@ MIN_RATING, MAX_RATING = 400, 3100
 SAMPLE_PER_CELL = 25        # puzzles kept per (rating bucket, theme)
 MIN_POPULARITY, MIN_PLAYS, MAX_DEVIATION = 80, 300, 90
 RATING_KEY, COUNT_KEY, FETCHED_KEY = "puzzle_rating", "puzzle_count", "puzzle_library_fetched"
+THEMES_KEY = "puzzle_library_themes"     # the THEMES the stored sample was drawn for (E2)
 DEFAULT_RATING = 1500
 
 # Lichess theme tag -> label. Only these themes are sampled (phase/length tags are not).
@@ -52,6 +53,8 @@ THEMES = {
     "defensiveMove": "Defensive move", "quietMove": "Quiet move", "exposedKing": "Exposed king",
     "kingsideAttack": "Kingside attack", "attackingF2F7": "Attacking f2/f7", "advancedPawn": "Advanced pawn",
     "promotion": "Promotion", "endgame": "Endgame", "rookEndgame": "Rook endgame", "pawnEndgame": "Pawn endgame",
+    "queenEndgame": "Queen endgame", "bishopEndgame": "Bishop endgame", "knightEndgame": "Knight endgame",
+    "queenRookEndgame": "Queen and rook endgame",
     "opening": "Opening", "crushing": "Crushing", "advantage": "Winning an advantage",
 }
 
@@ -72,7 +75,12 @@ KIND_THEMES = {
     "loses_material": ["defensiveMove", "trappedPiece"],
     "positional": ["quietMove", "defensiveMove"],
 }
-PHASE_THEMES = {"endgame": ["endgame"], "opening": ["opening"], "middlegame": ["kingsideAttack", "sacrifice"]}
+# Endgame types (E2), and the order Today's endgame block cycles through them: roughly how often
+# each comes up (Lichess frequency), rook endgames most.
+ENDGAME_THEMES = ["rookEndgame", "pawnEndgame", "queenEndgame", "bishopEndgame", "knightEndgame", "queenRookEndgame"]
+ENDGAME_ROTATION = ["rookEndgame", "pawnEndgame", "rookEndgame", "queenEndgame", "pawnEndgame", "bishopEndgame",
+                    "rookEndgame", "knightEndgame", "pawnEndgame", "queenRookEndgame"]
+PHASE_THEMES = {"endgame": ENDGAME_THEMES, "opening": ["opening"], "middlegame": ["kingsideAttack", "sacrifice"]}
 
 
 def themes_for(train: dict | None) -> list[str]:
@@ -187,12 +195,23 @@ def fetch(conn: sqlite3.Connection, progress: FetchProgress | None = None, url: 
             [(r[0], r[1], r[2], int(r[3]), int(r[4]), int(r[5]), int(r[6]), f" {r[7]} ", r[8])
              for r in puzzles.values()])
         db.set_meta(conn, FETCHED_KEY, time.strftime("%Y-%m-%d"))
+        db.set_meta(conn, THEMES_KEY, themes_stamp())
     progress.kept, progress.state = len(puzzles), "done"
     return len(puzzles)
 
 
 def count(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM puzzles").fetchone()[0]
+
+
+def themes_stamp() -> str:
+    return " ".join(sorted(THEMES))
+
+
+def outdated(conn: sqlite3.Connection) -> bool:
+    """The stored sample was drawn before themes were added to THEMES (an update samples them too;
+    puzzles that carry a new theme among their tags are found by it already)."""
+    return count(conn) > 0 and db.get_meta(conn, THEMES_KEY) != themes_stamp()
 
 
 # ------------------------------------------------------------ puzzle rating
@@ -269,6 +288,33 @@ def pick(conn: sqlite3.Connection, n: int, themes: list[str] | None = None, arou
             random.Random(seed).shuffle(ids)
             return ids[:n]
     return []
+
+
+def pick_endgames(conn: sqlite3.Connection, n: int, on, exclude: set[str] | None = None) -> list[str]:
+    """Up to `n` endgame puzzles near my puzzle rating, one type after
+    another along ENDGAME_ROTATION (where the day starts in it moves daily); a type with nothing
+    unseen falls back to any endgame type."""
+    exclude = set(exclude or ())
+    out: list[tuple[str, str]] = []
+    start = on.toordinal() % len(ENDGAME_ROTATION)
+    for i in range(n):
+        theme = ENDGAME_ROTATION[(start + i) % len(ENDGAME_ROTATION)]
+        seed = f"{on.isoformat()}:{i}"
+        found = pick(conn, 1, [theme], exclude=exclude, seed=seed) \
+            or pick(conn, 1, ENDGAME_THEMES + ["endgame"], exclude=exclude, seed=seed)
+        if found:
+            exclude.add(found[0])
+            out.append(found[0])
+    return out
+
+
+def endgame_types(conn: sqlite3.Connection, ids: list[str]) -> list[str]:
+    """The endgame types (labels, in ENDGAME_THEMES order) among these puzzles."""
+    if not ids:
+        return []
+    tags = " ".join(r["themes"] for r in conn.execute(
+        f"SELECT themes FROM puzzles WHERE id IN ({','.join('?' * len(ids))})", ids)).split()
+    return [THEMES[t] for t in ENDGAME_THEMES if t in tags]
 
 
 def puzzle_json(row: sqlite3.Row) -> dict:

@@ -172,20 +172,20 @@ async function fetchOverview() {
 
 // ------------------------------------------------------------ drill
 
-let drill = null;   // { lines, colors, line, step, chess, tally, recorded, failedStep }
+let drill = null;   // { lines, line, step, chess, tally, recorded, failedStep }
 
-// mode 'learn' (random lines), 'due' (due positions of this colour) or 'today' (the lines
-// planned in Today's opening block, both colours: `colors` says which side each line is for).
+// mode 'learn' (random lines) or 'due' (due positions of this colour). Today has no opening
+// block (E2: openings are practised on Chessly).
 async function startDrill(mode) {
   const d = await api(`/api/openings/drill?${params()}&mode=${mode}`);
   if (!d.lines.length) {
     $('drill-done').hidden = false;
     $('drill-done').replaceChildren(el('p', { class: 'muted' },
-      mode === 'today' ? "Today's lines are done." : mode === 'due' ? 'Nothing due right now.'
+      mode === 'due' ? 'Nothing due right now.'
         : 'No lines yet: you need at least two games in a line to drill it.'));
     return;
   }
-  drill = { lines: d.lines, colors: d.colors || null, line: 0, step: 0, chess: null,
+  drill = { lines: d.lines, line: 0, step: 0, chess: null,
             tally: { solved: 0, failed: 0 }, recorded: new Set(), failedStep: false };
   $('drill-start').hidden = true;
   $('drill-done').hidden = true;
@@ -193,14 +193,8 @@ async function startDrill(mode) {
   startLine();
 }
 
-function setColor(side) {
-  color = side;
-  document.querySelectorAll('[data-color]').forEach(x => x.classList.toggle('active', x.dataset.color === side));
-}
-
 function startLine() {
   const dr = drill;
-  if (dr.colors) setColor(dr.colors[dr.line]);
   dr.step = 0;
   dr.failedStep = false;
   dr.chess = new Chess();
@@ -321,8 +315,7 @@ function finishDrill() {
   box.hidden = false;
   box.replaceChildren(el('div', { class: 'celebrate' }, failed ? '📘' : '🏆'), el('h2', {}, 'Drill complete'),
     el('p', { class: 'muted' }, `${solved} of ${solved + failed} positions right first time.` +
-      (failed ? ' Missed positions come back tomorrow.' : '')),
-    FROM_TODAY ? el('div', { class: 'actions' }, el('a', { class: 'btn primary', href: '/train' }, 'Back to Today ▶')) : '');
+      (failed ? ' Missed positions come back tomorrow.' : '')));
   loadOverview();
 }
 
@@ -367,16 +360,12 @@ $('reset-btn').addEventListener('click', () => { if (tab === 'explore') { path =
 const begin = busy(mode => guard(document.querySelector('main'), () => startDrill(mode), 'your lines'));
 $('learn-btn').addEventListener('click', () => begin('learn'));
 $('due-btn').addEventListener('click', () => begin('due'));
-$('today-btn').addEventListener('click', () => begin('today'));
 $('drill-stop').addEventListener('click', () => finishDrill());
 document.addEventListener('keydown', e => {
   if (e.target.matches('input, select, textarea') || tab !== 'explore') return;
   if (e.key === 'ArrowLeft' && path.length) { e.preventDefault(); path.pop(); loadNode(); }
 });
 
-const FROM_TODAY = new URLSearchParams(location.search).get('from') === 'today';
-$('today-btn').hidden = !FROM_TODAY;
-$('learn-btn').classList.toggle('primary', !FROM_TODAY);
 loadOverview();
-if (location.hash === '#drill') showTab('drill');   // from Today's "Opening lines" block
+if (location.hash === '#drill') showTab('drill');   // a link straight to the drills
 else loadNode();

@@ -53,6 +53,30 @@ def test_fetch_stores_the_sample(conn):
     assert db.get_meta(conn, library.FETCHED_KEY)
 
 
+def test_a_sample_from_before_new_themes_is_outdated(conn):
+    """E2: Settings suggests an update when the sample was drawn before the endgame types existed."""
+    assert not library.outdated(conn)
+    db.set_meta(conn, library.THEMES_KEY, "fork pin")
+    assert library.outdated(conn)
+
+
+def test_endgame_puzzles_rotate_through_the_types(conn):
+    from datetime import date
+    rows = [(f"r{i}", " endgame rookEndgame ") for i in range(3)] + [(f"p{i}", " endgame pawnEndgame ") for i in range(3)] \
+        + [("q0", " endgame queenEndgame ")]
+    conn.executemany("""INSERT INTO puzzles (id, fen, moves, rating, deviation, popularity, plays, themes, game_url)
+                        VALUES (?, ?, 'c1d2 b4c2', 1500, 80, 90, 1000, ?, '')""", [(i, FEN, t) for i, t in rows])
+    conn.commit()
+    day = next(d for d in (date(2026, 11, n) for n in range(1, 30))
+               if d.toordinal() % len(library.ENDGAME_ROTATION) == 0)       # the rotation starts at rook
+    ids = library.pick_endgames(conn, 4, day)
+    assert [i[0] for i in ids] == ["r", "p", "r", "q"] and len(set(ids)) == 4
+    # A type with nothing left falls back to any endgame puzzle; nothing excluded comes back.
+    more = library.pick_endgames(conn, 5, day, exclude=set(ids))
+    assert len(more) == 3 and not set(more) & set(ids)
+    assert library.endgame_types(conn, ids) == ["Rook endgame", "Pawn endgame", "Queen endgame"]
+
+
 def test_puzzle_json_starts_after_the_opponents_move(conn):
     p = library.puzzle_json(conn.execute("SELECT * FROM puzzles WHERE id = 'aaaaa'").fetchone())
     board = chess.Board(p["fen"])
@@ -102,7 +126,7 @@ def test_pick_follows_the_rating(conn):
 
 def test_themes_for_weaknesses():
     assert library.themes_for({"kind": "hanging_piece"}) == ["hangingPiece"]
-    assert library.themes_for({"phase": "endgame"}) == ["endgame"]
+    assert library.themes_for({"phase": "endgame"}) == library.ENDGAME_THEMES
     assert library.themes_for({"low_clock": "1"}) == []
 
 

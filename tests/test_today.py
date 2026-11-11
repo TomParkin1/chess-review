@@ -14,7 +14,7 @@ DAY = srs.today()    # review results are stamped with the real time (training d
 
 @pytest.fixture
 def cfg():
-    """10 minutes at the default 60 s a puzzle: 10 puzzle slots, no Convert."""
+    """10 minutes at the default 60 s a puzzle: the first essential endgame (2 min), 8 puzzle slots."""
     base = load_config()
     return replace(base, coach=replace(base.coach, calm_ratio=0.5, budget_minutes=10, seconds_per_puzzle=60),
                    training=replace(base.training, new_per_day=10))
@@ -62,13 +62,15 @@ def test_plan_blocks_and_progress(conn, cfg, monkeypatch):
     plan = coach.today_plan(conn, cfg, DAY)
     blocks = {b["id"]: b for b in plan["blocks"]}
     assert [g_p[:2] for g_p in blocks["reviews"]["items"]] == [[1, 2]]           # the one due card
-    # 9 fresh slots: 5 real-game (3 new + 2 calm) and 4 focus, of which only one can be filled;
-    # nothing else is due, so the 3 spare go to calm positions (all 4 there are).
+    assert blocks["convert"]["key"] == "endgame/kq_k"                         # endgames first: 2 of 10 minutes
+    assert "endgame" not in blocks                                            # no endgame mistakes, no library
+    # 7 fresh slots: 4 real-game (2 new + 2 calm) and 3 focus, of which two can be filled (the
+    # other blunders); nothing else is due, so the spare one goes to a third calm position.
     real_tags = [tag for *_, tag in blocks["real"]["items"]]
-    assert real_tags.count("new") == 3 and real_tags.count("calm") == 4
+    assert real_tags.count("new") == 2 and real_tags.count("calm") == 3
     focus = blocks["focus"]["items"]
-    assert blocks["focus"]["title"] == "Focus: Hanging pieces" and focus == [[1, 10, "focus"]]   # the last blunder
-    assert plan["budget"] == 10 and plan["pace"] == 60 and plan["minutes_left"] == 9
+    assert blocks["focus"]["title"] == "Focus: Hanging pieces" and focus == [[1, 8, "focus"], [1, 10, "focus"]]
+    assert plan["budget"] == 10 and plan["pace"] == 60 and plan["minutes_left"] == 10
     used = [tuple(i[:2]) for b in plan["blocks"] for i in b["items"]]
     assert len(used) == len(set(used))                                         # no position twice
     assert plan["finished"] == 0 and not plan["complete"]
@@ -146,20 +148,17 @@ def test_new_games_mark_a_started_plan_stale_and_refresh_keeps_progress(conn, cf
 
 def test_refreshing_a_finished_day_adds_no_second_workout(conn, cfg, monkeypatch):
     monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [WEAKNESS]})
-    monkeypatch.setattr(coach, "_due_line_keys", lambda c, on: [k for k in ["white:x"] if srs.due_lines(c, "white", on)])
-    conn.execute("INSERT INTO cards (kind, key, box, due_on) VALUES ('line', 'white:x', 1, ?)", (DAY.isoformat(),))
-    conn.commit()
     plan = coach.today_plan(conn, cfg, DAY)
-    assert "opening" in [b["id"] for b in plan["blocks"]]
+    assert "convert" in [b["id"] for b in plan["blocks"]]
     for block in plan["blocks"]:
         for g, p, _ in block["items"]:
             conn.execute("INSERT INTO review_results (game_id, ply, result) VALUES (?, ?, 'solved')", (g, p))
-    srs.record_line(conn, "white:x", "solved", DAY)          # drilled: no longer due today
     conn.commit()
+    srs.record_key(conn, "endgame", "kq_k", "solved", DAY)    # the endgame played: the next one isn't added
     assert coach.today_plan(conn, cfg, DAY)["complete"]
     again = coach.today_plan(conn, cfg, DAY, refresh=True)
     assert again["complete"] and again["total"] == plan["total"]
-    assert [b["id"] for b in again["blocks"]] == [b["id"] for b in plan["blocks"]]   # the drilled block stays
+    assert [b["id"] for b in again["blocks"]] == [b["id"] for b in plan["blocks"]]   # the played block stays
 
 
 def test_a_plan_from_before_the_basis_existed_can_go_stale(conn, cfg, monkeypatch):

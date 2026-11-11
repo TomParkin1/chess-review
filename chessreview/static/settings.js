@@ -192,7 +192,8 @@ async function loadLibrary() {
   const p = s.progress;
   document.getElementById('library-note').textContent = s.count
     ? `${s.count.toLocaleString()} puzzles (rated 400–3000) from the Lichess puzzle database, downloaded ${s.fetched_on}. ` +
-      `Your puzzle rating: ${s.rating} after ${s.played} puzzles.`
+      `Your puzzle rating: ${s.rating} after ${s.played} puzzles.` +
+      (s.outdated ? ' Update it to sample the newest puzzle types too (queen, bishop, knight and queen-and-rook endgames).' : '')
     : 'Not downloaded yet. A one-time, streamed download of about 300 MB; about 5 MB is kept.';
   const btn = document.getElementById('library-btn');
   btn.textContent = s.count ? 'Update the puzzle library' : 'Download the puzzle library';

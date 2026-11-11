@@ -15,8 +15,11 @@ Everything runs on your own machine. Your games and progress live in a SQLite da
   adapt to your rating. Each one comes with a plain-English reason (hanging piece, missed fork, missed mate, ...).
 - **Practice**: replay your own mistakes as puzzles, with hints, a "threat check first" mode and an analysis
   board. Filter by opening, phase, result, colour, time control, kind of mistake or time trouble.
-- **Today**: a daily plan sized to 10, 20 or 30 minutes. It mixes spaced-repetition reviews, new mistakes,
-  calm "real game" positions, your current #1 weakness, opening lines and endgames.
+- **Today**: a daily plan sized to 10, 20 or 30 minutes. About 30% of it is endgames: one endgame to play
+  against Stockfish (an essential endgame, or a won position from your games) and endgame puzzles (your own
+  endgame mistakes plus Lichess rook, pawn, queen and minor-piece endgames near your puzzle rating). The rest
+  mixes spaced-repetition reviews, new mistakes, calm "real game" positions and your current #1 weakness.
+  Opening lines aren't part of Today (practise them on the Openings page).
 - **New-games session**: after an import, first guess where each lost game turned, then review it.
 - **Openings**: your repertoire tree for each colour, built from your games, with drills.
 - **Convert**: play won positions from your games out to the win against Stockfish, plus 15 essential endgames.
