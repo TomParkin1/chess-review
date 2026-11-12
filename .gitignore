@@ -25,13 +25,14 @@ htmlcov/
 *.db-shm
 *.sqlite
 *.pgn
-!/samples/*.pgn
 !/tests/data/*.pgn
 *.csv.zst
 
-# Local settings
+# Local settings and logs
 .env
-config.local.toml
+*.log
+.claude/settings.local.json
+CLAUDE.local.md
 
 # Editors and OS files
 .idea/
