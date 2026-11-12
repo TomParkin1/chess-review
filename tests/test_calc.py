@@ -71,11 +71,39 @@ def test_judging():
     q = calc.Question(key="k", source="lib:x", kind="best", plies=3, subject="", fen="", line=[], line_san="",
                       to_move="white", orientation="white", prompt="", answer="Ra8#",
                       final_fen="6k1/5ppp/8/8/8/8/8/R2R2K1 w - - 0 1", title="")
-    assert calc.judge(q, "Ra8#") and calc.judge(q, "Ra8") and calc.judge(q, "a1a8")
-    assert calc.judge(q, "Rd8#")                             # another mate counts
-    assert not calc.judge(q, "Kf2") and not calc.judge(q, "zz") and not calc.judge(q, "a1a9")
+    assert calc.judge(q, "Ra8#") == (True, False) and calc.judge(q, "Ra8")[0] and calc.judge(q, "a1a8")[0]
+    assert calc.judge(q, "ra8")[0]                           # a lowercase piece letter is read too
+    assert calc.judge(q, "Rd8#") == (True, False)            # another mate counts
+    assert calc.judge(q, "Kf2") == (False, False)
+    assert calc.judge(q, "Qh5") == (False, True) and calc.judge(q, "h2h4") == (False, True)
+    for typo in ("zz", "", "a1a9", "hello"):
+        with pytest.raises(calc.Unreadable):
+            calc.judge(q, typo)
     yn = replace(q, kind="capture", answer="no")
-    assert calc.judge(yn, "No") and not calc.judge(yn, "yes")
+    assert calc.judge(yn, "No")[0] and not calc.judge(yn, "yes")[0]
+    with pytest.raises(calc.Unreadable):
+        calc.judge(yn, "maybe")
+    with pytest.raises(calc.Unreadable):
+        calc.judge(replace(q, kind="where", answer="e4"), "e")
+
+
+def test_a_typo_records_nothing(conn):
+    key = calc.build(conn, "lib:p1", 3, "best").key
+    with pytest.raises(calc.Unreadable):
+        calc.answer(conn, key, "zz")
+    assert conn.execute("SELECT COUNT(*) FROM calc_attempts").fetchone()[0] == 0
+    assert calc.level(conn) == 1 and conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 0
+    r = calc.answer(conn, key, "Qh5")                        # readable but illegal there: a miscalculation
+    assert not r["correct"] and r["illegal"]
+
+
+def test_todays_plan_items_are_never_shown_here(conn):
+    import json
+    plan = {"day": srs.today().isoformat(), "blocks": [{"id": "focus", "items": [["lib", "p1", "focus"], [1, 2, "new"]]}]}
+    db.set_meta(conn, "today_plan", json.dumps(plan))
+    conn.commit()
+    rng = __import__("random").Random(1)
+    assert calc._library_sources(conn, 3, True, rng) == [] and calc._game_sources(conn, rng) == []
 
 
 def test_answers_cards_and_the_adaptive_depth(conn):
@@ -113,11 +141,12 @@ def test_due_cards_come_first_and_used_puzzles_leave_the_puzzle_page(conn):
 
 def test_today_links_the_trainer_for_a_calculation_weakness(conn, monkeypatch):
     cfg = load_config()
-    weakness = {"title": "Letting advantages slip", "detail": "", "train": {"kind": "missed_opportunity"}}
-    monkeypatch.setattr(coach.insights, "compute", lambda *a, **k: {"weaknesses": [weakness]})
-    focus = coach.build_plan(conn, cfg, srs.today())
-    block = next((b for b in focus["blocks"] if b["id"] == "focus"), None)
-    assert block is None or block["calc"]
+    for kind, linked in (("missed_opportunity", True), ("fork", True), ("hanging_piece", False)):
+        weakness = {"title": "W", "detail": "", "train": {"kind": kind}}
+        monkeypatch.setattr(coach, "_focus_items", lambda *a, w=weakness, **k: (w, [["lib", "p1", "focus"]]))
+        monkeypatch.setattr(coach, "_servable", lambda c, items: {coach._key(i) for i in items})
+        block = next(b for b in coach.build_plan(conn, cfg, srs.today())["blocks"] if b["id"] == "focus")
+        assert block["calc"] is linked, kind
     plan = {"blocks": [{"id": "focus", "title": "", "items": [], "calc": True}]}
     assert coach.with_progress(conn, plan, srs.today())["total"] == 0      # the link isn't counted
 

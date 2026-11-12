@@ -25,7 +25,9 @@ cards (kind 'calc', key = source~plies~kind~subject, which regenerates the same 
 back first when due. Attempts are kept in `calc_attempts` (migration 12): the streak counts them.
 """
 
+import json
 import random
+import re
 import sqlite3
 from dataclasses import asdict, dataclass
 
@@ -258,6 +260,17 @@ _BUILDERS = {"best": _best, "capture": _capture, "where": _where}
 
 # ------------------------------------------------------------ choosing
 
+def _in_todays_plan(conn: sqlite3.Connection) -> tuple[set[str], set[tuple[int, int]]]:
+    """Puzzle ids and (game, ply) positions in today's Today plan: never shown here (their line or
+    a move from it would give the item away, and a puzzle's first try is rated)."""
+    stored = db.get_meta(conn, "today_plan")
+    plan = json.loads(stored) if stored else {}
+    if plan.get("day") != srs.today().isoformat():
+        return set(), set()
+    items = [i for b in plan.get("blocks", []) for i in b.get("items", [])]
+    return {i[1] for i in items if i[0] == "lib"}, {(i[0], i[1]) for i in items if i[0] != "lib"}
+
+
 def _library_sources(conn: sqlite3.Connection, plies: int, need_next: bool, rng: random.Random) -> list[str]:
     rating = library.rating(conn)
     min_moves = (0 if plies % 2 else 1) + plies + (1 if need_next else 0)
@@ -266,15 +279,17 @@ def _library_sources(conn: sqlite3.Connection, plies: int, need_next: bool, rng:
           AND id NOT IN (SELECT puzzle_id FROM puzzle_attempts)
           AND id NOT IN (SELECT puzzle_id FROM calc_attempts WHERE puzzle_id IS NOT NULL)""",
         (rating - RATING_WINDOW, rating + RATING_WINDOW)).fetchall()
-    ids = [r["id"] for r in rows if len(r["moves"].split()) >= min_moves]
+    planned = _in_todays_plan(conn)[0]
+    ids = [r["id"] for r in rows if len(r["moves"].split()) >= min_moves and r["id"] not in planned]
     rng.shuffle(ids)
     return [f"lib:{i}" for i in ids[:TRIES]]
 
 
 def _game_sources(conn: sqlite3.Connection, rng: random.Random) -> list[str]:
+    planned = _in_todays_plan(conn)[1]
     rows = conn.execute("""SELECT game_id, ply FROM mistakes WHERE is_mine = 1 AND phase IN ('middlegame', 'endgame')
                            ORDER BY RANDOM() LIMIT ?""", (TRIES,)).fetchall()
-    return [f"game:{r['game_id']}:{r['ply']}" for r in rows]
+    return [f"game:{r['game_id']}:{r['ply']}" for r in rows if (r["game_id"], r["ply"]) not in planned]
 
 
 def due_question(conn: sqlite3.Connection, exclude: set[str] = frozenset(), on=None) -> Question | None:
@@ -332,30 +347,59 @@ def next_question(conn: sqlite3.Connection, exclude: set[str] = frozenset()) -> 
 
 # ------------------------------------------------------------ answering
 
-def judge(q: Question, answer: str) -> bool:
+class Unreadable(ValueError):
+    """Not an answer at all (a typo): nothing is recorded."""
+
+
+UCI = re.compile(r"[a-h][1-8][a-h][1-8][qrbn]?")
+
+
+def read_move(board: chess.Board, text: str) -> chess.Move | None:
+    """A typed move in this position: SAN (also with a lowercase piece letter, "nxe5") or UCI. None
+    when it reads as a move but isn't legal here (a miscalculation); Unreadable otherwise."""
+    if not text:
+        raise Unreadable("type a move")
+    tries = [text] + ([text[0].upper() + text[1:]] if text[0] in "nbrqk" else [])   # "bxc3": pawn, then bishop
+    illegal = False
+    for t in tries:
+        try:
+            return board.parse_san(t)
+        except (chess.IllegalMoveError, chess.AmbiguousMoveError):
+            illegal = True
+        except chess.InvalidMoveError:
+            pass
+    if UCI.fullmatch(text.lower()):
+        move = chess.Move.from_uci(text.lower())
+        return move if move in board.legal_moves else None
+    if illegal:
+        return None
+    raise Unreadable(f"{text!r} isn't a move")
+
+
+def judge(q: Question, answer: str) -> tuple[bool, bool]:
+    """(right, illegal): `illegal` = a readable move that isn't legal at the end of the line.
+    Unreadable for an answer of the wrong shape (a typo), which isn't a miss."""
     answer = (answer or "").strip()
     if q.kind == "capture":
-        return answer.lower() in ("yes", "no") and answer.lower() == q.answer
+        if answer.lower() not in ("yes", "no"):
+            raise Unreadable("answer yes or no")
+        return answer.lower() == q.answer, False
     if q.kind == "where":
-        return answer.lower() == q.answer
+        if not re.fullmatch(r"[a-h][1-8]", answer.lower()):
+            raise Unreadable("answer with a square, like e4")
+        return answer.lower() == q.answer, False
     final = chess.Board(q.final_fen)
-    try:
-        move = final.parse_san(answer)
-    except ValueError:
-        try:
-            move = chess.Move.from_uci(answer.lower())
-        except ValueError:
-            return False
-        if move not in final.legal_moves:
-            return False
+    move = read_move(final, answer)
+    if move is None:
+        return False, True
     expected = final.parse_san(q.answer)
     if move == expected:
-        return True
+        return True, False
     final.push(expected)
     mates = final.is_checkmate()
     final.pop()
     final.push(move)
-    return mates and final.is_checkmate()                   # any mate when the solution mates
+    return mates and final.is_checkmate(), False            # any mate when the solution mates
 
 
 def answer(conn: sqlite3.Connection, key: str, given: str) -> dict | None:
@@ -363,7 +407,7 @@ def answer(conn: sqlite3.Connection, key: str, given: str) -> dict | None:
     q = from_key(conn, key)
     if q is None:
         return None
-    correct = judge(q, given)
+    correct, illegal = judge(q, given)                      # Unreadable: nothing recorded
     card = conn.execute("SELECT 1 FROM cards WHERE kind = 'calc' AND key = ?", (key,)).fetchone()
     fresh = card is None and conn.execute("SELECT 1 FROM calc_attempts WHERE key = ?", (key,)).fetchone() is None
     with conn:
@@ -376,7 +420,8 @@ def answer(conn: sqlite3.Connection, key: str, given: str) -> dict | None:
     lvl, changed = level(conn), False
     if fresh and q.plies == LEVELS[lvl]:
         lvl, changed = _adapt(conn, correct)
-    return {"correct": correct, "expected": q.answer, "final_fen": q.final_fen, "line_san": q.line_san,
+    return {"correct": correct, "illegal": illegal, "expected": q.answer, "final_fen": q.final_fen,
+            "line_san": q.line_san,
             "level": lvl, "plies": LEVELS[lvl], "level_changed": changed}
 
 

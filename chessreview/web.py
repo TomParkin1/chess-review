@@ -737,7 +737,10 @@ def create_app(cfg: Config | None = None) -> Flask:
         data = _body()
         if not isinstance(data.get("key"), str) or not isinstance(data.get("answer"), str):
             return jsonify(error="key and answer are required"), 400
-        result = calc.answer(conn(), data["key"], data["answer"])
+        try:
+            result = calc.answer(conn(), data["key"], data["answer"])
+        except calc.Unreadable as exc:          # a typo isn't a miss: nothing recorded
+            return jsonify(error=str(exc)), 400
         if result is None:
             return jsonify(error="no such question"), 404
         return jsonify(result)

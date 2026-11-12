@@ -66,10 +66,10 @@ const submit = busy(async given => {
   try {
     r = await post('/api/calc/answer', { key: q.key, answer: given });
   } catch (err) {
-    answered = false;
+    answered = false;                       // a typo (400) or a lost connection: try again
     $('feedback').hidden = false;
-    $('feedback').className = 'feedback bad';
-    $('feedback').textContent = `Couldn't check that (${err.message}).`;
+    $('feedback').className = 'feedback';
+    $('feedback').textContent = err.status === 400 ? `${err.message}: try again.` : `Couldn't check that (${err.message}).`;
     return;
   }
   tally[r.correct ? 'right' : 'wrong'] += 1;
@@ -78,7 +78,8 @@ const submit = busy(async given => {
   const answerText = q.kind === 'capture' ? (r.expected === 'yes' ? 'Yes' : 'No') : r.expected;
   $('feedback').hidden = false;
   $('feedback').className = `feedback ${r.correct ? 'ok' : 'bad'}`;
-  $('feedback').textContent = (r.correct ? `✓ Right: ${answerText}.` : `✗ The answer is ${answerText}. It comes back soon.`) +
+  $('feedback').textContent = (r.correct ? `✓ Right: ${answerText}.`
+    : `✗ ${r.illegal ? `${given} isn't legal at the end of the line. ` : ''}The answer is ${answerText}. It comes back soon.`) +
     (r.level_changed ? ` Lines are now ${r.plies} moves deep.` : '');
   setDepth(r);
   finalFen = r.final_fen;
