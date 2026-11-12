@@ -161,7 +161,7 @@ def build(conn: sqlite3.Connection, source: str, plies: int, kind: str, subject:
     if made is None:
         return None
     subject, prompt, answer = made
-    title = f"{plies} moves deep" if plies != 1 else "1 move deep"
+    title = f"{plies} half-moves deep"
     return Question(key=f"{source}~{plies}~{kind}~{subject}", source=source, kind=kind, plies=plies,
                     subject=subject, fen=start.fen(), line=line, line_san=_line_san(start, line),
                     to_move=side.lower(), orientation=orientation, prompt=prompt.replace("<side>", side),

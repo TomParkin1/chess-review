@@ -22,7 +22,7 @@ let asked = [];         // keys of this session's questions
 let tally = { right: 0, wrong: 0 };
 
 function setDepth(o) {
-  $('depth-chip').textContent = `${o.plies} moves deep`;
+  $('depth-chip').textContent = `${o.plies} half-moves deep`;
 }
 
 function showStart() {
@@ -80,7 +80,7 @@ const submit = busy(async given => {
   $('feedback').className = `feedback ${r.correct ? 'ok' : 'bad'}`;
   $('feedback').textContent = (r.correct ? `✓ Right: ${answerText}.`
     : `✗ ${r.illegal ? `${given} isn't legal at the end of the line. ` : ''}The answer is ${answerText}. It comes back soon.`) +
-    (r.level_changed ? ` Lines are now ${r.plies} moves deep.` : '');
+    (r.level_changed ? ` Lines are now ${r.plies} half-moves long.` : '');
   setDepth(r);
   finalFen = r.final_fen;
   mark = q.kind === 'where' ? r.expected : q.subject || null;
