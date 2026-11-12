@@ -188,7 +188,8 @@ def fetch(conn: sqlite3.Connection, progress: FetchProgress | None = None, url: 
     with conn:
         # Puzzles I have tried stay: their attempts and spaced-repetition cards point at them.
         conn.execute("""DELETE FROM puzzles WHERE id NOT IN (SELECT puzzle_id FROM puzzle_attempts)
-                        AND id NOT IN (SELECT key FROM cards WHERE kind = 'library')""")
+                        AND id NOT IN (SELECT key FROM cards WHERE kind = 'library')
+                        AND id NOT IN (SELECT puzzle_id FROM calc_attempts WHERE puzzle_id IS NOT NULL)""")
         conn.executemany(
             """INSERT OR IGNORE INTO puzzles (id, fen, moves, rating, deviation, popularity, plays, themes, game_url)
                VALUES (?,?,?,?,?,?,?,?,?)""",
@@ -281,7 +282,8 @@ def pick(conn: sqlite3.Connection, n: int, themes: list[str] | None = None, arou
     for width in (100, 200, 400, 800):
         rows = conn.execute(f"""
             SELECT id FROM puzzles WHERE rating BETWEEN ? AND ?{theme_sql}
-              AND id NOT IN (SELECT puzzle_id FROM puzzle_attempts) ORDER BY id""",
+              AND id NOT IN (SELECT puzzle_id FROM puzzle_attempts)
+              AND id NOT IN (SELECT puzzle_id FROM calc_attempts WHERE puzzle_id IS NOT NULL) ORDER BY id""",
             [around - width, around + width, *params]).fetchall()
         ids = [r["id"] for r in rows if r["id"] not in exclude]
         if len(ids) >= n or width == 800:

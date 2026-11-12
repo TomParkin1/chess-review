@@ -400,7 +400,7 @@ PAGE_APIS = ["/api/today", "/api/today/reviews", "/api/today/real", "/api/today/
              "/api/insights?last=100", "/api/progress/report", "/api/convert", "/api/openings?color=white",
              "/api/session", "/api/session/self-review", "/api/mistakes", "/api/games", "/api/sync",
              "/api/library/status", "/api/account", "/api/backups", "/api/settings/thresholds",
-             "/api/insights/endgame-training", "/api/settings/tablebase", "/api/spar"]
+             "/api/insights/endgame-training", "/api/settings/tablebase", "/api/spar", "/api/calc", "/api/calc/next"]
 
 
 def test_pages_work_on_an_empty_and_an_unanalysed_database(client, tmp_path):

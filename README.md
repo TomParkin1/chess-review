@@ -28,6 +28,8 @@ Everything runs on your own machine. Your games and progress live in a SQLite da
   played work offline; Settings can switch it off.
 - **Spar**: play positions from your own games (or the start, or any FEN) out against Stockfish at about your
   rating, adjustable from -200 to +300, then review your moves at full strength.
+- **Calculate**: read a line of moves without seeing them played, then answer about the position at the end
+  (the best move, whether a piece can be won, where a piece went). Lines get longer as you get them right.
 - **Puzzle library**: about 19k Lichess puzzles (optional download), with your own puzzle rating.
 - **Insights and Progress**: trends, accuracy by phase, clock use, openings, endgames (results by type of endgame,
   how often you convert winning endgames and save losing ones, your endgame training) and your top weaknesses

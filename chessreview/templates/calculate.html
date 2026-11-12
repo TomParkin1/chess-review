@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Calculate · Chess Review{% endblock %}
+{% block content %}
+<div class="layout game-layout">
+  <div class="board-col">
+    <div class="board-wrap"><div id="board" class="board"></div></div>
+  </div>
+
+  <div class="side-col">
+    <div class="report-panel">
+      <div class="report-head">
+        <div class="review-head"><h1>Calculate</h1><span class="chip" id="depth-chip"></span></div>
+        <p class="muted small" id="calc-intro">Read the moves without them being played, picture the position at the end,
+          and answer. Two right in a row and the lines get longer; a miss and they get shorter.</p>
+      </div>
+      <div class="report-body">
+        <div class="session-bar"><span class="muted small" id="counter"></span><span class="muted small" id="score"></span></div>
+        <div id="calc-empty" hidden></div>
+        <div id="calc-run">
+          <p class="muted small" id="q-source"></p>
+          <div class="calc-line" id="q-line" aria-live="polite"></div>
+          <div class="prompt" id="q-prompt"></div>
+          <div id="answer-where" hidden>
+            <p class="muted small">Click the square on the board, or type it.</p>
+            <div class="fen-row"><input type="text" id="where-input" maxlength="2" autocomplete="off" spellcheck="false"
+              placeholder="e4"><button class="btn primary" id="where-btn">Answer</button></div>
+          </div>
+          <div id="answer-best" hidden>
+            <p class="muted small">Type the move (Nf3, exd5, O-O or e2e4): it's played in the position after the line.</p>
+            <div class="fen-row"><input type="text" id="best-input" autocomplete="off" spellcheck="false" placeholder="Nf3">
+              <button class="btn primary" id="best-btn">Answer</button></div>
+          </div>
+          <div class="actions" id="answer-capture" hidden>
+            <button class="btn primary" id="yes-btn">Yes</button>
+            <button class="btn" id="no-btn">No</button>
+          </div>
+          <div class="feedback" id="feedback" role="status" aria-live="polite" hidden></div>
+          <div class="actions" id="after" hidden>
+            <button class="btn primary" id="next-btn">Next ▶</button>
+            <button class="btn" id="toggle-btn">Final position</button>
+          </div>
+        </div>
+        <div id="calc-done" hidden></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='calculate.js') }}"></script>{% endblock %}

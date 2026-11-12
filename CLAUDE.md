@@ -81,6 +81,18 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   streak (`srs.TRAINING_SOURCES`); Delete all clears it. `/api/spar/review` {id, from}: my moves judged at full
   strength (`live.analyse` + `classify.judge`, current thresholds), `REVIEW_CHUNK` plies per request; click ->
   analysis board.
+- Calculation trainer (E6, F10): `chessreview/calc.py` + `/calculate` (`static/calculate.js`, sidebar "Calculate").
+  A position, a line in SAN (not played on the board: `makeBoard(..., keyboard: false)`), a question about the end:
+  `best` (Lichess puzzles only, solver to move: odd depths from the stored FEN, even ones after the opponent's first
+  move; typed SAN/UCI judged on the final position, any mate counts), `capture` (an attacked piece, yes/no by
+  `explain.exchange`, not in check; subject picked for ~50/50), `where` (a N/B/R whose twin also moved: SAN alone
+  doesn't say which went where). Sources: puzzles near my puzzle rating and the moves actually played in my games
+  (never an engine line from a card position: it would spoil the card). Depth `LEVELS` 3-6 plies (meta `calc_level`,
+  `calc_run`): two new questions right at the current depth -> deeper, a miss -> shallower; reviews don't move it.
+  `calc_attempts` (migration 12) keeps every answer (streak, Delete all clears it); puzzles used there are left out
+  of `library.pick` and kept by `library.fetch`; misses become cards kind 'calc' (key `source~plies~kind~subject`
+  rebuilds the question; `due_question` skips ones whose puzzle is gone) and come back first. Today: focus row
+  `calc` flag (weakness kind in `coach.CALC_KINDS`, `PLAN_VERSION` 3) -> link "/calculate?from=today", not counted.
 - Clock rules (Finish M5, F7) live in `report.py`: shares of the estimated game duration `game_budget_ms` = base +
   40 × increment (none for daily/unknown). Time trouble < 10% (`is_low_clock`; 60 s at 10+0, 18 s at 3+0, 130 s at
   15+10), a very fast move < 1/120 (5 s at 10+0), buckets `CLOCK_BUCKETS` 30/10/3%. `insights.in_time_trouble(clocks,
@@ -354,6 +366,7 @@ Openings are practised on Chessly: Today drops opening lines (the /openings page
 3. [x] E3 Lichess tablebase API (<= 7 pieces) for endgame play: perfect defence, exact verdicts, cached
 4. [x] E4 Endgame insights (conversion rate, results by endgame type, saves, drill progress, "Endgames" weakness)
 5. [x] E5 Sparring vs a rating-limited Stockfish from my positions (F9)
-6. [ ] E6 Calculation trainer (F10)
+6. [x] E6 Calculation trainer (F10)
+The E roadmap is complete.
 Still deferred: the deeper re-check of card positions (M3); idempotent old migrations (rule: never edit old ones;
 new migrations use `conn.execute` per statement, not `executescript`, so they stay atomic).

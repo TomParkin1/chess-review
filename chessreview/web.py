@@ -15,7 +15,7 @@ import chess
 from flask import Flask, Response, g, jsonify, render_template, request
 from werkzeug.exceptions import BadRequest, HTTPException
 
-from . import (backup, chesscom, coach, convert, db, insights, level, library, progress, report, repertoire,
+from . import (backup, calc, chesscom, coach, convert, db, insights, level, library, progress, report, repertoire,
                session, spar, srs, tablebase)
 from .classify import (ADAPTIVE_BANDS, MODE_KEY, REBUILD, Eval, adaptive_enabled, capture_square, judge, refresh,
                        thresholds_for)
@@ -714,6 +714,33 @@ def create_app(cfg: Config | None = None) -> Flask:
             return jsonify(error="unknown position or result"), 400
         srs.record_key(conn(), task.kind, task.card_key, data["result"])
         return jsonify(ok=True)
+
+    # ------------------------------------------------------------ calculation trainer (E6)
+
+    @app.get("/calculate")
+    def calculate_page():
+        return render_template("calculate.html")
+
+    @app.get("/api/calc")
+    def calc_overview():
+        return jsonify(calc.overview(conn()))
+
+    @app.get("/api/calc/next")
+    def calc_next():
+        """The next question (a due card first), not one of ?exclude=key,key (this session's)."""
+        exclude = {k for k in request.args.get("exclude", "").split(",") if k}
+        q, due = calc.next_question(conn(), exclude)
+        return jsonify(question=q.public() if q else None, due=due)
+
+    @app.post("/api/calc/answer")
+    def calc_answer():
+        data = _body()
+        if not isinstance(data.get("key"), str) or not isinstance(data.get("answer"), str):
+            return jsonify(error="key and answer are required"), 400
+        result = calc.answer(conn(), data["key"], data["answer"])
+        if result is None:
+            return jsonify(error="no such question"), 404
+        return jsonify(result)
 
     # ------------------------------------------------------------ sparring (E5)
 

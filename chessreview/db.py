@@ -294,8 +294,18 @@ def _migrate_11(conn: sqlite3.Connection) -> None:
                         result TEXT NOT NULL, reason TEXT, at TEXT DEFAULT CURRENT_TIMESTAMP)""")
 
 
+def _migrate_12(conn: sqlite3.Connection) -> None:
+    """Calculation trainer attempts (E6): every answer (streak, depth stats), and the puzzles used
+    (left out of the puzzle page, kept by a library refresh)."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS calc_attempts (
+                        id INTEGER PRIMARY KEY, key TEXT NOT NULL, source TEXT NOT NULL, puzzle_id TEXT,
+                        kind TEXT NOT NULL, plies INTEGER NOT NULL, result TEXT NOT NULL,
+                        at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_calc_attempts_key ON calc_attempts(key)")
+
+
 MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5, _migrate_6, _migrate_7,
-              _migrate_8, _migrate_9, _migrate_10, _migrate_11]   # index i upgrades user_version i -> i + 1
+              _migrate_8, _migrate_9, _migrate_10, _migrate_11, _migrate_12]   # index i upgrades user_version i -> i + 1
 
 
 _schema_lock = threading.Lock()     # requests opening a new database at once must not both set it up
@@ -380,6 +390,7 @@ def delete_all_games(conn: sqlite3.Connection) -> int:
         conn.execute("DELETE FROM self_reviews")
         conn.execute("DELETE FROM training_log")
         conn.execute("DELETE FROM spar_games")
+        conn.execute("DELETE FROM calc_attempts")
         conn.execute("DELETE FROM mistakes")
         conn.execute("DELETE FROM positions")
         conn.execute("DELETE FROM games")

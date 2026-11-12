@@ -55,7 +55,7 @@ BUDGET_KEY = "today_budget"
 BUDGETS = (10, 20, 30)          # minutes offered on the Today page
 FOCUS_JUDGEMENTS = ("mistake", "blunder")
 
-PLAN_VERSION = 2                # 2: no opening block, endgame blocks (E2); older plans are rebuilt
+PLAN_VERSION = 3                # 2: no opening block, endgame blocks (E2); 3: focus `calc` link (E6)
 ENDGAME_SHARE = 0.30            # endgames take this share of the budget
 ENDGAME_SECONDS = 120           # one essential endgame
 CONVERT_SECONDS = 180           # one won position from my games
@@ -64,6 +64,9 @@ MIN_GAPS = 30                   # attempts needed before my own pace replaces co
 PACE_RANGE = (20.0, 180.0)      # seconds per puzzle, whatever the data says
 
 
+# Weaknesses (mistake kinds) that calculation trains: Today's focus row then links to /calculate (E6),
+# an extra outside the plan (not counted, no budget).
+CALC_KINDS = ("missed_tactic", "fork", "discovered_attack", "missed_mate", "missed_opportunity")
 BLOCK_ORDER = ["reviews", "convert", "endgame", "real", "focus"]
 ELSEWHERE = ("convert",)        # blocks played on their own page
 
@@ -236,7 +239,8 @@ def build_plan(conn: sqlite3.Connection, cfg: Config, on: date, spent: float = 0
         {"id": "real", "title": "Real-game positions", "items": real,
          "subtitle": "Spot the threat, then play your move. Not every position hides a mistake."},
         {"id": "focus", "title": f"Focus: {weakness['title']}" if weakness else "Focus", "items": focus,
-         "subtitle": weakness["detail"] if weakness else "", "train": weakness["train"] if weakness else None},
+         "subtitle": weakness["detail"] if weakness else "", "train": weakness["train"] if weakness else None,
+         "calc": bool(weakness) and (weakness["train"] or {}).get("kind") in CALC_KINDS},
     ]
     servable = _servable(conn, [i for b in blocks for i in b["items"]])
     for b in blocks:

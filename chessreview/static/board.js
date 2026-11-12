@@ -24,8 +24,9 @@ export function saveSettings(changes) {
 // ------------------------------------------------------------ board
 
 // Pass viewOnly: false for boards that will ever take moves: chessground only binds
-// its input listeners when the board is created.
-export function makeBoard(el, config = {}) {
+// its input listeners when the board is created. `keyboard: false` leaves out the move box
+// (a board that is only clicked, like the calculation trainer's).
+export function makeBoard(el, { keyboard = true, ...config } = {}) {
   const cg = Chessground(el, {
     viewOnly: true,
     coordinates: getSettings().coords,
@@ -35,7 +36,7 @@ export function makeBoard(el, config = {}) {
     ...config,
   });
   keepRealBounds(cg, el);
-  if (config.viewOnly === false) addKeyboardMoves(cg, el);
+  if (config.viewOnly === false && keyboard) addKeyboardMoves(cg, el);
   return cg;
 }
 

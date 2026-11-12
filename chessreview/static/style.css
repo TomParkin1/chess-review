@@ -528,6 +528,8 @@ a.chip { text-decoration: none; }
   background: var(--panel-2); color: var(--text); border: 0; border-radius: 8px; padding: 10px 12px; font: inherit; cursor: pointer; }
 .convert-row:hover:not(:disabled) { background: var(--panel-3); }
 .convert-row.locked { opacity: .5; cursor: not-allowed; }
+/* Calculate (E6) */
+.calc-line { font-size: 20px; font-weight: 700; line-height: 1.5; margin: 6px 0 12px; font-variant-numeric: tabular-nums; }
 /* Spar (E5) */
 .spar-level { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 40%); align-items: center; gap: 12px;
   margin-bottom: 8px; }

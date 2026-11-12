@@ -149,9 +149,12 @@ function renderBlock(b) {
       : el('button', { class: 'btn', onclick: () => startBlock(b) }, b.finished ? 'Continue' : 'Start');
   const count = b.id === 'convert' ? (b.done ? '1 / 1' : '0 / 1')
     : `${b.finished} / ${b.count}`;
+  // E6: a calculation weakness also gets a link to the trainer (an extra: not in the plan's count).
+  const calc = b.calc ? el('div', { class: 'small' }, el('a', { href: '/calculate?from=today' },
+    'Also train it by calculating lines →')) : '';
   return el('li', { class: `block-row ${b.done ? 'done' : ''}` },
     el('span', { class: 'block-icon' }, status),
-    el('div', { class: 'block-text' }, el('strong', {}, b.title), el('div', { class: 'muted small' }, b.subtitle || '')),
+    el('div', { class: 'block-text' }, el('strong', {}, b.title), el('div', { class: 'muted small' }, b.subtitle || ''), calc),
     el('span', { class: 'muted small block-count' }, count),
     action);
 }
