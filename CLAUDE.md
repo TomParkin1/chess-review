@@ -278,7 +278,7 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   is icons-only at <= 1100 px. Grids holding names use `minmax(0, 1fr)` so text ellipsizes instead of being clipped.
   Browser check: scratchpad `layout.mjs` (no sideways scroll, no clipped box, 1024/1280/1440/1920).
 - UI preferences: review is always interactive (puzzle first); board sized from window height for desktop; chess.com
-  "Neo" pieces (hotlinked from images.chesscomfiles.com) on a brown/cream board (CSS in `style.css`).
+  Lichess "cburnett" pieces (from chessground) on a brown/cream board (CSS in `style.css`).
 - `static/board.js`: makeBoard + settings (localStorage, applied via `html[data-board|data-pieces]`), square badges,
   promotion picker, WebAudio sounds. `static/icons.js`: our own SVG mark badges (`MARKS`, `markIcon`).
   `keepRealBounds` (Finish M5, B17): chessground caches the board's rect; measured while hidden (0×0) every arrow is

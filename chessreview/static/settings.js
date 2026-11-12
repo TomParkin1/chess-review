@@ -10,14 +10,11 @@ const post = (url, body) => api(url, { method: 'POST', headers: { 'Content-Type'
 function render() {
   const s = getSettings();
   document.querySelectorAll('[data-board]').forEach(b => b.classList.toggle('selected', b.dataset.board === s.board));
-  document.querySelectorAll('[data-pieces]').forEach(b => b.classList.toggle('selected', b.dataset.pieces === s.pieces));
   document.querySelectorAll('[data-setting]').forEach(c => { c.checked = Boolean(s[c.dataset.setting]); });
 }
 
 document.querySelectorAll('button[data-board]').forEach(b =>
   b.addEventListener('click', () => { saveSettings({ board: b.dataset.board }); render(); }));
-document.querySelectorAll('button[data-pieces]').forEach(b =>
-  b.addEventListener('click', () => { saveSettings({ pieces: b.dataset.pieces }); render(); }));
 document.querySelectorAll('[data-setting]').forEach(c =>
   c.addEventListener('change', () => {
     saveSettings({ [c.dataset.setting]: c.checked });

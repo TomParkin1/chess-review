@@ -7,7 +7,7 @@ import { markIcon } from './icons.js';
 // ------------------------------------------------------------ settings
 
 const SETTINGS_KEY = 'chess-review-settings';
-const DEFAULTS = { board: 'brown', pieces: 'neo', sound: true, coords: true, badges: true };
+const DEFAULTS = { board: 'brown', sound: true, coords: true, badges: true };
 
 export function getSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { return { ...DEFAULTS }; }
@@ -17,7 +17,6 @@ export function saveSettings(changes) {
   const next = { ...getSettings(), ...changes };
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch { /* unavailable */ }
   document.documentElement.dataset.board = next.board;
-  document.documentElement.dataset.pieces = next.pieces;
   return next;
 }
 
