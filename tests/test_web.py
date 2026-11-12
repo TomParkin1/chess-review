@@ -283,6 +283,7 @@ def test_threshold_mode_switch_reclassifies(client):
 def test_requests_keep_working_while_everything_is_reclassified(client, monkeypatch):
     """F17: a full reclassification runs in the background; pages keep reading the stored rows."""
     import threading
+
     from chessreview import classify
     c, _app = client
     with open(SAMPLE, "rb") as f:
@@ -561,7 +562,9 @@ def test_today_budget_and_no_opening_lines(client):
 def test_bad_input_is_a_client_error_not_a_server_error(client, tmp_path):
     """Each of these used to raise inside the route (a 500 with a stack trace in the terminal)."""
     c, _app = client
-    post = lambda url, body: c.post(url, data=json.dumps(body), content_type="application/json")
+    def post(url, body):
+        return c.post(url, data=json.dumps(body), content_type="application/json")
+
     cases = [
         (c.get("/api/convert/task?key=convert/a:b"), 404),
         (c.get("/api/convert/task?key=convert/1:2:3"), 404),

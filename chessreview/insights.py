@@ -287,7 +287,9 @@ def endgames(conn: sqlite3.Connection, games: list[sqlite3.Row], by_game: dict) 
 def drill_progress(conn: sqlite3.Connection) -> dict:
     """My endgame training: essential endgames, won positions from my games, Lichess endgame
     puzzles (first tries) and my own endgame mistakes in spaced repetition."""
-    from . import convert       # convert -> level -> ...: imported late, only Insights needs it
+    from . import (
+        convert,  # convert -> level -> ...: imported late, only Insights needs it
+    )
     essentials = convert.endgame_overview(conn)
     positions = convert.convert_overview(conn)
     first_tries = [r["result"] for r in conn.execute("""
@@ -298,7 +300,9 @@ def drill_progress(conn: sqlite3.Connection) -> dict:
                                    SUM(c.due_on IS NOT NULL OR c.mastered_on IS NOT NULL) AS studied
                             FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
                             WHERE c.kind = 'mistake' AND m.phase = 'endgame'""").fetchone()
-    count = lambda rows, *states: sum(r["status"] in states for r in rows)
+    def count(rows: list, *states: str) -> int:
+        return sum(r["status"] in states for r in rows)
+
     return {
         "essentials": {"total": len(essentials), "solved": count(essentials, "solved", "mastered"),
                        "mastered": count(essentials, "mastered"), "unlocked": sum(e["unlocked"] for e in essentials)},

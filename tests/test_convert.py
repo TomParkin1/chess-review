@@ -1,5 +1,4 @@
 """v3 milestone 3: converting won positions and essential endgames (convert.py)."""
-from dataclasses import replace
 
 import chess
 import pytest

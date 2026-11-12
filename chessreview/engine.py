@@ -13,6 +13,7 @@ AnalysisJob runs a pool of worker threads, each owning one Stockfish process, an
 exposes progress counters that the CLI and the web app poll.
 """
 
+import contextlib
 import queue
 import sqlite3
 import threading
@@ -383,7 +384,5 @@ class AnalysisJob:
 
 
 def _quit_quietly(engine: chess.engine.SimpleEngine) -> None:
-    try:
+    with contextlib.suppress(Exception):
         engine.quit()
-    except Exception:
-        pass

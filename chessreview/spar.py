@@ -23,6 +23,7 @@ current thresholds), chunk by chunk.
 
 import sqlite3
 from dataclasses import dataclass
+from itertools import pairwise
 
 import chess
 import chess.engine
@@ -80,7 +81,7 @@ def _share_for(elo: int, table: list[tuple[float, int]]) -> float:
     """The swap share that measured `elo`, interpolated (the table falls as the share rises)."""
     if elo >= table[0][1]:
         return table[0][0]
-    for (s1, e1), (s2, e2) in zip(table, table[1:]):
+    for (s1, e1), (s2, e2) in pairwise(table):
         if e2 <= elo <= e1:
             return s1 + (s2 - s1) * (e1 - elo) / (e1 - e2)
     return table[-1][0]

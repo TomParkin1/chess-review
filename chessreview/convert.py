@@ -24,13 +24,13 @@ Tasks are keyed "convert/<game_id>:<ply>" or "endgame/<id>"; SRS cards use kind 
 import sqlite3
 import tomllib
 from dataclasses import asdict, dataclass
+from itertools import pairwise
 from pathlib import Path
 
 import chess
 
 from . import level, srs
 from .classify import Eval
-from .config import Config
 
 ENDGAMES_PATH = Path(__file__).parent / "data" / "endgames.toml"
 LEVELS = {1: "Beginner", 2: "Intermediate", 3: "Advanced"}
@@ -147,7 +147,7 @@ def convert_positions(conn: sqlite3.Connection) -> list[dict]:
         by_game.setdefault(r["game_id"], []).append(r)
     out = []
     for game_rows in by_game.values():
-        for here, nxt in zip(game_rows, game_rows[1:]):
+        for here, nxt in pairwise(game_rows):
             if (here["win_before"] or -1) >= winning and (nxt["win_before"] or -1) >= winning:
                 out.append(_convert_entry(here))
                 break

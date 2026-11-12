@@ -4,6 +4,7 @@ Pages render a small HTML shell; the data comes from the JSON API below and is
 drawn by the scripts in static/.
 """
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -15,16 +16,41 @@ import chess
 from flask import Flask, Response, g, jsonify, render_template, request
 from werkzeug.exceptions import BadRequest, HTTPException
 
-from . import (backup, calc, chesscom, coach, convert, db, insights, level, library, progress, report, repertoire,
-               session, spar, srs, tablebase)
-from .classify import (ADAPTIVE_BANDS, MODE_KEY, REBUILD, Eval, adaptive_enabled, capture_square, judge, refresh,
-                       thresholds_for)
+from . import (
+    backup,
+    calc,
+    chesscom,
+    coach,
+    convert,
+    db,
+    insights,
+    level,
+    library,
+    progress,
+    repertoire,
+    report,
+    session,
+    spar,
+    srs,
+    tablebase,
+)
+from .classify import (
+    ADAPTIVE_BANDS,
+    MODE_KEY,
+    REBUILD,
+    Eval,
+    adaptive_enabled,
+    capture_square,
+    judge,
+    refresh,
+    thresholds_for,
+)
 from .config import PROJECT_ROOT, Config, effective_workers, load_config
 from .engine import AnalysisJob, count_pending
 from .explain import ATTACKING_KINDS, MoveContext, explain_best, hint, san_line
 from .live import LiveEngine, PositionAnalysis
-from .threats import gain_of_move, threat_of, training_threat
 from .pgn_import import ImportStats, import_pgn_text
+from .threats import gain_of_move, threat_of, training_threat
 
 JUDGEMENT_ORDER = ["good", "inaccuracy", "mistake", "blunder"]
 REVIEW_RESULTS = {"solved", "solved_with_help", "failed", "skipped"}
@@ -177,10 +203,8 @@ def create_app(cfg: Config | None = None) -> Flask:
         c = conn()
         out = _account(c)
         if request.args.get("archives") and out["username"]:
-            try:
+            with contextlib.suppress(LookupError, OSError):    # the summary is optional
                 out |= _archive_summary(chesscom.archives_of(out["username"], fetch=chesscom.fetch_json))
-            except (LookupError, OSError):
-                pass
         return jsonify(out)
 
     @app.post("/api/account")
@@ -343,9 +367,9 @@ def create_app(cfg: Config | None = None) -> Flask:
         else:
             out_positions = _unanalysed_positions(row)
         # Time used by the move played from each position (ply i -> spent[i]).
-        for p, spent in zip(out_positions, report.time_spent(row["clocks_ms"], row["time_control"])):
+        for p, spent in zip(out_positions, report.time_spent(row["clocks_ms"], row["time_control"]), strict=False):
             p["spent_ms"] = spent
-        game_json = {k: row[k] for k in row.keys() if k not in ("pgn", "moves_uci", "clocks_ms")}
+        game_json = {k: v for k, v in dict(row).items() if k not in ("pgn", "moves_uci", "clocks_ms")}
         return jsonify(game=game_json, positions=out_positions)
 
     # ------------------------------------------------------------ review
@@ -440,7 +464,9 @@ def create_app(cfg: Config | None = None) -> Flask:
         adaptive = adaptive_enabled(c, cfg)
         th = thresholds_for(rating, cfg, True)
         std = thresholds_for(None, cfg, False)
-        pct = lambda v: round(v * 50, 1)   # -1..1 win-chance drop -> win% points
+        def pct(v: float) -> float:
+            return round(v * 50, 1)   # -1..1 win-chance drop -> win% points
+
         mine = c.execute("""SELECT SUM(judgement = 'inaccuracy') AS i, SUM(judgement = 'mistake') AS m,
                                    SUM(judgement = 'blunder') AS b FROM mistakes WHERE is_mine = 1""").fetchone()
         return jsonify(adaptive=adaptive, rating=rating, band=th.band,
@@ -1071,15 +1097,14 @@ def create_app(cfg: Config | None = None) -> Flask:
         before = prev_capture = None
         c = conn()
         thresholds = level.current_thresholds(c, cfg)   # tries are judged at my level *now*
-        if data.get("game_id") is not None:
-            if _int(data, "step", 0) == 0 and data.get("ply") is not None:
-                pos = c.execute("SELECT * FROM positions WHERE game_id = ? AND ply = ?",
-                                (_int(data, "game_id"), _int(data, "ply"))).fetchone()
-                if pos is not None and pos["fen"] == fen:
-                    before = _stored_analysis(pos)
-                    prev = c.execute("SELECT fen, move_uci FROM positions WHERE game_id = ? AND ply = ?",
-                                     (data["game_id"], pos["ply"] - 1)).fetchone()
-                    prev_capture = _prev_capture(prev["fen"], prev["move_uci"]) if prev else None
+        if data.get("game_id") is not None and _int(data, "step", 0) == 0 and data.get("ply") is not None:
+            pos = c.execute("SELECT * FROM positions WHERE game_id = ? AND ply = ?",
+                            (_int(data, "game_id"), _int(data, "ply"))).fetchone()
+            if pos is not None and pos["fen"] == fen:
+                before = _stored_analysis(pos)
+                prev = c.execute("SELECT fen, move_uci FROM positions WHERE game_id = ? AND ply = ?",
+                                 (data["game_id"], pos["ply"] - 1)).fetchone()
+                prev_capture = _prev_capture(prev["fen"], prev["move_uci"]) if prev else None
         try:
             result = live.judge(fen, uci, before, thresholds, prev_capture)
         except ValueError as exc:

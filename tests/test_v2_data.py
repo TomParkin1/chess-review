@@ -12,7 +12,7 @@ import pytest
 
 from chessreview import chesscom, db, report
 from chessreview.config import load_config
-from chessreview.pgn_import import ImportStats, import_game, import_pgn_text
+from chessreview.pgn_import import import_pgn_text
 
 DATA = Path(__file__).parent / "data"
 MONTH = json.loads((DATA / "chesscom_2026_10.json").read_text())

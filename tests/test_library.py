@@ -1,10 +1,10 @@
 """v3 milestone 4: the puzzle library (library.py) and its place in Today."""
 import io
+from compression import zstd
 from datetime import date, timedelta
 
 import chess
 import pytest
-from compression import zstd
 
 from chessreview import backup, coach, db, library
 from chessreview.config import load_config

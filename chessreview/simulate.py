@@ -14,10 +14,10 @@ import random
 import sqlite3
 import tempfile
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
-from . import coach, convert, db, srs
+from . import coach, db, srs
 from .config import Config
 
 # (clean solve, solved with help) per kind of attempt when my history is too thin to tell; the
@@ -156,7 +156,7 @@ class _Clock:
     in UTC like CURRENT_TIMESTAMP, so they fall on the right training day)."""
 
     def __init__(self, on: date, pace: float):
-        self.at = datetime.combine(on, time(12)).astimezone(timezone.utc)
+        self.at = datetime.combine(on, time(12)).astimezone(UTC)
         self.pace = pace
 
     def tick(self) -> str:

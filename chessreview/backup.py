@@ -241,7 +241,7 @@ class DailyBackups:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True, name="daily-backup")
 
-    def start(self) -> "DailyBackups":
+    def start(self) -> DailyBackups:
         self._thread.start()
         return self
 

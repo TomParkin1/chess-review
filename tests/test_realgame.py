@@ -9,7 +9,13 @@ import pytest
 from chessreview import db, level, srs
 from chessreview.classify import Eval, thresholds_for
 from chessreview.config import load_config
-from chessreview.engine import analyse_position, analyse_threat, my_move_count, open_engine, threat_board
+from chessreview.engine import (
+    analyse_position,
+    analyse_threat,
+    my_move_count,
+    open_engine,
+    threat_board,
+)
 from chessreview.threats import threat_of
 
 DAY = date(2026, 10, 16)

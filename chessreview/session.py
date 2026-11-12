@@ -178,8 +178,8 @@ def summary(conn: sqlite3.Connection, cfg: Config, batch_ids: list[int]) -> dict
         trouble += insights.in_time_trouble(m["clocks_ms"], m["time_control"], m["ply"])
 
     worst = None
-    scored = [(a, g) for g, a in zip(games, [g["accuracy_white"] if g["my_color"] == "white"
-                                              else g["accuracy_black"] for g in games]) if a is not None]
+    scored = [(a, g) for g in games
+              if (a := g["accuracy_white"] if g["my_color"] == "white" else g["accuracy_black"]) is not None]
     if scored:
         acc, g = min(scored, key=lambda t: t[0])
         worst = {"id": g["id"], "opponent": g["black"] if g["my_color"] == "white" else g["white"],

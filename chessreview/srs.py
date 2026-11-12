@@ -217,7 +217,7 @@ def calm_positions(conn: sqlite3.Connection, cfg: Config, count: int, seed: str,
     if count <= 0:
         return []
     th = current_thresholds(conn, cfg)
-    rows = conn.execute(f"""
+    rows = conn.execute("""
         SELECT m.game_id, m.ply, g.my_color, p.fen, p.score_cp, p.score_mate, p.threat_cp, p.threat_mate,
                p.threat_uci, p.threat_pv, p0.fen AS prev_fen, p0.move_uci AS prev_move_uci
         FROM mistakes m JOIN positions p ON p.game_id = m.game_id AND p.ply = m.ply
