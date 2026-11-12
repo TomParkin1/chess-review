@@ -328,7 +328,7 @@ def new_question(conn: sqlite3.Connection, exclude: set[str] = frozenset(), rng:
         kind = KINDS[(asked + i) % len(KINDS)]
         sources = _library_sources(conn, plies, kind == "best", rng)
         if kind != "best":
-            sources = [s for pair in zip(sources, _game_sources(conn, rng)) for s in pair] or \
+            sources = [s for pair in zip(sources, _game_sources(conn, rng), strict=False) for s in pair] or \
                 sources or _game_sources(conn, rng)
         for source in sources:
             q = build(conn, source, plies, kind, rng=rng)

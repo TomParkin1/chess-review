@@ -20,6 +20,7 @@ import sqlite3
 import threading
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from itertools import pairwise
 
 import chess
 
@@ -44,7 +45,7 @@ class Eval:
     mate: int | None   # >0: this side mates in N; <0: this side gets mated
 
     @classmethod
-    def from_row(cls, row: sqlite3.Row, color: chess.Color) -> "Eval":
+    def from_row(cls, row: sqlite3.Row, color: chess.Color) -> Eval:
         """Convert a stored (White point of view) eval to `color`'s point of view."""
         sign = 1 if color == chess.WHITE else -1
         cp = row["score_cp"]
@@ -167,7 +168,7 @@ def judge(before: Eval, after: Eval, cfg: Config, th: Thresholds | None = None) 
         value, limits = cp_loss, (c.cp_blunder * f, c.cp_mistake * f, c.cp_inaccuracy * f)
     else:
         value, limits = drop, (th.blunder, th.mistake, th.inaccuracy)
-    for name, limit in zip(("blunder", "mistake", "inaccuracy"), limits):
+    for name, limit in zip(("blunder", "mistake", "inaccuracy"), limits, strict=True):
         if value >= limit:
             return name, drop, cp_loss
     return "good", drop, cp_loss
@@ -196,7 +197,7 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config, adaptive:
     previous_judgement = None
     previous_move = previous_board = None
     first_turn = chess.Board(positions[0]["fen"]).turn if positions else chess.WHITE
-    for before_row, after_row in zip(positions, positions[1:]):
+    for before_row, after_row in pairwise(positions):
         if before_row["move_uci"] is None:
             break
         board = chess.Board(before_row["fen"])

@@ -1,7 +1,6 @@
 """v3 milestone 2: the Today workout (coach.py) and the progress report (progress.py)."""
 import json
 from dataclasses import replace
-from datetime import date
 
 import pytest
 

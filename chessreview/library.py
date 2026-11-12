@@ -167,7 +167,7 @@ def fetch(conn: sqlite3.Connection, progress: FetchProgress | None = None, url: 
           opener=urllib.request.urlopen) -> int:
     """Download and sample the puzzle database, replacing the stored library (puzzles I have
     tried are kept, see below). Returns the number of puzzles in the new sample."""
-    from compression import zstd   # stdlib since Python 3.14
+    from compression import zstd  # stdlib since Python 3.14
 
     progress = progress or FetchProgress()
     progress.state, progress.started_at = "running", time.time()

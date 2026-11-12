@@ -48,7 +48,7 @@ Everything runs on your own machine. Your games and progress live in a SQLite da
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e ".[dev]"
 ```
 
 Check `config.toml`. If Stockfish isn't at `/opt/homebrew/bin/stockfish`, set `[engine] path`.

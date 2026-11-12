@@ -45,6 +45,7 @@ endgame items against the endgame share too), so no progress is lost.
 import json
 import sqlite3
 from datetime import date, datetime
+from itertools import pairwise
 from statistics import mean
 
 from . import convert, db, insights, library, session, srs
@@ -129,7 +130,7 @@ def attempt_seconds(conn: sqlite3.Connection, cfg: Config) -> float:
     """My average time between two attempts in one sitting (positions and library puzzles, my last
     200), or coach.seconds_per_puzzle until there are MIN_GAPS such gaps."""
     stamps = sorted(datetime.fromisoformat(at) for _, at, _ in _recent_attempts(conn))
-    gaps = [g for g in ((b - a).total_seconds() for a, b in zip(stamps, stamps[1:])) if 0 < g <= SITTING_GAP]
+    gaps = [g for g in ((b - a).total_seconds() for a, b in pairwise(stamps)) if 0 < g <= SITTING_GAP]
     return mean(gaps) if len(gaps) >= MIN_GAPS else cfg.coach.seconds_per_puzzle
 
 

@@ -3,10 +3,10 @@ before anything that rewrites or deletes data."""
 import io
 import shutil
 import sqlite3
+from compression import zstd
 from datetime import datetime, timedelta
 
 import pytest
-from compression import zstd
 
 from chessreview import backup, classify, db, library
 from chessreview.config import BackupConfig, load_config
@@ -125,7 +125,8 @@ def test_restore_refuses_files_that_are_not_intact_chess_review_databases(conn, 
 
 def test_copies_before_destructive_actions(conn, path, monkeypatch):
     folder = backup.folder_for(path)
-    kinds = lambda: {b.kind for b in backup.files(folder)}
+    def kinds() -> set[str]:
+        return {b.kind for b in backup.files(folder)}
 
     conn.execute("""INSERT INTO mistakes (game_id, ply, judgement, is_mine) VALUES (1, 0, 'good', 1)""")
     conn.commit()
@@ -139,7 +140,9 @@ def test_copies_before_destructive_actions(conn, path, monkeypatch):
 
     data = zstd.compress(b"PuzzleId,FEN,Moves,Rating,RatingDeviation,Popularity,NbPlays,Themes,GameUrl\n"
                          b"aaaaa,8/8/8/8/8/8/8/K6k w - - 0 1,a1a2 h1h2,1000,70,95,5000,fork,u\n")
-    opener = lambda req, timeout: FakeResponse(data)
+    def opener(req, timeout):
+        return FakeResponse(data)
+
     library.fetch(conn, opener=opener)                                # the first download: nothing to lose
     assert "before-library" not in kinds()
     library.fetch(conn, opener=opener)                                # a refresh

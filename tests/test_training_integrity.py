@@ -3,7 +3,7 @@ load it keeps (F4), the streak (B9), the 04:00 training day (B13) and sessions t
 Today (B5). B12 (double clicks) is front-end only: see the browser scenario."""
 import json
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -375,7 +375,7 @@ def test_next_endgame_order(conn):
 # ------------------------------------------------------------ B9: the streak counts all training
 
 def local_noon(day: date) -> str:
-    return datetime.combine(day, datetime.min.time().replace(hour=12)).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.combine(day, datetime.min.time().replace(hour=12)).astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def test_the_streak_counts_every_kind_of_training(conn):
@@ -396,7 +396,7 @@ def test_the_training_day_runs_from_four_to_four(conn, cfg):
     assert srs.today(datetime(2026, 10, 21, 23, 55)) == DAY
     assert srs.today(datetime(2026, 10, 22, 0, 30)) == DAY            # still the evening's workout
     assert srs.today(datetime(2026, 10, 22, 4, 0)) == DAY + timedelta(days=1)
-    late = datetime(2026, 10, 22, 0, 30).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    late = datetime(2026, 10, 22, 0, 30).astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute("INSERT INTO review_results (game_id, ply, result, at) VALUES (1, 2, 'solved', ?)", (late,))
     conn.commit()
     assert (1, 2) in coach.attempted_today(conn, DAY)                  # counts for the plan it belongs to

@@ -8,7 +8,6 @@ originally detected by the chess.com Link header, or by a hash of the
 players, date and moves when there is no Link.
 """
 
-import hashlib
 import io
 import re
 import sqlite3
@@ -37,7 +36,7 @@ class ImportStats:
     def skip(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
 
-    def merge(self, other: "ImportStats") -> None:
+    def merge(self, other: ImportStats) -> None:
         self.files += other.files
         self.games_seen += other.games_seen
         self.imported += other.imported

@@ -374,7 +374,7 @@ def restore(conn: sqlite3.Connection, source: Path) -> Path | None:
     return before
 
 
-def username(conn: sqlite3.Connection, cfg: "Config") -> str:
+def username(conn: sqlite3.Connection, cfg: Config) -> str:
     """My chess.com username: set in the app (Settings / first run), else from config.toml."""
     return get_meta(conn, USERNAME_KEY) or cfg.player.username
 

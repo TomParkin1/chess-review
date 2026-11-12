@@ -12,7 +12,13 @@ import pytest
 
 from chessreview.classify import Eval, judge, keeps_long_mate, thresholds_for
 from chessreview.config import load_config
-from chessreview.explain import LineResult, MoveContext, explain, explain_best, play_line
+from chessreview.explain import (
+    LineResult,
+    MoveContext,
+    explain,
+    explain_best,
+    play_line,
+)
 
 
 class Row(NamedTuple):

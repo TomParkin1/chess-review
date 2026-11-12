@@ -56,8 +56,8 @@ class MoveContext:
     best: chess.Move | None            # engine's best move in that position
     best_line: list[chess.Move]        # engine line starting with `best`
     reply_line: list[chess.Move]       # engine line for the opponent after my move
-    before: "Eval"                     # eval before my move, my point of view
-    after: "Eval"                      # eval after my move, my point of view
+    before: Eval                       # eval before my move, my point of view
+    after: Eval                        # eval after my move, my point of view
     prev_capture: chess.Square | None = None   # where the opponent's last move captured (None: it didn't)
     min_loss: int = MIN_LOSS           # material (pawns) that counts as a tactic at the mover's level
 

@@ -31,7 +31,7 @@ class EngineConfig:
     pv_length: int = 8
 
 
-def effective_workers(engine: "EngineConfig") -> int:
+def effective_workers(engine: EngineConfig) -> int:
     """Number of analysis processes: configured, or ~2/3 of the cores (8 on a 12-core Mac)."""
     if engine.workers > 0:
         return engine.workers

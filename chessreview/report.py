@@ -138,7 +138,7 @@ def game_accuracy(white_pcts: list[float], accuracies: list[float], white_to_mov
             continue
         accs = [accuracies[i] for i in idx]
         ws = [weights[i] for i in idx]
-        weighted = sum(a * w for a, w in zip(accs, ws)) / sum(ws)
+        weighted = sum(a * w for a, w in zip(accs, ws, strict=True)) / sum(ws)
         harmonic = len(accs) / sum(1 / max(a, 1.0) for a in accs)
         out.append(round((weighted + harmonic) / 2, 1))
     first, second = out

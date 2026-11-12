@@ -7,6 +7,7 @@ Call LiveEngine.close() on shutdown: python-chess engine threads keep the
 interpreter alive otherwise (`serve` does this in a finally block).
 """
 
+import contextlib
 import queue
 import random
 import threading
@@ -265,10 +266,8 @@ class LiveEngine:
 def _quit(engine: chess.engine.SimpleEngine | None) -> None:
     """Stop an engine process that may already be gone (an EngineError doesn't always kill it)."""
     if engine is not None:
-        try:
+        with contextlib.suppress(Exception):
             engine.quit()
-        except Exception:
-            pass
 
 
 def _line_json(board: chess.Board, info: dict) -> dict:

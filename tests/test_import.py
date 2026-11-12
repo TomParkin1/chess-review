@@ -8,7 +8,13 @@ import pytest
 
 from chessreview import db
 from chessreview.config import load_config
-from chessreview.pgn_import import ImportStats, import_game, import_paths, opening_from_headers, time_class
+from chessreview.pgn_import import (
+    ImportStats,
+    import_game,
+    import_paths,
+    opening_from_headers,
+    time_class,
+)
 
 SAMPLE = Path(__file__).parent / "data" / "sample.pgn"
 
