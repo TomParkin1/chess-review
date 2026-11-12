@@ -1,5 +1,11 @@
-"""Shared test setup: no test reaches the Lichess tablebase (E3) unless it says so."""
+"""Shared test setup: the suite's own config, and no test reaches the Lichess tablebase unless it says so."""
+import os
+from pathlib import Path
+
 import pytest
+
+# Tests read tests/config.toml, never the user's config.toml (load_config() looks this up on every call).
+os.environ["CHESSREVIEW_CONFIG"] = str(Path(__file__).parent / "config.toml")
 
 from chessreview import tablebase
 

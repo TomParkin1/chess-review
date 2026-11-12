@@ -1,0 +1,8 @@
+# Configuration for the test suite (selected in conftest.py). Anything not set here uses the defaults in
+# chessreview/config.py. The fixtures' games are played by "sampleplayer".
+
+[player]
+username = "sampleplayer"
+
+[engine]
+max_depth = 20
