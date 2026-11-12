@@ -1,5 +1,4 @@
 """v3 real-game training: threats (null-move search), level scaling, puzzle quality, deck."""
-import shutil
 from dataclasses import replace
 from datetime import date
 
@@ -27,10 +26,8 @@ def cfg():
 
 
 @pytest.fixture
-def engine_cfg(tmp_path):
+def engine_cfg(tmp_path, stockfish):
     base = load_config()
-    if not shutil.which(base.engine.path):
-        pytest.skip("Stockfish not installed")
     return replace(base, engine=replace(base.engine, time_per_position=0.1, threads=1), db_path=tmp_path / "e.db")
 
 

@@ -15,6 +15,7 @@ exposes progress counters that the CLI and the web app poll.
 
 import contextlib
 import queue
+import shutil
 import sqlite3
 import threading
 import time
@@ -69,8 +70,40 @@ class PositionEval:
     second_uci: str | None = None
 
 
+class StockfishNotFound(RuntimeError):
+    """No Stockfish executable at the configured path, on PATH or in the usual install folders."""
+
+
+# Where package managers put Stockfish when it isn't on PATH (Homebrew, a manual install, Debian/Ubuntu's apt).
+USUAL_PLACES = ("/opt/homebrew/bin/stockfish", "/usr/local/bin/stockfish", "/usr/games/stockfish")
+
+INSTALL_HINT = (
+    "Install Stockfish (macOS: `brew install stockfish`; Debian/Ubuntu: `sudo apt install stockfish`; "
+    "Windows: download it from https://stockfishchess.org/download/), then put it on your PATH, set "
+    "STOCKFISH_PATH, set [engine] path in config.toml or pass --stockfish PATH."
+)
+
+
+def find_stockfish(configured: str = "") -> str:
+    """The Stockfish executable to run.
+
+    A configured path (config, $STOCKFISH_PATH or --stockfish) must exist; a bare name is looked up on
+    PATH. Without one: `stockfish` on PATH, then USUAL_PLACES. Raises StockfishNotFound otherwise.
+    """
+    if configured:
+        found = shutil.which(configured)
+        if found is None:
+            raise StockfishNotFound(f"Stockfish not found at {configured!r}. {INSTALL_HINT}")
+        return found
+    found = shutil.which("stockfish") or next((p for p in USUAL_PLACES if shutil.which(p)), None)
+    if found is None:
+        raise StockfishNotFound(f"Stockfish not found. {INSTALL_HINT}")
+    return found
+
+
 def open_engine(cfg: Config, threads: int | None = None) -> chess.engine.SimpleEngine:
-    engine = chess.engine.SimpleEngine.popen_uci(cfg.engine.path)
+    """Start a Stockfish process with the configured threads and hash size."""
+    engine = chess.engine.SimpleEngine.popen_uci(find_stockfish(cfg.engine.path))
     engine.configure({"Threads": threads or cfg.engine.threads, "Hash": cfg.engine.hash_mb})
     return engine
 

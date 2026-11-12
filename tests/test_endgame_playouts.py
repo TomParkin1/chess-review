@@ -12,7 +12,6 @@ tablebase result too).
 Slow (minutes), so opt-in: CHESSREVIEW_PLAYOUTS=1 .venv/bin/pytest tests/test_endgame_playouts.py
 """
 import os
-import shutil
 import time
 import urllib.error
 from dataclasses import replace
@@ -59,10 +58,8 @@ def conftest_offline(url):
 
 
 @pytest.fixture(scope="module")
-def client(tmp_path_factory, mode):
+def client(tmp_path_factory, mode, stockfish):
     base = load_config()
-    if not shutil.which(base.engine.path):
-        pytest.skip("Stockfish not installed")
     app = create_app(replace(base, db_path=tmp_path_factory.mktemp("playouts") / "p.db"))  # real live_time
     app.testing = True
     yield app.test_client()
@@ -70,9 +67,9 @@ def client(tmp_path_factory, mode):
 
 
 @pytest.fixture(scope="module")
-def picker():
+def picker(stockfish):
     """A separate Stockfish that ranks every legal move to pick merely safe ones."""
-    engine = chess.engine.SimpleEngine.popen_uci(load_config().engine.path)
+    engine = chess.engine.SimpleEngine.popen_uci(stockfish)
     engine.configure({"Threads": 4})
     yield engine
     engine.quit()

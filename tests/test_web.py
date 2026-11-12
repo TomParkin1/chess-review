@@ -1,6 +1,5 @@
 import io
 import json
-import shutil
 import threading
 from dataclasses import replace
 from pathlib import Path
@@ -17,8 +16,6 @@ SAMPLE = Path(__file__).parent / "data" / "sample.pgn"
 
 def make_app(tmp_path, username=None):
     base = load_config()
-    if not shutil.which(base.engine.path):
-        pytest.skip("Stockfish not installed")
     cfg = replace(base, db_path=tmp_path / "web.db",
                   engine=replace(base.engine, time_per_position=0.05, workers=2, threads=1),
                   review=replace(base.review, live_time=0.1),
@@ -31,14 +28,14 @@ def make_app(tmp_path, username=None):
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, stockfish):
     app, _cfg = make_app(tmp_path)
     yield app.test_client(), app
     app.extensions["live"].close()
 
 
 @pytest.fixture
-def new_user(tmp_path):
+def new_user(tmp_path, stockfish):
     """A first run: no username in config.toml, empty database."""
     app, _cfg = make_app(tmp_path, username="")
     yield app.test_client(), app

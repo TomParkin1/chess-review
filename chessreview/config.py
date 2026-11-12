@@ -5,11 +5,12 @@ Every setting has a default here, so the file is optional and only needs the val
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 CONFIG_NAME = "config.toml"
 CONFIG_ENV = "CHESSREVIEW_CONFIG"      # path of the config file to use
+STOCKFISH_ENV = "STOCKFISH_PATH"       # overrides [engine] path
 
 
 class ConfigError(ValueError):
@@ -29,7 +30,7 @@ class ImportConfig:
 
 @dataclass(frozen=True)
 class EngineConfig:
-    path: str = "/opt/homebrew/bin/stockfish"
+    path: str = ""              # Stockfish executable; empty = find it (engine.find_stockfish)
     time_per_position: float = 0.3
     max_depth: int = 0          # stop a position early at this depth (0 = no depth limit)
     workers: int = 0            # parallel Stockfish processes; 0 = automatic (about 2/3 of CPU cores)
@@ -133,6 +134,7 @@ def load_config(path: Path | str | None = None) -> Config:
     """Read the configuration (see find_config); without a file every setting has its default.
 
     A relative database path is relative to the config file's folder (the current folder without one).
+    $STOCKFISH_PATH, when set, replaces [engine] path.
     """
     file = find_config(path)
     raw: dict = {}
@@ -157,11 +159,14 @@ def load_config(path: Path | str | None = None) -> Config:
         except TypeError as exc:     # an unknown key
             raise ConfigError(f"{file}: unknown setting in [{name}] ({exc})") from None
 
+    engine = section(EngineConfig, "engine")
+    if os.environ.get(STOCKFISH_ENV):
+        engine = replace(engine, path=os.environ[STOCKFISH_ENV])
 
     return Config(
         player=section(PlayerConfig, "player"),
         imports=section(ImportConfig, "import"),
-        engine=section(EngineConfig, "engine"),
+        engine=engine,
         classification=section(ClassificationConfig, "classification"),
         phases=section(PhaseConfig, "phases"),
         db_path=db_path,

@@ -1,5 +1,4 @@
 """E6: the calculation trainer (F10)."""
-import shutil
 from dataclasses import replace
 
 import chess
@@ -152,10 +151,8 @@ def test_today_links_the_trainer_for_a_calculation_weakness(conn, monkeypatch):
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, stockfish):
     base = load_config()
-    if not shutil.which(base.engine.path):
-        pytest.skip("Stockfish not installed")
     app = create_app(replace(base, db_path=tmp_path / "web.db"))
     app.testing = True
     yield app.test_client()
