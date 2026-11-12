@@ -27,7 +27,6 @@
       try { s = JSON.parse(localStorage.getItem('chess-review-settings') || '{}'); } catch (e) {}
       var root = document.documentElement;
       root.dataset.board = s.board || 'brown';
-      root.dataset.pieces = s.pieces || 'neo';
     })();
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.2.1/assets/chessground.base.css">

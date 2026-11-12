@@ -203,20 +203,6 @@ html[data-board="green"] .cg-wrap cg-board { background: repeating-conic-gradien
 html[data-board="blue"] .cg-wrap cg-board { background: repeating-conic-gradient(#4b7399 0% 25%, #eae9d2 0% 50%) 0 0 / 25% 25%; }
 .cg-wrap coords { font-weight: 700; }
 
-/* chess.com "Neo" pieces (loaded from chess.com's image server) when selected */
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.pawn.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wp.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.knight.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wn.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.bishop.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wb.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.rook.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wr.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.queen.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wq.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.king.white { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wk.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.pawn.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bp.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.knight.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bn.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.bishop.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bb.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.rook.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/br.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.queen.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bq.png'); }
-html[data-pieces="neo"] .cg-wrap:not(.cburnett-only) piece.king.black { background-image: url('https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bk.png'); }
-
 /* Mark badge on a square, and the promotion picker */
 .badge-layer { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
 .square-badge { position: absolute; width: 5.25%; /* 42% of a square */ transform: translate(-62%, -38%); filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }

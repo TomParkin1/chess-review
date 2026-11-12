@@ -122,3 +122,7 @@ config.toml
   Puzzles from the [Lichess puzzle database](https://database.lichess.org/#puzzles) (CC0).
   Endgame tablebase answers from the [Lichess tablebase API](https://github.com/lichess-org/lila-tablebase) (Syzygy).
 - Mistake thresholds and accuracy formula follow Lichess.
+
+## Licence
+
+GPL-3.0-or-later, see [LICENSE](LICENSE). python-chess and chessground are GPL-3.0 too.

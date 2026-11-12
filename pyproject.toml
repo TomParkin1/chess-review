@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Analyse your chess.com games with Stockfish and train on your own mistakes, locally."
 readme = "README.md"
 license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 # compression.zstd (the puzzle library download) is new in Python 3.14.
 requires-python = ">=3.14"
 dependencies = [

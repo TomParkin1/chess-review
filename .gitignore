@@ -1,7 +1,42 @@
-.venv/
+# Python
 __pycache__/
-*.pyc
-.pytest_cache/
-/data/
-.DS_Store
+*.py[cod]
 *.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Your data: the database, its backups and any games you download.
+# (chessreview/data/ holds the app's own data files and is tracked.)
+/data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.pgn
+!/tests/data/*.pgn
+*.csv.zst
+
+# Local settings and logs
+.env
+*.log
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Editors and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

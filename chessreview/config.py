@@ -112,7 +112,9 @@ class Config:
     backup: BackupConfig = BackupConfig()
 
 
-def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
+def load_config(path: Path | str | None = None) -> Config:
+    """Read the configuration: `path`, else $CHESSREVIEW_CONFIG, else config.toml in the project root."""
+    path = path or os.environ.get("CHESSREVIEW_CONFIG") or DEFAULT_CONFIG_PATH
     with open(path, "rb") as f:
         raw = tomllib.load(f)
 

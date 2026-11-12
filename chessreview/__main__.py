@@ -332,7 +332,7 @@ def main() -> None:
     p.set_defaults(func=cmd_simulate)
 
     args = parser.parse_args()
-    cfg = load_config(args.config) if args.config else load_config()
+    cfg = load_config(args.config)
     if args.func is cmd_restore:    # no schema work first: the database may be what is broken
         Path(cfg.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(cfg.db_path, timeout=30)

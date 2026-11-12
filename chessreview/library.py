@@ -172,7 +172,7 @@ def fetch(conn: sqlite3.Connection, progress: FetchProgress | None = None, url: 
     progress = progress or FetchProgress()
     progress.state, progress.started_at = "running", time.time()
     sampler = Sampler()
-    request = urllib.request.Request(url, headers={"User-Agent": "chess-review (personal training app)"})
+    request = urllib.request.Request(url, headers={"User-Agent": "chess-review (local training app)"})
     with opener(request, timeout=60) as response:
         progress.bytes_total = int(response.headers.get("Content-Length") or 0)
         raw = io.BufferedReader(_CountingReader(response, progress), buffer_size=1 << 20)
