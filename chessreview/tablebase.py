@@ -32,7 +32,7 @@ import chess
 from . import db
 
 API = "https://tablebase.lichess.ovh/standard"
-USER_AGENT = "chess-review (personal training app)"
+USER_AGENT = "chess-review (local training app)"
 MAX_PIECES = 7
 TIMEOUT = 3.0                # seconds; then Stockfish plays
 BACKOFF = 30.0               # seconds without asking after a failure

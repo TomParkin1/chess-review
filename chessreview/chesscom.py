@@ -24,7 +24,7 @@ from .config import Config
 from .pgn_import import ImportStats, import_game
 
 API = "https://api.chess.com/pub/player/{user}/games/archives"
-USER_AGENT = "chess-review (personal local app; python urllib)"
+USER_AGENT = "chess-review (local training app; python urllib)"
 LAST_MONTH_KEY = "chesscom_last_month"     # 'YYYY/MM' of the newest archive fetched
 SINCE_CHOICES = {"all": None, "3m": 3, "1m": 1}
 
