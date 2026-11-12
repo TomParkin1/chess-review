@@ -181,5 +181,6 @@ def test_swapped_moves(client):
     limit = chess.engine.Limit(time=0.05)
     rnd = {live.play(board, options, limit, 1.0, "random", random.Random(i)) for i in range(8)}
     assert len(rnd) > 1 and rnd <= set(board.legal_moves)                   # any legal move
-    top = {live.play(board, options, limit, 1.0, "top5", random.Random(i)) for i in range(8)}
+    fixed = chess.engine.Limit(depth=10)       # one search result for every call: a time limit can vary the top five
+    top = {live.play(board, options, fixed, 1.0, "top5", random.Random(i)) for i in range(8)}
     assert 1 < len(top) <= 5                                                 # one of five
