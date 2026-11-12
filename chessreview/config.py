@@ -1,12 +1,19 @@
-"""Load config.toml into simple dataclasses."""
+"""Load config.toml into simple dataclasses.
+
+Every setting has a default here, so the file is optional and only needs the values you change.
+"""
 
 import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+CONFIG_NAME = "config.toml"
+CONFIG_ENV = "CHESSREVIEW_CONFIG"      # path of the config file to use
+
+
+class ConfigError(ValueError):
+    """The config file is missing, isn't valid TOML or has a setting the app doesn't know."""
 
 
 @dataclass(frozen=True)
@@ -112,26 +119,55 @@ class Config:
     backup: BackupConfig = BackupConfig()
 
 
+def find_config(path: Path | str | None = None) -> Path | None:
+    """The config file to read: `path`, else $CHESSREVIEW_CONFIG, else ./config.toml if there is one."""
+    if path:
+        return Path(path)
+    if os.environ.get(CONFIG_ENV):
+        return Path(os.environ[CONFIG_ENV])
+    local = Path.cwd() / CONFIG_NAME
+    return local if local.is_file() else None
+
+
 def load_config(path: Path | str | None = None) -> Config:
-    """Read the configuration: `path`, else $CHESSREVIEW_CONFIG, else config.toml in the project root."""
-    path = path or os.environ.get("CHESSREVIEW_CONFIG") or DEFAULT_CONFIG_PATH
-    with open(path, "rb") as f:
-        raw = tomllib.load(f)
+    """Read the configuration (see find_config); without a file every setting has its default.
+
+    A relative database path is relative to the config file's folder (the current folder without one).
+    """
+    file = find_config(path)
+    raw: dict = {}
+    base = Path.cwd()
+    if file is not None:
+        try:
+            with open(file, "rb") as f:
+                raw = tomllib.load(f)
+        except FileNotFoundError:
+            raise ConfigError(f"Config file not found: {file}") from None
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigError(f"{file} isn't valid TOML: {exc}") from None
+        base = file.resolve().parent
 
     db_path = Path(raw.get("database", {}).get("path", "data/chess.db"))
     if not db_path.is_absolute():
-        db_path = PROJECT_ROOT / db_path
+        db_path = base / db_path
+
+    def section(cls, name: str):
+        try:
+            return cls(**raw.get(name, {}))
+        except TypeError as exc:     # an unknown key
+            raise ConfigError(f"{file}: unknown setting in [{name}] ({exc})") from None
+
 
     return Config(
-        player=PlayerConfig(**raw.get("player", {})),
-        imports=ImportConfig(**raw.get("import", {})),
-        engine=EngineConfig(**raw.get("engine", {})),
-        classification=ClassificationConfig(**raw.get("classification", {})),
-        phases=PhaseConfig(**raw.get("phases", {})),
+        player=section(PlayerConfig, "player"),
+        imports=section(ImportConfig, "import"),
+        engine=section(EngineConfig, "engine"),
+        classification=section(ClassificationConfig, "classification"),
+        phases=section(PhaseConfig, "phases"),
         db_path=db_path,
-        review=ReviewConfig(**raw.get("review", {})),
-        analysis=AnalysisConfig(**raw.get("analysis", {})),
-        training=TrainingConfig(**raw.get("training", {})),
-        coach=CoachConfig(**raw.get("coach", {})),
-        backup=BackupConfig(**raw.get("backup", {})),
+        review=section(ReviewConfig, "review"),
+        analysis=section(AnalysisConfig, "analysis"),
+        training=section(TrainingConfig, "training"),
+        coach=section(CoachConfig, "coach"),
+        backup=section(BackupConfig, "backup"),
     )

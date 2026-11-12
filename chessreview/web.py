@@ -11,6 +11,7 @@ import sqlite3
 import threading
 from collections import Counter
 from datetime import date
+from pathlib import Path
 
 import chess
 from flask import Flask, Response, g, jsonify, render_template, request
@@ -45,7 +46,7 @@ from .classify import (
     refresh,
     thresholds_for,
 )
-from .config import PROJECT_ROOT, Config, effective_workers, load_config
+from .config import Config, effective_workers, load_config
 from .engine import AnalysisJob, count_pending
 from .explain import ATTACKING_KINDS, MoveContext, explain_best, hint, san_line
 from .live import LiveEngine, PositionAnalysis
@@ -985,7 +986,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/backups")
     def backups_list():
         folder = _backups_folder()
-        shown = folder.relative_to(PROJECT_ROOT) if folder.is_relative_to(PROJECT_ROOT) else folder
+        shown = folder.relative_to(Path.cwd()) if folder.is_relative_to(Path.cwd()) else folder
         return jsonify(backups=[b.as_dict() for b in backup.files(folder)], folder=str(shown))
 
     @app.post("/api/backups")
