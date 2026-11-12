@@ -1,7 +1,7 @@
 # Chess review configuration. Edit freely; restart the app after changes.
 
 [player]
-username = "sampleplayer"   # optional: the app asks for it on first run (Settings can change it)
+# username = "your-chess.com-name"   # optional: the app asks for it on first run (Settings can change it)
 
 [import]
 min_plies = 10            # skip games shorter than this (aborted / instant resignations)
