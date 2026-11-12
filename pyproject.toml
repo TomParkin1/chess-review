@@ -52,3 +52,36 @@ ignore = ["E501"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["chessreview.config.BackupConfig"]
+
+[tool.mypy]
+python_version = "3.14"
+packages = ["chessreview"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# Baseline: modules with type errors when mypy was introduced. Each is removed from this list as it is fixed.
+[[tool.mypy.overrides]]
+module = [
+    "chessreview.backup",
+    "chessreview.calc",
+    "chessreview.classify",
+    "chessreview.coach",
+    "chessreview.convert",
+    "chessreview.db",
+    "chessreview.engine",
+    "chessreview.explain",
+    "chessreview.insights",
+    "chessreview.library",
+    "chessreview.live",
+    "chessreview.openings",
+    "chessreview.pgn_import",
+    "chessreview.progress",
+    "chessreview.repertoire",
+    "chessreview.report",
+    "chessreview.spar",
+    "chessreview.srs",
+    "chessreview.threats",
+    "chessreview.web",
+]
+ignore_errors = true
