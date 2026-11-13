@@ -7,9 +7,7 @@ English, and a daily workout built from your own games. Runs locally; your games
 [![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue)](LICENSE)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue)](pyproject.toml)
 
-*Screenshot to come: the Practice page, with a mistake from one of your games as a puzzle.*
-<!-- Add docs/screenshot.png and replace the line above with:
-![Practice: a mistake from one of your games, as a puzzle](docs/screenshot.png) -->
+![Practice: a mistake from one of your games, as a puzzle](docs/screenshot.png)
 
 Lichess can analyse one game at a time. Chess Review imports all of your games at once (from chess.com's public
 API or PGN files), analyses them in parallel, and then works on them with you.
