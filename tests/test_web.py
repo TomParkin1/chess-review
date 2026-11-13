@@ -4,6 +4,8 @@ import threading
 from dataclasses import replace
 from pathlib import Path
 
+import chess
+import chess.engine
 import pytest
 
 from chessreview import backup, chesscom, coach, db
@@ -709,3 +711,46 @@ def test_analysis_job_starts_once_when_asked_twice_at_once(client, monkeypatch):
     for t in threads:
         t.join()
     assert len(started) == 1
+
+
+def test_without_stockfish_the_engine_routes_say_so(tmp_path):
+    """They used to answer 500 "FileNotFoundError: ..." (or "done" analysis with no results)."""
+    base = load_config()
+    app = create_app(replace(base, db_path=tmp_path / "web.db", engine=replace(base.engine, path="/no/such/stockfish")))
+    try:
+        c = app.test_client()
+        r = c.post("/api/judge", json={"fen": chess.STARTING_FEN, "uci": "e2e4"})
+        assert r.status_code == 503 and "Stockfish not found" in r.get_json()["error"]
+        r = c.get("/api/analyse/stream", query_string={"fen": chess.STARTING_FEN})
+        assert r.status_code == 503  # used to start an empty stream (the engine thread failed unseen)
+        assert c.get("/").status_code == 200  # pages that don't need the engine still work
+    finally:
+        app.extensions["live"].close()
+
+
+def test_a_crashed_engine_is_a_503(tmp_path, monkeypatch):
+    base = load_config()
+    app = create_app(replace(base, db_path=tmp_path / "web.db"))
+    live = app.extensions["live"]
+
+    def crash(*args, **kwargs):
+        raise chess.engine.EngineTerminatedError("engine process died unexpectedly")
+
+    monkeypatch.setattr(live, "judge", crash)
+    try:
+        r = app.test_client().post("/api/judge", json={"fen": chess.STARTING_FEN, "uci": "e2e4"})
+        assert r.status_code == 503 and "stopped unexpectedly" in r.get_json()["error"]
+    finally:
+        live.close()
+
+
+def test_an_impossible_position_is_a_client_error(tmp_path):
+    """Stockfish exits on a position without a king: that was a 500, then a misleading "try again" 503."""
+    app = create_app(replace(load_config(), db_path=tmp_path / "web.db"))
+    try:
+        c = app.test_client()
+        no_king = "8/8/8/8/8/8/4P3/4K3 b - - 0 1"
+        assert c.post("/api/judge", json={"fen": no_king, "uci": "e2e3"}).status_code == 400
+        assert c.get("/api/analyse/stream", query_string={"fen": no_king}).status_code == 400
+    finally:
+        app.extensions["live"].close()

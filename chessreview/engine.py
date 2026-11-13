@@ -401,6 +401,7 @@ class AnalysisJob:
                     conn.close()
                 if not games and not threat_only:
                     break
+                find_stockfish(self.cfg.engine.path)  # StockfishNotFound: say so instead of failing per game
                 attempted.update(g["id"] for g in games + threat_only)
                 with self._lock:
                     self.progress.games_total += len(games) + len(threat_only)
@@ -420,8 +421,10 @@ class AnalysisJob:
                     w.start()
                 for w in workers:
                     w.join()
-            self.progress.state = "done"
-        except Exception as exc:  # surface unexpected failures (e.g. bad engine path)
+            # Every game failing (Stockfish crashing on start, say) is an error, not a finished job.
+            failed = self.progress.errors and not self.progress.games_done
+            self.progress.state = "error" if failed else "done"
+        except Exception as exc:  # surface unexpected failures (e.g. no Stockfish)
             self.progress.errors.append(str(exc))
             self.progress.state = "error"
 

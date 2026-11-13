@@ -109,6 +109,31 @@ def test_concurrent_import_of_the_same_game_is_a_duplicate(tmp_path, cfg):
 
 
 def test_failed_import_leaves_no_empty_batch(conn, cfg, tmp_path):
-    with pytest.raises(FileNotFoundError):
-        import_paths(conn, [tmp_path / "missing.pgn"], cfg)
+    stats = import_paths(conn, [tmp_path / "missing.pgn"], cfg)
+    assert stats.errors == [f"{tmp_path / 'missing.pgn'}: no such file or folder"]
     assert conn.execute("SELECT COUNT(*) FROM imports").fetchone()[0] == 0
+
+
+def test_unreadable_paths_are_reported_and_the_rest_imported(conn, cfg, tmp_path):
+    """A missing path used to stop the whole import with a traceback."""
+    (tmp_path / "empty").mkdir()
+    stats = import_paths(conn, [tmp_path / "missing.pgn", tmp_path / "empty", SAMPLE], cfg)
+    assert stats.imported == 3
+    assert [e.split(": ", 1)[1] for e in stats.errors] == ["no such file or folder", "no .pgn files in this folder"]
+
+
+def test_a_broken_game_is_skipped_and_the_next_one_read(conn, cfg, monkeypatch):
+    """python-chess raising mid-file used to drop every game after it."""
+    real = chess.pgn.read_game
+    calls = []
+
+    def flaky(stream):
+        calls.append(1)
+        if len(calls) == 1:
+            stream.readline()  # it consumed some of the bad game before giving up
+            raise ValueError("bad PGN")
+        return real(stream)
+
+    monkeypatch.setattr(chess.pgn, "read_game", flaky)
+    stats = import_paths(conn, [SAMPLE], cfg)
+    assert stats.skipped.get("unreadable PGN") == 1 and stats.games_seen == 6

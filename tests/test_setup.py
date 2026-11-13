@@ -135,3 +135,51 @@ def test_import_as_a_name_with_no_games_leaves_the_player_unset(no_config, monke
     assert "player is unchanged" in capsys.readouterr().out
     run(monkeypatch, "import", str(SAMPLES), "--as", "sample player")  # names match in any case
     assert "Imported:     5" in capsys.readouterr().out
+
+
+def test_import_reports_paths_it_cannot_read_and_exits_with_an_error(no_config, monkeypatch, capsys):
+    with pytest.raises(SystemExit) as exit_:
+        run(monkeypatch, "import", str(SAMPLES), str(no_config / "typo.pgn"), "--as", "Sample Player")
+    out, err = capsys.readouterr()
+    assert exit_.value.code == 1
+    assert "Imported:     5" in out and "typo.pgn: no such file or folder" in err
+
+
+def test_sync_offline_says_so(no_config, monkeypatch):
+    import urllib.error
+
+    from chessreview import chesscom
+
+    def offline(request, timeout):
+        raise urllib.error.URLError("network is unreachable")
+
+    monkeypatch.setattr(chesscom.urllib.request, "urlopen", offline)
+    (no_config / "config.toml").write_text('[player]\nusername = "someone"\n')
+    with pytest.raises(SystemExit, match="Couldn't reach chess.com"):
+        run(monkeypatch, "sync")
+
+
+def test_a_failed_puzzle_download_says_so(no_config, monkeypatch):
+    from chessreview import library
+
+    def offline(conn, progress):
+        raise OSError("network is unreachable")
+
+    monkeypatch.setattr(library, "fetch", offline)
+    with pytest.raises(SystemExit, match="Couldn't download the puzzle library"):
+        run(monkeypatch, "puzzles")
+
+
+def test_sync_for_an_unknown_player_says_so(no_config, monkeypatch):
+    import io
+    import urllib.error
+
+    from chessreview import chesscom
+
+    def not_found(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, io.BytesIO())
+
+    monkeypatch.setattr(chesscom.urllib.request, "urlopen", not_found)
+    (no_config / "config.toml").write_text('[player]\nusername = "nobody-here"\n')
+    with pytest.raises(SystemExit, match="no player called 'nobody-here'"):
+        run(monkeypatch, "sync")

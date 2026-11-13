@@ -81,3 +81,36 @@ def test_both_sides_classified_with_marks_and_accuracy(cfg):
     positions = conn.execute("SELECT * FROM positions WHERE best_uci IS NOT NULL").fetchall()
     assert any(p["second_uci"] for p in positions)  # MultiPV 2 stored
     conn.close()
+
+
+def test_a_job_without_stockfish_ends_in_error(tmp_path):
+    """It used to end as "done", with one raw FileNotFoundError per game."""
+    base = load_config()
+    cfg = replace(base, engine=replace(base.engine, path="/no/such/stockfish"), db_path=tmp_path / "test.db")
+    conn = db.connect(cfg.db_path)
+    import_paths(conn, [SAMPLE], cfg)
+    conn.close()
+    job = AnalysisJob(cfg)
+    job.start()
+    assert job.wait(timeout=10)
+    assert job.progress.state == "error"
+    assert len(job.progress.errors) == 1 and "Stockfish not found" in job.progress.errors[0]
+
+
+def test_a_job_whose_engine_fails_on_every_game_ends_in_error(tmp_path, monkeypatch):
+    from chessreview import engine
+
+    def crash(cfg, threads=None):
+        raise chess.engine.EngineTerminatedError("engine process died unexpectedly")
+
+    base = load_config()
+    cfg = replace(base, engine=replace(base.engine, path=__file__), db_path=tmp_path / "test.db")  # "exists"
+    monkeypatch.setattr(engine, "find_stockfish", lambda path: path)
+    monkeypatch.setattr(engine, "open_engine", crash)
+    conn = db.connect(cfg.db_path)
+    import_paths(conn, [SAMPLE], cfg)
+    conn.close()
+    job = AnalysisJob(cfg)
+    job.start()
+    assert job.wait(timeout=10)
+    assert job.progress.state == "error" and "died unexpectedly" in job.progress.errors[0]

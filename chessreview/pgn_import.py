@@ -27,13 +27,14 @@ FAMILY_ENDINGS = {"Defense", "Defence", "Opening", "Game", "Gambit", "Attack", "
 
 @dataclass
 class ImportStats:
-    """Counts from an import: files, games seen, imported, duplicates and skips by reason."""
+    """Counts from an import: files, games seen, imported, duplicates, skips by reason, and files it couldn't read."""
 
     files: int = 0
     games_seen: int = 0
     imported: int = 0
     duplicates: int = 0
     skipped: dict[str, int] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)  # "<path>: <why>" for paths that couldn't be read
 
     def skip(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
@@ -45,6 +46,7 @@ class ImportStats:
         self.duplicates += other.duplicates
         for reason, n in other.skipped.items():
             self.skipped[reason] = self.skipped.get(reason, 0) + n
+        self.errors += other.errors
 
 
 def time_class(time_control: str) -> str:
@@ -246,11 +248,14 @@ def import_pgn_text(
     stats = ImportStats(files=1)
     stream = io.StringIO(text)
     while True:
+        start = stream.tell()
         try:
             game = chess.pgn.read_game(stream)
-        except Exception:  # extremely malformed input; stop reading this file
+        except Exception:  # python-chess gave up on this game: skip it and read on
             stats.skip("unreadable PGN")
-            break
+            if stream.tell() == start:  # nothing consumed: reading on would loop for ever
+                break
+            continue
         if game is None:
             break
         import_game(conn, game, cfg, source, stats, batch_id=batch_id)
@@ -259,14 +264,27 @@ def import_pgn_text(
 
 
 def import_paths(conn: sqlite3.Connection, paths: list[Path], cfg: Config) -> ImportStats:
-    """Import PGN files, or every *.pgn file inside given directories, as one batch."""
+    """Import PGN files, or every *.pgn file inside given directories, as one batch.
+
+    A path that doesn't exist, a folder without PGN files or a file that can't be read is noted in
+    `errors` and the rest are still imported.
+    """
     total = ImportStats()
     batch_id = db.create_batch(conn, "upload", f"Upload of {len(paths)} path(s)")
     try:
         for path in paths:
+            if not path.exists():
+                total.errors.append(f"{path}: no such file or folder")
+                continue
             files = sorted(path.glob("*.pgn")) if path.is_dir() else [path]
+            if not files:
+                total.errors.append(f"{path}: no .pgn files in this folder")
             for f in files:
-                text = f.read_text(encoding="utf-8", errors="replace")
+                try:
+                    text = f.read_text(encoding="utf-8", errors="replace")
+                except OSError as exc:
+                    total.errors.append(f"{f}: {exc.strerror or exc}")
+                    continue
                 total.merge(import_pgn_text(conn, text, cfg, source=f.name, batch_id=batch_id))
     finally:
         session.finish_import(conn, cfg, batch_id)  # an empty batch is dropped, even after an error

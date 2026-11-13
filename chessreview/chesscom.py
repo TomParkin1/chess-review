@@ -96,9 +96,17 @@ def months_to_fetch(
     return [u for u in archives if month_of(u) >= f"{y:04d}/{m:02d}"]
 
 
+class UserNotFound(LookupError):
+    """chess.com has no player with this username."""
+
+
 def archives_of(user: str, fetch: Callable[[str], Any] = fetch_json) -> list[str]:
-    """URLs of a player's monthly archives, oldest first. LookupError if chess.com has no such player."""
-    return fetch(API.format(user=user.strip().lower()))["archives"]
+    """URLs of a player's monthly archives, oldest first. UserNotFound if chess.com has no such player."""
+    try:
+        reply = fetch(API.format(user=user.strip().lower()))
+    except LookupError:  # a 404 from fetch_json
+        raise UserNotFound(user) from None
+    return reply["archives"]
 
 
 def sync(
