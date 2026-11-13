@@ -4,11 +4,12 @@ Blueprints by area: pages (HTML), games (account, import, analysis), practice (m
 training (Today, sessions, Insights, Progress, Openings), play (Convert, Spar, Calculate) and settings.
 """
 
+import chess.engine
 from flask import Flask, Response, current_app, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from ..config import Config, load_config
-from ..engine import AnalysisJob
+from ..engine import AnalysisJob, StockfishNotFound
 from ..live import LiveEngine
 from . import games, pages, play, practice, settings, training
 from .common import AppState, close_conn
@@ -28,6 +29,8 @@ def create_app(cfg: Config | None = None) -> Flask:
     app.extensions["live"] = state.live  # closed by the `serve` command on shutdown
     app.teardown_appcontext(close_conn)
     app.register_error_handler(HTTPException, http_error)
+    app.register_error_handler(StockfishNotFound, engine_unavailable)
+    app.register_error_handler(chess.engine.EngineError, engine_unavailable)
     app.register_error_handler(Exception, server_error)
     for bp in BLUEPRINTS:
         app.register_blueprint(bp)
@@ -39,6 +42,18 @@ def http_error(exc: HTTPException) -> HTTPException | tuple[Response, int]:
     if request.path.startswith("/api/"):
         return jsonify(error=exc.description or exc.name), exc.code or 500
     return exc
+
+
+def engine_unavailable(exc: Exception) -> tuple[Response | str, int]:
+    """Stockfish is missing, or stopped mid-request: a 503 that says which (the next request starts a new one)."""
+    if isinstance(exc, StockfishNotFound):
+        message = str(exc)
+    else:
+        current_app.logger.warning("Stockfish failed in %s: %s", request.path, exc)
+        message = f"Stockfish stopped unexpectedly ({exc}). Try again."
+    if request.path.startswith("/api/"):
+        return jsonify(error=message), 503
+    return message, 503
 
 
 def server_error(exc: Exception) -> tuple[Response | str, int]:
