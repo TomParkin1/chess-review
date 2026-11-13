@@ -671,7 +671,7 @@ def test_delete_all_waits_for_imports_and_rebuilds(client, monkeypatch):
 
 def test_analysis_job_starts_once_when_asked_twice_at_once(client, monkeypatch):
     """Two requests at once each started a job; the first was orphaned (still running, unstoppable)."""
-    from chessreview import web
+    from chessreview.web import games as web_games
 
     c, _app = client
     started = []
@@ -697,7 +697,7 @@ def test_analysis_job_starts_once_when_asked_twice_at_once(client, monkeypatch):
 
             return Progress()
 
-    monkeypatch.setattr(web, "AnalysisJob", SlowJob)
+    monkeypatch.setattr(web_games, "AnalysisJob", SlowJob)
 
     def go():
         barrier.wait()

@@ -382,7 +382,7 @@ def _key(item: list) -> tuple:
 
 
 def _servable(conn: sqlite3.Connection, items: list[list]) -> set[tuple]:
-    """Keys of the items that can still be served as puzzles (same rows web._items_for needs):
+    """Keys of the items that can still be served as puzzles (same rows web.puzzles.items_for needs):
     my analysed move with the position after it, or a puzzle still in the library."""
     mine = list({_key(i) for i in items if i[0] != "lib"})
     out: set[tuple] = set()

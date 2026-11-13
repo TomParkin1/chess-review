@@ -85,7 +85,7 @@ def status(conn: sqlite3.Connection, cfg: Config) -> dict:
 
 
 def puzzle_where(cfg: Config, batch_ids: list[int]) -> tuple[str, list]:
-    """WHERE clause (for the mistakes query in web.py) selecting this session's puzzles."""
+    """WHERE clause (for the mistakes query in web/practice.py) selecting this session's puzzles."""
     marks = ",".join("?" * len(batch_ids))
     return (f"g.batch_id IN ({marks}) AND m.judgement IN ({srs.judgements_sql(cfg)})", list(batch_ids))
 

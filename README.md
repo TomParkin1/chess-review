@@ -122,7 +122,7 @@ chessreview/
   library.py                Lichess puzzle library
   tablebase.py              Lichess endgame tablebase (<= 7 pieces), cached
   insights.py, progress.py  statistics
-  web.py                    Flask app and JSON API
+  web/                      Flask app factory and one blueprint per area of the JSON API
   static/, templates/       front end (plain ES modules, no build step)
 tests/
 config.toml
