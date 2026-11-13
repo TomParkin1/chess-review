@@ -55,6 +55,8 @@ PIECE_NAMES = {
 
 @dataclass
 class Question:
+    """One calculation question: a position, a line to read and a question about where it ends."""
+
     key: str  # source~plies~kind~subject
     source: str  # "lib:<puzzle id>" | "game:<game id>:<ply>"
     kind: str
@@ -82,6 +84,7 @@ class Question:
 
 
 def level(conn: sqlite3.Connection) -> int:
+    """My current line length in plies (one of LEVELS)."""
     stored = db.get_meta(conn, LEVEL_KEY)
     return int(stored) if stored and stored.isdigit() and int(stored) in LEVELS else 1
 
@@ -362,6 +365,7 @@ def due_question(
 
 
 def from_key(conn: sqlite3.Connection, key: str) -> Question | None:
+    """Rebuild a question from its card key; None if the key or its source is no longer valid."""
     parts = key.split("~")
     if len(parts) != 4 or not parts[1].isdigit() or parts[2] not in KINDS:
         return None
@@ -502,6 +506,7 @@ def answer(conn: sqlite3.Connection, key: str, given: str) -> dict | None:
 
 
 def overview(conn: sqlite3.Connection) -> dict:
+    """The Calculate page: my level, today's answers, results by depth and questions due for review."""
     lvl = level(conn)
     day = srs.today().isoformat()
     today = conn.execute(

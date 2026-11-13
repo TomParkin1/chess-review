@@ -81,6 +81,8 @@ def is_sacrifice(board: chess.Board, move: chess.Move) -> bool:
 
 @dataclass
 class MarkInput:
+    """What mark_move needs to know about one move."""
+
     judgement: str  # good | inaccuracy | mistake | blunder (classify.judge)
     drop_pct: float  # win% points lost by the move, mover's point of view
     before_pct: float  # mover's win% before the move
@@ -95,6 +97,7 @@ class MarkInput:
 
 
 def mark_move(m: MarkInput) -> str:
+    """A chess.com-style mark for a move (book, best, great, brilliant, miss, ...)."""
     if m.book:
         return "book"
     if m.forced:
@@ -219,11 +222,13 @@ def game_budget_ms(tc: str | None) -> int | None:
 
 
 def low_clock_ms(tc: str | None) -> int | None:
+    """Time left (ms) below which a player is in time trouble, or None without a clock."""
     budget = game_budget_ms(tc)
     return None if budget is None else round(budget * LOW_CLOCK_SHARE)
 
 
 def fast_move_ms(tc: str | None) -> int | None:
+    """Time (ms) under which a move counts as very fast, or None without a clock."""
     budget = game_budget_ms(tc)
     return None if budget is None else round(budget * FAST_MOVE_SHARE)
 

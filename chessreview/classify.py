@@ -100,6 +100,8 @@ MODE_KEY = "thresholds_mode"  # meta override set from the Settings page: 'adapt
 
 @dataclass(frozen=True)
 class Thresholds:
+    """Win-chance drops that make a move an inaccuracy, mistake or blunder, for one rating band."""
+
     inaccuracy: float
     mistake: float
     blunder: float
@@ -135,11 +137,13 @@ def keeps_long_mate(before: Eval, after: Eval) -> bool:
 
 
 def adaptive_enabled(conn: sqlite3.Connection, cfg: Config) -> bool:
+    """Whether thresholds follow the mover's rating (Settings overrides the config)."""
     mode = db.get_meta(conn, MODE_KEY)
     return cfg.classification.adaptive if mode is None else mode == "adaptive"
 
 
 def thresholds_for(rating: int | None, cfg: Config, adaptive: bool) -> Thresholds:
+    """The thresholds for a mover rated `rating`: banded when adaptive, else the config's."""
     c = cfg.classification
     if not adaptive or not rating:
         return Thresholds(c.inaccuracy, c.mistake, c.blunder)
@@ -348,6 +352,7 @@ def ensure_classified(conn: sqlite3.Connection, cfg: Config, force: bool = False
 
 
 def needs_rebuild(conn: sqlite3.Connection, cfg: Config) -> bool:
+    """Whether stored judgements were made with different settings than now."""
     return db.get_meta(conn, SETTINGS_KEY) != settings_fingerprint(cfg, adaptive_enabled(conn, cfg))
 
 

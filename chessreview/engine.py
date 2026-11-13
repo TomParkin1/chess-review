@@ -40,6 +40,8 @@ THREAT_VERSION = 1
 
 @dataclass
 class PositionResult:
+    """Stockfish's view of one position of a game (White's point of view), as stored."""
+
     ply: int
     fen: str
     move_uci: str | None
@@ -235,6 +237,7 @@ def my_move_count(game: sqlite3.Row) -> int:
 
 
 def save_game_analysis(conn: sqlite3.Connection, game_id: int, results: list[PositionResult]) -> None:
+    """Replace a game's positions with `results` and mark it analysed, in one transaction."""
     with conn:  # one transaction: a game is either fully stored or not at all
         conn.execute("DELETE FROM positions WHERE game_id = ?", (game_id,))
         conn.executemany(
@@ -275,6 +278,7 @@ def save_game_analysis(conn: sqlite3.Connection, game_id: int, results: list[Pos
 
 
 def save_threats(conn: sqlite3.Connection, game_id: int, threats: list[tuple[int, Threat]]) -> None:
+    """Store threat-only results for a game analysed before threats existed."""
     with conn:
         conn.executemany(
             """UPDATE positions SET threat_cp = ?, threat_mate = ?, threat_uci = ?, threat_pv = ?
@@ -311,6 +315,8 @@ def count_pending(conn: sqlite3.Connection) -> int:
 
 @dataclass
 class Progress:
+    """Progress of an AnalysisJob, polled by the CLI and the web app."""
+
     state: str = "idle"  # idle | running | stopping | done | error
     games_total: int = 0
     games_done: int = 0

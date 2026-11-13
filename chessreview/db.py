@@ -340,6 +340,7 @@ _schema_lock = threading.Lock()  # requests opening a new database at once must 
 
 
 def migrate(conn: sqlite3.Connection) -> None:
+    """Apply pending MIGRATIONS (backing up an existing database first)."""
     with _schema_lock:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         if version < len(MIGRATIONS) and (version > 0 or conn.execute("SELECT 1 FROM games LIMIT 1").fetchone()):
@@ -364,6 +365,7 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
 
 
 def create_batch(conn: sqlite3.Connection, source: str, label: str) -> int:
+    """Start an import batch and return its id."""
     with conn:
         batch_id = conn.execute("INSERT INTO imports (source, label) VALUES (?, ?)", (source, label)).lastrowid
     assert batch_id is not None  # always set after an INSERT
@@ -382,11 +384,13 @@ def finish_batch(conn: sqlite3.Connection, batch_id: int) -> int:
 
 
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
+    """A value from the key/value `meta` table, or None."""
     row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else None
 
 
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Store a value in the `meta` table (the caller commits)."""
     conn.execute(
         "INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value)
     )

@@ -38,6 +38,8 @@ _cache_lock = threading.Lock()
 
 @dataclass
 class Edge:
+    """A move from a position in my games, with how it went."""
+
     uci: str
     san: str
     count: int = 0
@@ -48,6 +50,8 @@ class Edge:
 
 @dataclass
 class Node:
+    """A position in my games (by EPD) and the moves played from it."""
+
     epd: str
     fen: str
     ply: int
@@ -86,6 +90,7 @@ def build(conn: sqlite3.Connection, color: str, family: str | None = None) -> di
 
 
 def clear_cache() -> None:
+    """Forget cached trees (after a restore replaces the database)."""
     with _cache_lock:
         _cache.clear()
 
@@ -153,10 +158,12 @@ def _build(conn: sqlite3.Connection, color: str, family: str | None) -> dict[str
 
 
 def root_epd() -> str:
+    """EPD of the starting position."""
     return chess.Board().epd()
 
 
 def node_json(tree: dict[str, Node], epd: str) -> dict | None:
+    """A position of the tree for the Openings page; None if it isn't in my games."""
     node = tree.get(epd)
     if node is None:
         return None
@@ -238,6 +245,7 @@ def problems(tree: dict[str, Node], limit: int = 12) -> list[dict]:
 
 
 def card_key(color: str, epd: str) -> str:
+    """The card key of a repertoire position: '<colour>:<epd>'."""
     return f"{color}:{epd}"
 
 

@@ -113,6 +113,7 @@ def budget(conn: sqlite3.Connection, cfg: Config) -> int:
 
 
 def set_budget(conn: sqlite3.Connection, minutes: int) -> None:
+    """Save Today's time budget (one of BUDGETS minutes)."""
     if minutes not in BUDGETS:
         raise ValueError(f"budget must be one of {BUDGETS} minutes")
     with conn:

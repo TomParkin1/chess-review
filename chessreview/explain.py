@@ -42,6 +42,8 @@ STILL_WINNING_CP = 700  # after a missed mate, this much ahead (Lichess' mate ru
 
 @dataclass
 class LineResult:
+    """Material won and lost along a line of moves."""
+
     net: int  # material gained by `color` (negative = lost)
     lost: list[chess.PieceType]  # my pieces captured along the line
     won: list[chess.PieceType]  # opponent pieces I captured along the line
@@ -51,6 +53,8 @@ class LineResult:
 
 @dataclass
 class MoveContext:
+    """Everything the rules need to explain one move: the position, my move and the engine's lines."""
+
     board: chess.Board  # position before my move (me to move)
     move: chess.Move  # the move I played
     best: chess.Move | None  # engine's best move in that position
@@ -124,6 +128,7 @@ RuleResult = tuple[str, str] | None
 
 
 def value(piece_type: chess.PieceType | None) -> int:
+    """Material value of a piece type in pawns (0 for none or a king)."""
     return PIECE_VALUES.get(piece_type, 0) if piece_type else 0
 
 
@@ -246,6 +251,7 @@ def _shown(plies: int) -> int:
 
 
 def material_change(board: chess.Board, line: list[chess.Move], color: chess.Color) -> int:
+    """Material `color` gains along `line` (negative: loses)."""
     return play_line(board, line, color).net
 
 
@@ -292,6 +298,7 @@ def san_line(board: chess.Board, line: list[chess.Move], plies: int = 4) -> str:
 
 
 def describe_material(points: int) -> str:
+    """A number of pawns in words: 'a pawn', 'a piece', 'a rook', ..."""
     if points <= 1:
         return "a pawn"
     if points == 2:
@@ -306,6 +313,7 @@ def describe_material(points: int) -> str:
 
 
 def piece_on(board: chess.Board, square: chess.Square) -> str:
+    """'knight on f3': the piece on a square, for explanations."""
     piece = board.piece_at(square)
     name = chess.piece_name(piece.piece_type) if piece else "piece"
     return f"{name} on {chess.square_name(square)}"
@@ -416,6 +424,7 @@ def _takes_piece(board: chess.Board, move: chess.Move) -> bool:
 
 
 def missed_mate(ctx: MoveContext) -> RuleResult:
+    """I had a forced mate and my move lost it."""
     if ctx.before.mate and ctx.before.mate > 0 and not (ctx.after.mate and ctx.after.mate > 0):
         best = _san(ctx.board, ctx.best)
         if ctx.before.mate == 1:
@@ -432,6 +441,7 @@ def missed_mate(ctx: MoveContext) -> RuleResult:
 
 
 def allowed_mate(ctx: MoveContext) -> RuleResult:
+    """My move lets the opponent force mate."""
     if ctx.after.mate and ctx.after.mate < 0 and not (ctx.before.mate and ctx.before.mate < 0):
         after = ctx.board_after()
         n = -ctx.after.mate
@@ -458,6 +468,7 @@ def bigger_miss(ctx: MoveContext) -> RuleResult:
 
 
 def walked_into_fork(ctx: MoveContext) -> RuleResult:
+    """My move allows a reply that attacks two of my pieces at once."""
     if not ctx.reply_line:
         return None
     after = ctx.board_after()
@@ -523,6 +534,7 @@ def discovered_attack(ctx: MoveContext) -> RuleResult:
 
 
 def hanging_piece(ctx: MoveContext) -> RuleResult:
+    """My move leaves a piece that the opponent can simply take."""
     if not ctx.reply_line:
         return None
     after = ctx.board_after()
@@ -594,12 +606,14 @@ def _why_loose(ctx: MoveContext, target_sq: chess.Square) -> str | None:
 
 
 def loses_material(ctx: MoveContext) -> RuleResult:
+    """My move loses material by force, without a simpler reason."""
     if not _lost(ctx, ctx.min_loss):
         return None
     return "loses_material", f"This loses {describe_trade(ctx.loss)} by force: {ctx.loss_line()}.{_and_drop(ctx)}"
 
 
 def missed_win(ctx: MoveContext) -> RuleResult:
+    """The engine's move would have won material and mine didn't."""
     if not _missed_ok(ctx):
         return None
     return _missed(ctx)
@@ -736,6 +750,7 @@ def missed_opportunity(ctx: MoveContext) -> RuleResult:
 
 
 def positional(ctx: MoveContext) -> RuleResult:
+    """The fallback: no tactic found, so describe how much worse the position got."""
     after = ctx.board_after()
     reply = san_line(after, ctx.reply_line)
     if ctx.before.win_chance() >= 0.3 and ctx.after.win_chance() <= -0.3:
@@ -825,6 +840,7 @@ ATTACKING_KINDS = {"missed_mate", "missed_capture", "missed_tactic"}
 
 
 def hint(kind: str | None) -> str:
+    """The spoiler-free hint for a kind of mistake."""
     return HINTS.get(kind or "", "Think about your opponent's best reply before you move.")
 
 

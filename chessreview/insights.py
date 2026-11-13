@@ -43,14 +43,17 @@ def _games(conn: sqlite3.Connection, time_class: str | None, last: int | None) -
 
 
 def my_accuracy(g: sqlite3.Row) -> float | None:
+    """My accuracy in a game row."""
     return g["accuracy_white"] if g["my_color"] == "white" else g["accuracy_black"]
 
 
 def my_elo(g: sqlite3.Row) -> int | None:
+    """My rating in a game row."""
     return g["white_elo"] if g["my_color"] == "white" else g["black_elo"]
 
 
 def score(results: list[str]) -> float | None:
+    """Percentage score of results ('win', 'draw', 'loss'); None for no games."""
     if not results:
         return None
     return 100 * sum({"win": 1, "draw": 0.5}.get(r, 0) for r in results) / len(results)
@@ -96,6 +99,7 @@ def _times(ratio: float) -> str:
 
 
 def compute(conn: sqlite3.Connection, time_class: str | None = None, last: int | None = None) -> dict:
+    """Everything on the Insights page for my games (optionally one time class or my last N games)."""
     games = _games(conn, time_class, last)
     ids = [g["id"] for g in games]
     if not ids:

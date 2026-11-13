@@ -49,6 +49,8 @@ LOSING_SHARE = 0.6  # a draw goal fails below -60% of it
 
 @dataclass(frozen=True)
 class Task:
+    """A position to play out against Stockfish: a won position from my games or an essential endgame."""
+
     key: str  # "convert/12:34" | "endgame/kq_k"
     kind: str  # 'convert' | 'endgame'
     fen: str
@@ -95,6 +97,7 @@ def finish_text(task: Task) -> str:
 
 
 def endgames() -> list[Task]:
+    """The essential endgames from data/endgames.toml, in unlock order."""
     with open(ENDGAMES_PATH, "rb") as f:
         raw = tomllib.load(f)["endgame"]
     out = []
@@ -186,6 +189,7 @@ def _convert_entry(r: sqlite3.Row) -> dict:
 
 
 def convert_overview(conn: sqlite3.Connection) -> list[dict]:
+    """My won positions to convert, each with its card status."""
     cards = {r["key"]: r for r in conn.execute("SELECT * FROM cards WHERE kind = 'convert'")}
     return [{**e, "status": _status(cards.get(e["key"].split("/", 1)[1]))} for e in convert_positions(conn)]
 
@@ -225,6 +229,7 @@ def _untried_convert(conn: sqlite3.Connection) -> str | None:
 
 
 def task_for(conn: sqlite3.Connection, key: str) -> Task | None:
+    """The task for a key ('convert/<game>:<ply>' or 'endgame/<id>'); None if it doesn't exist."""
     kind, _, rest = key.partition("/")
     if kind == "endgame":
         return next((t for t in endgames() if t.key == key), None)
@@ -275,6 +280,8 @@ def resign_cp(start: Eval) -> int | None:
 
 @dataclass
 class State:
+    """Where a playout stands after a move: still playing, won or failed (and why)."""
+
     status: str  # 'playing' | 'won' | 'failed'
     reason: str = ""
     streak: int = 0  # convert: my moves in a row at Task.resign_cp or more

@@ -44,6 +44,8 @@ class PositionAnalysis:
 
 @dataclass
 class Judgement:
+    """The verdict on a move I try in review, with what to show next."""
+
     uci: str
     san: str
     judgement: str  # good | inaccuracy | mistake | blunder
@@ -72,6 +74,8 @@ class _Stream:
 
 
 class LiveEngine:
+    """Long-lived Stockfish processes for judging tries, streaming analysis and sparring."""
+
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self._judge_engine: chess.engine.SimpleEngine | None = None

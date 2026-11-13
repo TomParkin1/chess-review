@@ -15,6 +15,7 @@ PIECE_VALUES = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, 
 
 
 def non_pawn_material(board: chess.Board) -> int:
+    """Total value of both sides' knights, bishops, rooks and queens."""
     return sum(
         PIECE_VALUES[pt] * len(board.pieces(pt, color))
         for color in chess.COLORS
@@ -23,6 +24,7 @@ def non_pawn_material(board: chess.Board) -> int:
 
 
 def phase(board: chess.Board, ply: int, cfg: Config) -> str:
+    """'opening', 'middlegame' or 'endgame' for a position at `ply`."""
     if non_pawn_material(board) <= cfg.phases.endgame_material:
         return "endgame"
     if ply < cfg.phases.opening_plies:

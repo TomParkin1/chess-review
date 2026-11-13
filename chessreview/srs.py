@@ -209,6 +209,7 @@ def introduced_on(conn: sqlite3.Connection, on: date) -> int:
 
 
 def stats(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> dict:
+    """The Train page's counts: due and new cards, attempts today, mastered, learning, unseen and the streak."""
     on = on or today()
     q = queue(conn, cfg, on)
     row = conn.execute("""
@@ -323,6 +324,7 @@ def record_key(conn: sqlite3.Connection, kind: str, key: str, result: str, on: d
 
 
 def due_lines(conn: sqlite3.Connection, color: str, on: date | None = None) -> list[str]:
+    """Opening-line cards of one colour due by `on`, most overdue first."""
     on = on or today()
     return [
         r[0]
@@ -335,6 +337,7 @@ def due_lines(conn: sqlite3.Connection, color: str, on: date | None = None) -> l
 
 
 def line_stats(conn: sqlite3.Connection, color: str, on: date | None = None) -> dict:
+    """Opening-line card counts of one colour: seen, mastered and due."""
     on = on or today()
     row = conn.execute(
         """SELECT COUNT(*) AS seen, SUM(mastered_on IS NOT NULL) AS mastered,

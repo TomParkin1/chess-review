@@ -49,6 +49,7 @@ def book_positions() -> frozenset[str]:
 
 
 def is_book(board_after_move: chess.Board) -> bool:
+    """Whether the position after a move is on a named opening line."""
     return board_after_move.epd() in book_positions()
 
 

@@ -55,6 +55,8 @@ WDL = {
 
 @dataclass(frozen=True)
 class Move:
+    """A move from the tablebase answer, with its result for the side that plays it."""
+
     uci: str
     san: str
     wdl: int  # for the side that plays it
@@ -73,6 +75,8 @@ class Move:
 
 @dataclass(frozen=True)
 class TbResult:
+    """The tablebase's verdict on a position and its moves."""
+
     wdl: int  # side to move: 2 win, 1 cursed win, 0 draw, -1 blessed loss, -2 loss
     dtm: int | None  # moves to mate (signed, side to move), when the API knows it (<= 5 pieces)
     dtz: int | None
@@ -104,6 +108,7 @@ def choose(tb: TbResult, engine_move: chess.Move | None) -> Move | None:
 
 
 def verdict(wdl: int) -> str:
+    """A WDL value in words."""
     return {
         2: "win",
         1: "win, but not within the 50-move rule",
@@ -129,10 +134,12 @@ def clear_cache() -> None:
 
 
 def enabled(conn: sqlite3.Connection) -> bool:
+    """Whether tablebase lookups are on (Settings)."""
     return db.get_meta(conn, SETTING_KEY) != "off"
 
 
 def set_enabled(conn: sqlite3.Connection, on: bool) -> None:
+    """Turn tablebase lookups on or off."""
     with conn:
         db.set_meta(conn, SETTING_KEY, "on" if on else "off")
 

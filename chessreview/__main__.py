@@ -30,6 +30,7 @@ from .pgn_import import import_paths
 
 
 def cmd_sync(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Fetch new games from chess.com as one import batch."""
     from . import chesscom
 
     user = db.username(conn, cfg)
@@ -55,6 +56,7 @@ def _set_player(conn: sqlite3.Connection, name: str) -> None:
 
 
 def cmd_import(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Import PGN files or folders, naming the player with --as when none is set."""
     before = db.username(conn, cfg)
     switching = bool(args.player) and args.player.lower() != before.lower()
     if switching:
@@ -99,6 +101,7 @@ def _wdl_query(conn: sqlite3.Connection, group_by: str, limit: int | None = None
 
 
 def cmd_summary(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Print results overall, by colour, time class and opening, then a mistake summary."""
     total = conn.execute("SELECT COUNT(*), MIN(date), MAX(date) FROM games").fetchone()
     if not total[0]:
         print("No games imported yet. Run: python -m chessreview import <files>")
@@ -176,6 +179,7 @@ def _format_eta(seconds: float | None) -> str:
 
 
 def cmd_analyse(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Analyse new games with Stockfish, showing progress; Ctrl+C keeps finished games."""
     pending = count_pending(conn)
     total = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     print(f"{total - pending} games analysed and up to date (cached), {pending} to analyse.")
@@ -208,11 +212,13 @@ def cmd_analyse(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace)
 
 
 def cmd_reclassify(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Re-judge every stored move with the current thresholds (no engine needed)."""
     n = ensure_classified(conn, cfg, force=True)
     print(f"Re-classified {n} games with the current thresholds.")
 
 
 def cmd_mistakes(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """List my worst moves with their explanations."""
     ensure_classified(conn, cfg)
     _print_mistakes(conn, args.limit)
 
@@ -230,6 +236,7 @@ def _print_progress(job: AnalysisJob) -> None:
 
 
 def cmd_serve(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Run the web app on 127.0.0.1 with hourly backups until Ctrl+C."""
     from .web import create_app  # Flask is only needed for the web app
 
     refresh(conn, cfg)  # new games now; a full rebuild (new thresholds or version) in the background
@@ -244,6 +251,7 @@ def cmd_serve(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -
 
 
 def cmd_reset(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Delete all games and their analysis after confirmation."""
     n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     if not args.yes:
         answer = input(f"Delete all {n} games and their analysis? PGN files are not touched. [y/N] ")
@@ -254,6 +262,7 @@ def cmd_reset(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -
 
 
 def cmd_backup(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Back up the database (unless --list), then list the copies."""
     folder = backup.folder_for(cfg.db_path)
     if not args.list:
         print(f"Backed up to {backup.make(conn, 'manual', folder)}")
@@ -300,6 +309,7 @@ def cmd_puzzles(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace)
 
 
 def cmd_simulate(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Simulate days of Today on a copy of the database and print the load."""
     from . import simulate
 
     print(
@@ -311,6 +321,7 @@ def cmd_simulate(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace
 
 
 def main() -> None:
+    """Parse the command line, load the config and run the chosen command."""
     parser = argparse.ArgumentParser(
         prog="chessreview", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

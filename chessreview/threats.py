@@ -21,6 +21,8 @@ from .phases import PIECE_VALUES
 
 @dataclass(frozen=True)
 class Threat:
+    """What the opponent would do if I passed, and whether it really threatens something."""
+
     uci: str | None  # the opponent's best move if I passed
     gain: float  # drop in my win chance if I passed (>= 0 in practice)
     real: bool

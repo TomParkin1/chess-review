@@ -27,6 +27,8 @@ FAMILY_ENDINGS = {"Defense", "Defence", "Opening", "Game", "Gambit", "Attack", "
 
 @dataclass
 class ImportStats:
+    """Counts from an import: files, games seen, imported, duplicates and skips by reason."""
+
     files: int = 0
     games_seen: int = 0
     imported: int = 0
@@ -89,6 +91,7 @@ def opening_from_headers(headers: chess.pgn.Headers) -> tuple[str, str]:
 
 
 def dedupe_key(game: chess.pgn.Game, moves_uci: str) -> str:
+    """The game's identity across imports: its Link header, else a hash of players, date and moves."""
     link = game.headers.get("Link", "").strip()
     if link:
         return link
@@ -115,6 +118,7 @@ def clocks_ms(game: chess.pgn.Game) -> str | None:
 
 
 def my_result(result: str, my_color: str) -> str | None:
+    """'win', 'draw' or 'loss' from my side, or None for an unfinished game."""
     if result == "1/2-1/2":
         return "draw"
     if result == "1-0":

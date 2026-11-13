@@ -33,6 +33,8 @@ SINCE_CHOICES = {"all": None, "3m": 3, "1m": 1}
 
 @dataclass
 class SyncResult:
+    """What a sync did: months fetched, import counts and the batch it created."""
+
     months: list[str] = field(default_factory=list)
     stats: ImportStats = field(default_factory=ImportStats)
     batch_id: int | None = None
@@ -55,6 +57,7 @@ class Unavailable(OSError):
 
 
 def fetch_json(url: str, retries: int = 4) -> dict:
+    """GET a chess.com API URL as JSON, retrying rate limits and server errors with back-off."""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     for attempt in range(retries):
         try:

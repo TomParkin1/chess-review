@@ -29,6 +29,8 @@ MIN_GAMES = 10  # a window needs at least this many games to be shown
 
 @dataclass
 class GameStats:
+    """The numbers Progress needs from one analysed game."""
+
     date: str
     result: str
     blunders: int = 0
@@ -96,6 +98,7 @@ def game_stats(conn: sqlite3.Connection, cfg: Config) -> list[GameStats]:
 
 
 def window_metrics(games: list[GameStats]) -> dict:
+    """Averages over a window of games (blunders, accuracy, conversion, ...)."""
     n = len(games)
     blunders = sum(g.blunders for g in games)
     reached = [g for g in games if g.reached_win]
@@ -114,6 +117,7 @@ def window_metrics(games: list[GameStats]) -> dict:
 
 
 def report(conn: sqlite3.Connection, cfg: Config) -> dict:
+    """The Progress page: my last games against the ones before, rolling series and weekly training."""
     window = max(MIN_GAMES, cfg.coach.progress_window)
     games = game_stats(conn, cfg)
     current = games[-window:]

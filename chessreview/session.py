@@ -57,11 +57,13 @@ def expire(conn: sqlite3.Connection, cfg: Config) -> int:
 
 
 def open_batches(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Import batches whose new-games session isn't finished yet."""
     return conn.execute("""SELECT * FROM imports WHERE session_done_at IS NULL AND games_added > 0
                            ORDER BY id""").fetchall()
 
 
 def status(conn: sqlite3.Connection, cfg: Config) -> dict:
+    """The current new-games session: its games, what is left to do and the summary when done."""
     expire(conn, cfg)
     batches = open_batches(conn)
     ids = [b["id"] for b in batches]
@@ -180,6 +182,7 @@ def self_review_rate(conn: sqlite3.Connection, game_ids: list[int] | None = None
 
 
 def mark_done(conn: sqlite3.Connection, batch_ids: list[int]) -> None:
+    """Close the sessions of these import batches."""
     with conn:
         conn.executemany(
             "UPDATE imports SET session_done_at = CURRENT_TIMESTAMP WHERE id = ?", [(i,) for i in batch_ids]

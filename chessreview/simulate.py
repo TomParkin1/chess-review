@@ -37,6 +37,8 @@ MIN_ATTEMPTS = 20  # attempts of a kind needed before my own rate replaces the d
 
 @dataclass
 class Day:
+    """One simulated day of Today: what was due, planned, done and left waiting."""
+
     day: date
     skipped: bool = False
     due: int = 0  # due reviews at the start of the day (all of them)
@@ -59,6 +61,8 @@ class Day:
 
 @dataclass
 class Result:
+    """A simulation run: its settings and every day."""
+
     budget: int
     pace: float
     rates: dict

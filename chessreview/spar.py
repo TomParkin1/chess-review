@@ -48,6 +48,8 @@ PHASES = ("middlegame", "endgame")
 
 @dataclass(frozen=True)
 class Strength:
+    """How to make Stockfish play at a target rating (UCI options, time and move swaps)."""
+
     elo: int  # the target (clamped to MIN_ELO..ELO_MAX)
     options: dict  # UCI options for the limited engine
     limit: chess.engine.Limit
@@ -61,14 +63,17 @@ class Strength:
 
 
 def target_elo(rating: int | None, offset: int) -> int:
+    """The sparring strength for my rating and chosen offset."""
     return (rating or DEFAULT_RATING) + clamp_offset(offset)
 
 
 def clamp_offset(offset: int) -> int:
+    """An offset limited to the OFFSETS range."""
     return min(max(int(offset), OFFSETS[0]), OFFSETS[-1])
 
 
 def strength(elo: int) -> Strength:
+    """Engine settings that play at about `elo` (calibrated below Stockfish's own floor)."""
     elo = min(max(elo, MIN_ELO), ELO_MAX)
     options = {"UCI_LimitStrength": True, "UCI_Elo": max(elo, ELO_FLOOR), "Skill Level": 20}
     limit = chess.engine.Limit(time=MOVE_TIME)
@@ -99,11 +104,13 @@ def levels(conn: sqlite3.Connection) -> list[dict]:
 
 
 def saved_offset(conn: sqlite3.Connection) -> int:
+    """My chosen strength offset (0 if none)."""
     stored = db.get_meta(conn, OFFSET_KEY)
     return clamp_offset(int(stored)) if stored and stored.lstrip("-").isdigit() else 0
 
 
 def save_offset(conn: sqlite3.Connection, offset: int) -> None:
+    """Remember my chosen strength offset."""
     with conn:
         db.set_meta(conn, OFFSET_KEY, str(clamp_offset(offset)))
 
@@ -200,6 +207,7 @@ def record(
     result: str,
     reason: str,
 ) -> int:
+    """Store a finished sparring game and return its id."""
     with conn:
         game_id = conn.execute(
             """INSERT INTO spar_games (source, start_fen, color, elo, elo_offset, moves, result, reason)
@@ -238,4 +246,5 @@ def history(conn: sqlite3.Connection, limit: int = 20) -> dict:
 
 
 def game(conn: sqlite3.Connection, game_id: int) -> sqlite3.Row | None:
+    """A stored sparring game, or None."""
     return conn.execute("SELECT * FROM spar_games WHERE id = ?", (game_id,)).fetchone()

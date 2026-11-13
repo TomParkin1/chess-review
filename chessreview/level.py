@@ -39,6 +39,7 @@ WINNING_BANDS = [(1200, 500), (1800, 400), (None, 300)]
 
 
 def winning_cp(rating: int | None) -> int:
+    """The eval (centipawns) that counts as clearly winning at `rating`."""
     for below, cp in WINNING_BANDS:
         if below is None or (rating or 0) < below:
             return cp

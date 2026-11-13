@@ -54,6 +54,8 @@ _lock = threading.RLock()  # one copy or restore at a time
 
 @dataclass(frozen=True)
 class Backup:
+    """A backup file found in the backups folder."""
+
     path: Path
     kind: str
     at: datetime
@@ -74,6 +76,7 @@ class Backup:
 
 
 def folder_for(db_path: Path | str) -> Path:
+    """The backups folder that belongs to the database at `db_path`."""
     return Path(db_path).parent / "backups"
 
 

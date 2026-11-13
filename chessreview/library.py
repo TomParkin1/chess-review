@@ -137,6 +137,8 @@ def themes_for(train: dict | None) -> list[str]:
 
 @dataclass
 class FetchProgress:
+    """Progress of the puzzle library download, shown in Settings."""
+
     state: str = "idle"  # idle | running | done | error
     bytes_read: int = 0
     bytes_total: int = 0
@@ -254,10 +256,12 @@ def fetch(
 
 
 def count(conn: sqlite3.Connection) -> int:
+    """Number of puzzles in the library."""
     return conn.execute("SELECT COUNT(*) FROM puzzles").fetchone()[0]
 
 
 def themes_stamp() -> str:
+    """The sampled themes as one string, to tell when the library is out of date."""
     return " ".join(sorted(THEMES))
 
 
@@ -271,6 +275,7 @@ def outdated(conn: sqlite3.Connection) -> bool:
 
 
 def rating(conn: sqlite3.Connection) -> int:
+    """My puzzle rating: stored, else my current game rating, else DEFAULT_RATING."""
     stored = db.get_meta(conn, RATING_KEY)
     if stored is not None:
         return round(float(stored))
@@ -281,6 +286,7 @@ SCORES = {"solved": 1.0, "solved_with_help": 0.5}  # anything else scores 0
 
 
 def k_factor(played: int) -> float:
+    """Elo K-factor after `played` puzzles: large at first so a bad starting rating corrects quickly."""
     return max(16.0, 40 - 24 * min(played, 100) / 100, 120 * 0.8**played)
 
 

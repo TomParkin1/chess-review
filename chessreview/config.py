@@ -36,17 +36,23 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class PlayerConfig:
+    """[player]: whose games these are."""
+
     username: str = ""  # chess.com username; the app's Settings can set it instead (db.username)
 
 
 @dataclass(frozen=True)
 class ImportConfig:
+    """[import]: which games to skip."""
+
     min_plies: int = 10
     skip_variants: bool = True
 
 
 @dataclass(frozen=True)
 class EngineConfig:
+    """[engine]: Stockfish and how long it looks at each position."""
+
     path: str = ""  # Stockfish executable; empty = find it (engine.find_stockfish)
     time_per_position: float = 0.3
     max_depth: int = 0  # stop a position early at this depth (0 = no depth limit)
@@ -65,6 +71,8 @@ def effective_workers(engine: EngineConfig) -> int:
 
 @dataclass(frozen=True)
 class ClassificationConfig:
+    """[classification]: what counts as an inaccuracy, mistake or blunder."""
+
     mode: str = "winchance"
     inaccuracy: float = 0.1
     mistake: float = 0.2
@@ -77,12 +85,16 @@ class ClassificationConfig:
 
 @dataclass(frozen=True)
 class PhaseConfig:
+    """[phases]: where the opening ends and the endgame starts."""
+
     opening_plies: int = 20
     endgame_material: int = 13
 
 
 @dataclass(frozen=True)
 class ReviewConfig:
+    """[review]: how puzzles from my mistakes are played out and judged."""
+
     playout_tactical: int = 3  # my moves to play out when I missed a mate/tactic/capture
     playout_other: int = 1  # my moves to play out for defensive/positional mistakes
     live_time: float = 0.35  # seconds per position when judging moves I try (4 threads)
@@ -90,12 +102,16 @@ class ReviewConfig:
 
 @dataclass(frozen=True)
 class AnalysisConfig:
+    """[analysis]: the free analysis board."""
+
     max_seconds: float = 10  # live analysis stops after this long per position
     multipv: int = 3  # engine lines shown on the analysis board
 
 
 @dataclass(frozen=True)
 class TrainingConfig:
+    """[training]: which mistakes become cards, and how many a day."""
+
     new_per_day: int = 10  # new mistakes introduced into daily training per day
     include_inaccuracies: bool = False
     blind: bool = True  # Train shows positions "as in a real game" (no badge, no arrow)
@@ -103,6 +119,8 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class CoachConfig:
+    """[coach]: how Today's plan, sessions and Progress are put together."""
+
     calm_ratio: float = 0.3  # share of the real-game deck that is positions I handled well
     recent_games: int = 100  # calm positions come from my last N games
     budget_minutes: int = 20  # Today: default time budget (10, 20 or 30; the Today page changes it)
@@ -117,6 +135,8 @@ class CoachConfig:
 
 @dataclass(frozen=True)
 class BackupConfig:
+    """[backup]: how many copies of each kind are kept."""
+
     daily: int = 7  # daily copies kept in data/backups (backup.py)
     weekly: int = 4  # weekly copies kept
     other: int = 10  # copies made by hand or before Delete all, reclassify, migrations...
@@ -124,6 +144,8 @@ class BackupConfig:
 
 @dataclass(frozen=True)
 class Config:
+    """All settings, one dataclass per section of config.toml."""
+
     player: PlayerConfig
     imports: ImportConfig
     engine: EngineConfig
