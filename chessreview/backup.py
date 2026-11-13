@@ -19,6 +19,7 @@ shared pool of the newest `other` copies of every other kind.
 This module only uses the standard library (db.py imports it for the pre-migration copy).
 """
 
+import logging
 import os
 import re
 import shutil
@@ -30,6 +31,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import BackupConfig
+
+log = logging.getLogger(__name__)
 
 KINDS = {
     "daily": "Daily",
@@ -256,7 +259,7 @@ class DailyBackups:
             try:
                 daily(self.db_path, self.keep)
             except (OSError, sqlite3.Error) as exc:  # e.g. disk full: try again next hour
-                print(f"Daily backup failed: {exc}")
+                log.warning("Daily backup failed: %s", exc)
             self._stop.wait(self.interval)
 
     def stop(self) -> None:
