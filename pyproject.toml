@@ -46,10 +46,17 @@ filterwarnings = ["ignore::DeprecationWarning:chess.engine"]
 line-length = 120
 target-version = "py314"
 
+[tool.ruff.format]
+# Keep short collections on one line when they fit, rather than one item per line.
+skip-magic-trailing-comma = true
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 # Temporary while the code is reformatted to 120 columns (removed in the lint-and-types change).
 ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["chessreview.config.BackupConfig"]

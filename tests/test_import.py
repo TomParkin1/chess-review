@@ -8,13 +8,7 @@ import pytest
 
 from chessreview import db
 from chessreview.config import load_config
-from chessreview.pgn_import import (
-    ImportStats,
-    import_game,
-    import_paths,
-    opening_from_headers,
-    time_class,
-)
+from chessreview.pgn_import import ImportStats, import_game, import_paths, opening_from_headers, time_class
 
 SAMPLE = Path(__file__).parent / "data" / "sample.pgn"
 
@@ -59,10 +53,18 @@ def test_game_without_link_deduped_by_hash(conn, cfg):
     assert any(k.startswith("sha1:") for k in keys)
 
 
-@pytest.mark.parametrize("tc,expected", [
-    ("60", "bullet"), ("120+1", "bullet"), ("180", "blitz"), ("180+2", "blitz"),
-    ("600", "rapid"), ("1/86400", "daily"), ("", "unknown"),
-])
+@pytest.mark.parametrize(
+    "tc,expected",
+    [
+        ("60", "bullet"),
+        ("120+1", "bullet"),
+        ("180", "blitz"),
+        ("180+2", "blitz"),
+        ("600", "rapid"),
+        ("1/86400", "daily"),
+        ("", "unknown"),
+    ],
+)
 def test_time_class(tc, expected):
     assert time_class(tc) == expected
 
@@ -85,14 +87,15 @@ def test_concurrent_import_of_the_same_game_is_a_duplicate(tmp_path, cfg):
     a, b = db.connect(tmp_path / "race.db"), db.connect(tmp_path / "race.db")
     game = chess.pgn.read_game(io.StringIO(SAMPLE.read_text()))
     first, second, errors = ImportStats(), ImportStats(), []
-    import_game(a, game, cfg, "a", first)            # stored but not committed: A holds the write lock
+    import_game(a, game, cfg, "a", first)  # stored but not committed: A holds the write lock
 
     def other():
         try:
-            import_game(b, game, cfg, "b", second)   # its check can't see A's game; its insert waits
+            import_game(b, game, cfg, "b", second)  # its check can't see A's game; its insert waits
             b.commit()
-        except Exception as exc:                      # before the fix: sqlite3.IntegrityError
+        except Exception as exc:  # before the fix: sqlite3.IntegrityError
             errors.append(exc)
+
     thread = threading.Thread(target=other)
     thread.start()
     time.sleep(0.3)

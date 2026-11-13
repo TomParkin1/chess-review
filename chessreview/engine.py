@@ -51,21 +51,22 @@ class PositionResult:
     second_cp: int | None = None
     second_mate: int | None = None
     second_uci: str | None = None
-    threat_cp: int | None = None      # eval after a null move (White's POV), my positions only
+    threat_cp: int | None = None  # eval after a null move (White's POV), my positions only
     threat_mate: int | None = None
-    threat_uci: str | None = None     # the opponent's best move if I passed
-    threat_pv: str | None = None      # ...and the line that follows (space-separated)
+    threat_uci: str | None = None  # the opponent's best move if I passed
+    threat_pv: str | None = None  # ...and the line that follows (space-separated)
 
 
 @dataclass
 class PositionEval:
     """Engine view of one position, White's point of view."""
+
     score_cp: int | None
     score_mate: int | None
     best_uci: str | None
     pv_uci: str
     depth: int | None
-    second_cp: int | None = None      # the second-best move's score (None if only one move)
+    second_cp: int | None = None  # the second-best move's score (None if only one move)
     second_mate: int | None = None
     second_uci: str | None = None
 
@@ -109,8 +110,7 @@ def open_engine(cfg: Config, threads: int | None = None) -> chess.engine.SimpleE
     return engine
 
 
-def analyse_position(engine: chess.engine.SimpleEngine, board: chess.Board,
-                     cfg: Config) -> PositionEval:
+def analyse_position(engine: chess.engine.SimpleEngine, board: chess.Board, cfg: Config) -> PositionEval:
     """Analyse one position with the two best lines (MultiPV 2)."""
     if board.is_checkmate():
         cp = -MATED_CP if board.turn == chess.WHITE else MATED_CP
@@ -124,10 +124,7 @@ def analyse_position(engine: chess.engine.SimpleEngine, board: chess.Board,
     score = first["score"].white()
     pv = first.get("pv", [])[: cfg.engine.pv_length]
     result = PositionEval(
-        score.score(), score.mate(),
-        pv[0].uci() if pv else None,
-        " ".join(m.uci() for m in pv),
-        first.get("depth"),
+        score.score(), score.mate(), pv[0].uci() if pv else None, " ".join(m.uci() for m in pv), first.get("depth")
     )
     if len(infos) > 1 and infos[1].get("pv"):
         second = infos[1]["score"].white()
@@ -143,10 +140,10 @@ def threat_board(board: chess.Board) -> chess.Board | None:
         return None
     passed = board.copy(stack=False)
     passed.push(chess.Move.null())
-    return chess.Board(passed.fen())   # no null move in the history (UCI can't transmit it)
+    return chess.Board(passed.fen())  # no null move in the history (UCI can't transmit it)
 
 
-Threat = tuple[int | None, int | None, str | None, str | None]   # cp, mate, move, line
+Threat = tuple[int | None, int | None, str | None, str | None]  # cp, mate, move, line
 
 
 def analyse_threat(engine: chess.engine.SimpleEngine, board: chess.Board, cfg: Config) -> Threat:
@@ -167,8 +164,13 @@ def _game_moves(game: sqlite3.Row) -> tuple[chess.Board, list[chess.Move], chess
     return board, moves, chess.WHITE if game["my_color"] == "white" else chess.BLACK
 
 
-def analyse_game(engine: chess.engine.SimpleEngine, game: sqlite3.Row, cfg: Config,
-                 on_position=None, stop: threading.Event | None = None) -> list[PositionResult] | None:
+def analyse_game(
+    engine: chess.engine.SimpleEngine,
+    game: sqlite3.Row,
+    cfg: Config,
+    on_position=None,
+    stop: threading.Event | None = None,
+) -> list[PositionResult] | None:
     """Analyse every position of a game (plus threats on my moves). None if stopped part-way."""
     board, moves, me = _game_moves(game)
     results = []
@@ -178,11 +180,18 @@ def analyse_game(engine: chess.engine.SimpleEngine, game: sqlite3.Row, cfg: Conf
         move = moves[ply] if ply < len(moves) else None
         e = analyse_position(engine, board, cfg)
         r = PositionResult(
-            ply=ply, fen=board.fen(),
+            ply=ply,
+            fen=board.fen(),
             move_uci=move.uci() if move else None,
             move_san=board.san(move) if move else None,
-            score_cp=e.score_cp, score_mate=e.score_mate, best_uci=e.best_uci, pv_uci=e.pv_uci,
-            depth=e.depth, second_cp=e.second_cp, second_mate=e.second_mate, second_uci=e.second_uci,
+            score_cp=e.score_cp,
+            score_mate=e.score_mate,
+            best_uci=e.best_uci,
+            pv_uci=e.pv_uci,
+            depth=e.depth,
+            second_cp=e.second_cp,
+            second_mate=e.second_mate,
+            second_uci=e.second_uci,
         )
         if move and board.turn == me:
             r.threat_cp, r.threat_mate, r.threat_uci, r.threat_pv = analyse_threat(engine, board, cfg)
@@ -196,9 +205,13 @@ def analyse_game(engine: chess.engine.SimpleEngine, game: sqlite3.Row, cfg: Conf
     return results
 
 
-def analyse_game_threats(engine: chess.engine.SimpleEngine, game: sqlite3.Row, cfg: Config,
-                         on_position=None, stop: threading.Event | None = None
-                         ) -> list[tuple[int, Threat]] | None:
+def analyse_game_threats(
+    engine: chess.engine.SimpleEngine,
+    game: sqlite3.Row,
+    cfg: Config,
+    on_position=None,
+    stop: threading.Event | None = None,
+) -> list[tuple[int, Threat]] | None:
     """Threat search only (for games analysed before threats existed): [(ply, threat)]."""
     board, moves, me = _game_moves(game)
     out = []
@@ -220,8 +233,7 @@ def my_move_count(game: sqlite3.Row) -> int:
     return (game["num_plies"] + (1 if mine_first else 0)) // 2
 
 
-def save_game_analysis(conn: sqlite3.Connection, game_id: int,
-                       results: list[PositionResult]) -> None:
+def save_game_analysis(conn: sqlite3.Connection, game_id: int, results: list[PositionResult]) -> None:
     with conn:  # one transaction: a game is either fully stored or not at all
         conn.execute("DELETE FROM positions WHERE game_id = ?", (game_id,))
         conn.executemany(
@@ -229,22 +241,45 @@ def save_game_analysis(conn: sqlite3.Connection, game_id: int,
                    score_mate, best_uci, pv_uci, depth, second_cp, second_mate, second_uci,
                    threat_cp, threat_mate, threat_uci, threat_pv)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            [(game_id, r.ply, r.fen, r.move_uci, r.move_san, r.score_cp, r.score_mate,
-              r.best_uci, r.pv_uci, r.depth, r.second_cp, r.second_mate, r.second_uci,
-              r.threat_cp, r.threat_mate, r.threat_uci, r.threat_pv)
-             for r in results],
+            [
+                (
+                    game_id,
+                    r.ply,
+                    r.fen,
+                    r.move_uci,
+                    r.move_san,
+                    r.score_cp,
+                    r.score_mate,
+                    r.best_uci,
+                    r.pv_uci,
+                    r.depth,
+                    r.second_cp,
+                    r.second_mate,
+                    r.second_uci,
+                    r.threat_cp,
+                    r.threat_mate,
+                    r.threat_uci,
+                    r.threat_pv,
+                )
+                for r in results
+            ],
         )
         # New evals invalidate the classification; ensure_classified() rebuilds it.
         conn.execute("DELETE FROM mistakes WHERE game_id = ?", (game_id,))
-        conn.execute("""UPDATE games SET analysed_at = CURRENT_TIMESTAMP, analysis_version = ?,
-                            threat_version = ? WHERE id = ?""", (ANALYSIS_VERSION, THREAT_VERSION, game_id))
+        conn.execute(
+            """UPDATE games SET analysed_at = CURRENT_TIMESTAMP, analysis_version = ?,
+                            threat_version = ? WHERE id = ?""",
+            (ANALYSIS_VERSION, THREAT_VERSION, game_id),
+        )
 
 
 def save_threats(conn: sqlite3.Connection, game_id: int, threats: list[tuple[int, Threat]]) -> None:
     with conn:
-        conn.executemany("""UPDATE positions SET threat_cp = ?, threat_mate = ?, threat_uci = ?, threat_pv = ?
+        conn.executemany(
+            """UPDATE positions SET threat_cp = ?, threat_mate = ?, threat_uci = ?, threat_pv = ?
                             WHERE game_id = ? AND ply = ?""",
-                         [(*threat, game_id, ply) for ply, threat in threats])
+            [(*threat, game_id, ply) for ply, threat in threats],
+        )
         conn.execute("UPDATE games SET threat_version = ? WHERE id = ?", (THREAT_VERSION, game_id))
 
 
@@ -275,7 +310,7 @@ def count_pending(conn: sqlite3.Connection) -> int:
 
 @dataclass
 class Progress:
-    state: str = "idle"            # idle | running | stopping | done | error
+    state: str = "idle"  # idle | running | stopping | done | error
     games_total: int = 0
     games_done: int = 0
     positions_total: int = 0
@@ -296,9 +331,14 @@ class Progress:
 
     def as_dict(self) -> dict:
         return {
-            "state": self.state, "games_total": self.games_total, "games_done": self.games_done,
-            "positions_total": self.positions_total, "positions_done": self.positions_done,
-            "fraction": self.fraction, "eta_seconds": self.eta_seconds, "errors": self.errors[-5:],
+            "state": self.state,
+            "games_total": self.games_total,
+            "games_done": self.games_done,
+            "positions_total": self.positions_total,
+            "positions_done": self.positions_done,
+            "fraction": self.fraction,
+            "eta_seconds": self.eta_seconds,
+            "errors": self.errors[-5:],
         }
 
 
@@ -347,8 +387,9 @@ class AnalysisJob:
                         games = games[: max(0, self.limit - len(attempted))]
                     # Threat-only pass for games analysed before threats existed (not when limited:
                     # `analyse --limit` is about new games).
-                    threat_only = [] if self.limit else [
-                        g for g in pending_threat_games(conn) if g["id"] not in attempted]
+                    threat_only = (
+                        [] if self.limit else [g for g in pending_threat_games(conn) if g["id"] not in attempted]
+                    )
                 finally:
                     conn.close()
                 if not games and not threat_only:
@@ -356,8 +397,9 @@ class AnalysisJob:
                 attempted.update(g["id"] for g in games + threat_only)
                 with self._lock:
                     self.progress.games_total += len(games) + len(threat_only)
-                    self.progress.positions_total += (sum(g["num_plies"] + 1 + my_move_count(g) for g in games)
-                                                      + sum(my_move_count(g) for g in threat_only))
+                    self.progress.positions_total += sum(g["num_plies"] + 1 + my_move_count(g) for g in games) + sum(
+                        my_move_count(g) for g in threat_only
+                    )
 
                 work: queue.Queue = queue.Queue()
                 for g in games:
@@ -366,8 +408,7 @@ class AnalysisJob:
                     work.put(("threats", g))
                 games = games + threat_only
                 n_workers = max(1, min(effective_workers(self.cfg.engine), len(games)))
-                workers = [threading.Thread(target=self._worker, args=(work,), daemon=True)
-                           for _ in range(n_workers)]
+                workers = [threading.Thread(target=self._worker, args=(work,), daemon=True) for _ in range(n_workers)]
                 for w in workers:
                     w.start()
                 for w in workers:
@@ -393,8 +434,7 @@ class AnalysisJob:
                     break
                 analyse = analyse_game if task == "full" else analyse_game_threats
                 try:
-                    results = analyse(engine, game, self.cfg,
-                                      on_position=self._count_position, stop=self._stop)
+                    results = analyse(engine, game, self.cfg, on_position=self._count_position, stop=self._stop)
                 except chess.engine.EngineError as exc:
                     # Engine crashed or misbehaved: note it, restart and carry on.
                     self.progress.errors.append(f"game {game['id']}: {exc}")

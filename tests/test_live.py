@@ -9,8 +9,9 @@ from chessreview.live import LiveEngine
 @pytest.fixture
 def live(stockfish):
     base = load_config()
-    cfg = replace(base, review=replace(base.review, live_time=0.2),
-                  analysis=replace(base.analysis, max_seconds=1, multipv=3))
+    cfg = replace(
+        base, review=replace(base.review, live_time=0.2), analysis=replace(base.analysis, max_seconds=1, multipv=3)
+    )
     engine = LiveEngine(cfg)
     yield engine
     engine.close()
@@ -53,7 +54,7 @@ def test_stream_deepens_and_new_stream_cancels_old(live):
     assert len(snapshots[-1]["lines"]) == 3
 
     first = live.stream(start)
-    next(first)                      # first stream is running and its reader is paused
+    next(first)  # first stream is running and its reader is paused
     second = list(live.stream(MATE_IN_ONE))
     assert second[-1]["lines"][0]["uci"] == "a1a8"
     assert not any(s.get("done") for s in first)  # cancelled: ends without a final snapshot

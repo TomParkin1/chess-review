@@ -34,26 +34,26 @@ from .classify import Eval
 
 ENDGAMES_PATH = Path(__file__).parent / "data" / "endgames.toml"
 LEVELS = {1: "Beginner", 2: "Intermediate", 3: "Advanced"}
-RESIGN_CP = 700          # decisive: a promotion or bare king counts from here; convert resigns no lower
-RESIGN_GAIN = 300        # convert positions resign 3 pawns above their start (P11)...
-RESIGN_MOVES = 3         # ...held for this many of my moves in a row
-RESIGN_MATE = 5          # every finish but "mate" also ends when Stockfish is mated in this many or fewer
+RESIGN_CP = 700  # decisive: a promotion or bare king counts from here; convert resigns no lower
+RESIGN_GAIN = 300  # convert positions resign 3 pawns above their start (P11)...
+RESIGN_MOVES = 3  # ...held for this many of my moves in a row
+RESIGN_MATE = 5  # every finish but "mate" also ends when Stockfish is mated in this many or fewer
 FINISHES = ("mate", "promote", "bare_king", "hold", "resign")
-HOLD_MOVES = 15          # a draw goal is reached after holding this many of my moves
+HOLD_MOVES = 15  # a draw goal is reached after holding this many of my moves
 CONVERT_MAX_PLIES = 120
 ENDGAME_MAX_PLIES = 100
-SLIP_SHARE = 0.4         # convert fails below 40% of the "clearly winning" bar
-LOSING_SHARE = 0.6       # a draw goal fails below -60% of it
+SLIP_SHARE = 0.4  # convert fails below 40% of the "clearly winning" bar
+LOSING_SHARE = 0.6  # a draw goal fails below -60% of it
 
 
 @dataclass(frozen=True)
 class Task:
-    key: str               # "convert/12:34" | "endgame/kq_k"
-    kind: str              # 'convert' | 'endgame'
+    key: str  # "convert/12:34" | "endgame/kq_k"
+    kind: str  # 'convert' | 'endgame'
     fen: str
-    color: str             # my colour: 'white' | 'black'
-    goal: str              # 'win' | 'draw'
-    finish: str            # FINISHES: 'mate' | 'promote' | 'bare_king' | 'hold' (endgames), 'resign' (convert)
+    color: str  # my colour: 'white' | 'black'
+    goal: str  # 'win' | 'draw'
+    finish: str  # FINISHES: 'mate' | 'promote' | 'bare_king' | 'hold' (endgames), 'resign' (convert)
     title: str
     subtitle: str = ""
     tip: str = ""
@@ -62,8 +62,8 @@ class Task:
     game_id: int | None = None
     ply: int | None = None
     start_eval: str | None = None
-    start_cp: int | None = None    # my eval at the start, in centipawns (convert positions only)
-    resign_cp: int | None = None   # convert: Stockfish resigns at this eval (None: the start is a mate)
+    start_cp: int | None = None  # my eval at the start, in centipawns (convert positions only)
+    resign_cp: int | None = None  # convert: Stockfish resigns at this eval (None: the start is a mate)
 
     @property
     def card_key(self) -> str:
@@ -92,17 +92,28 @@ def finish_text(task: Task) -> str:
 
 # ------------------------------------------------------------ essential endgames
 
+
 def endgames() -> list[Task]:
     with open(ENDGAMES_PATH, "rb") as f:
         raw = tomllib.load(f)["endgame"]
     out = []
     for e in raw:
         board = chess.Board(e["fen"])
-        out.append(Task(
-            key=f"endgame/{e['id']}", kind="endgame", fen=e["fen"],
-            color="white" if board.turn == chess.WHITE else "black", goal=e["goal"], finish=e["finish"],
-            title=e["title"], subtitle=f"{LEVELS[e['level']]} · {'win' if e['goal'] == 'win' else 'hold the draw'}",
-            tip=e.get("tip", ""), max_plies=e.get("max_plies", ENDGAME_MAX_PLIES), level=e["level"]))
+        out.append(
+            Task(
+                key=f"endgame/{e['id']}",
+                kind="endgame",
+                fen=e["fen"],
+                color="white" if board.turn == chess.WHITE else "black",
+                goal=e["goal"],
+                finish=e["finish"],
+                title=e["title"],
+                subtitle=f"{LEVELS[e['level']]} · {'win' if e['goal'] == 'win' else 'hold the draw'}",
+                tip=e.get("tip", ""),
+                max_plies=e.get("max_plies", ENDGAME_MAX_PLIES),
+                level=e["level"],
+            )
+        )
     return out
 
 
@@ -116,8 +127,7 @@ def endgame_overview(conn: sqlite3.Connection) -> list[dict]:
     unlocked = 1
     while all(solved.get(unlocked, [False])) and unlocked + 1 in solved:
         unlocked += 1
-    return [{**t.as_dict(), "unlocked": t.level <= unlocked, "status": _status(cards.get(t.card_key))}
-            for t in tasks]
+    return [{**t.as_dict(), "unlocked": t.level <= unlocked, "status": _status(cards.get(t.card_key))} for t in tasks]
 
 
 def _status(card: sqlite3.Row | None) -> str:
@@ -131,6 +141,7 @@ def _status(card: sqlite3.Row | None) -> str:
 
 
 # ------------------------------------------------------------ won positions from my games
+
 
 def convert_positions(conn: sqlite3.Connection) -> list[dict]:
     """The first clearly winning position of each game (held on my next move too); games I
@@ -151,16 +162,24 @@ def convert_positions(conn: sqlite3.Connection) -> list[dict]:
             if (here["win_before"] or -1) >= winning and (nxt["win_before"] or -1) >= winning:
                 out.append(_convert_entry(here))
                 break
-    out.sort(key=lambda e: e["end_time"] or "", reverse=True)               # newest first...
-    return sorted(out, key=lambda e: {"loss": 0, "draw": 1, "win": 2}[e["result"]])   # ...within losses, draws, wins
+    out.sort(key=lambda e: e["end_time"] or "", reverse=True)  # newest first...
+    return sorted(out, key=lambda e: {"loss": 0, "draw": 1, "win": 2}[e["result"]])  # ...within losses, draws, wins
 
 
 def _convert_entry(r: sqlite3.Row) -> dict:
     me = chess.WHITE if r["my_color"] == "white" else chess.BLACK
-    return {"key": f"convert/{r['game_id']}:{r['ply']}", "game_id": r["game_id"], "ply": r["ply"],
-            "fen": r["fen"], "color": r["my_color"], "result": r["my_result"],
-            "opponent": r["black"] if r["my_color"] == "white" else r["white"], "date": r["date"],
-            "end_time": r["end_time"], "eval": str(Eval.from_row(r, me))}
+    return {
+        "key": f"convert/{r['game_id']}:{r['ply']}",
+        "game_id": r["game_id"],
+        "ply": r["ply"],
+        "fen": r["fen"],
+        "color": r["my_color"],
+        "result": r["my_result"],
+        "opponent": r["black"] if r["my_color"] == "white" else r["white"],
+        "date": r["date"],
+        "end_time": r["end_time"],
+        "eval": str(Eval.from_row(r, me)),
+    }
 
 
 def convert_overview(conn: sqlite3.Connection) -> list[dict]:
@@ -176,17 +195,22 @@ def next_convert(conn: sqlite3.Connection, on=None) -> str | None:
 def next_endgame(conn: sqlite3.Connection, on=None) -> str | None:
     """Today's endgame to play (E2): a due essential endgame, else a due Convert position, else the
     next essential endgame never played (in unlock order), else a won position never tried."""
-    return (_due(conn, "endgame", on) or _due(conn, "convert", on)
-            or next((e["key"] for e in endgame_overview(conn) if e["unlocked"] and e["status"] == "new"), None)
-            or _untried_convert(conn))
+    return (
+        _due(conn, "endgame", on)
+        or _due(conn, "convert", on)
+        or next((e["key"] for e in endgame_overview(conn) if e["unlocked"] and e["status"] == "new"), None)
+        or _untried_convert(conn)
+    )
 
 
 def _due(conn: sqlite3.Connection, kind: str, on=None) -> str | None:
     """The most overdue card of a kind ('convert' | 'endgame') whose task still exists."""
     on = on or srs.today()
-    for r in conn.execute("""SELECT key FROM cards WHERE kind = ? AND mastered_on IS NULL
+    for r in conn.execute(
+        """SELECT key FROM cards WHERE kind = ? AND mastered_on IS NULL
                              AND due_on IS NOT NULL AND due_on <= ? ORDER BY due_on, box""",
-                          (kind, on.isoformat())):
+        (kind, on.isoformat()),
+    ):
         if task_for(conn, f"{kind}/{r['key']}") is not None:
             return f"{kind}/{r['key']}"
     return None
@@ -203,21 +227,36 @@ def task_for(conn: sqlite3.Connection, key: str) -> Task | None:
         return next((t for t in endgames() if t.key == key), None)
     game, _, ply_text = rest.partition(":")
     if kind != "convert" or not game.isdigit() or not ply_text.isdigit():
-        return None     # a malformed key is an unknown position, not an error
+        return None  # a malformed key is an unknown position, not an error
     game_id, ply = int(game), int(ply_text)
-    r = conn.execute("""SELECT p.fen, p.score_cp, p.score_mate, g.my_color, g.my_result, g.white, g.black, g.date
+    r = conn.execute(
+        """SELECT p.fen, p.score_cp, p.score_mate, g.my_color, g.my_result, g.white, g.black, g.date
                         FROM positions p JOIN games g ON g.id = p.game_id
-                        WHERE p.game_id = ? AND p.ply = ?""", (game_id, ply)).fetchone()
+                        WHERE p.game_id = ? AND p.ply = ?""",
+        (game_id, ply),
+    ).fetchone()
     me = chess.WHITE if r is not None and r["my_color"] == "white" else chess.BLACK
-    if r is None or chess.Board(r["fen"]).turn != me:     # only positions where it is my move
+    if r is None or chess.Board(r["fen"]).turn != me:  # only positions where it is my move
         return None
     opponent = r["black"] if r["my_color"] == "white" else r["white"]
     outcome = {"win": "won", "loss": "lost", "draw": "drew"}.get(r["my_result"], "played")
     start = Eval.from_row(r, me)
-    return Task(key=key, kind="convert", fen=r["fen"], color=r["my_color"], goal="win", finish="resign",
-                title=f"vs {opponent}, move {ply // 2 + 1}", subtitle=f"{r['date']} · in the game you {outcome}",
-                max_plies=CONVERT_MAX_PLIES, game_id=game_id, ply=ply, start_eval=str(start),
-                start_cp=start.as_cp(), resign_cp=resign_cp(start))
+    return Task(
+        key=key,
+        kind="convert",
+        fen=r["fen"],
+        color=r["my_color"],
+        goal="win",
+        finish="resign",
+        title=f"vs {opponent}, move {ply // 2 + 1}",
+        subtitle=f"{r['date']} · in the game you {outcome}",
+        max_plies=CONVERT_MAX_PLIES,
+        game_id=game_id,
+        ply=ply,
+        start_eval=str(start),
+        start_cp=start.as_cp(),
+        resign_cp=resign_cp(start),
+    )
 
 
 def resign_cp(start: Eval) -> int | None:
@@ -230,15 +269,22 @@ def resign_cp(start: Eval) -> int | None:
 
 # ------------------------------------------------------------ playing it out
 
+
 @dataclass
 class State:
-    status: str            # 'playing' | 'won' | 'failed'
+    status: str  # 'playing' | 'won' | 'failed'
     reason: str = ""
-    streak: int = 0        # convert: my moves in a row at Task.resign_cp or more
+    streak: int = 0  # convert: my moves in a row at Task.resign_cp or more
 
 
-def state(task: Task, board: chess.Board, ev: Eval | None, streak: int, rating: int | None,
-          tb: tuple[int | None, int | None, int] | None = None) -> State:
+def state(
+    task: Task,
+    board: chess.Board,
+    ev: Eval | None,
+    streak: int,
+    rating: int | None,
+    tb: tuple[int | None, int | None, int] | None = None,
+) -> State:
     """Where the playout stands after a move (`ev`: engine eval from my side, None if the game is over).
     `tb` = (WDL at the task's start, before my last move, after it), from my side, when the tablebase
     knows the position after my move (E3; the others are None when it doesn't know them: more than
@@ -257,7 +303,7 @@ def state(task: Task, board: chess.Board, ev: Eval | None, streak: int, rating: 
     if exact:
         return State("failed", exact, streak)
     if tb is not None and not _judged_exactly(task, tb):
-        tb = None              # a start the tablebase calls no better than the goal: the eval rules judge
+        tb = None  # a start the tablebase calls no better than the goal: the eval rules judge
     if ev.mate is not None and ev.mate < 0:
         return State("failed", "You are getting mated.")
     if task.goal == "draw":
@@ -273,7 +319,8 @@ def state(task: Task, board: chess.Board, ev: Eval | None, streak: int, rating: 
             return State("won", milestone)
     if task.finish == "resign":
         at_bar = task.resign_cp is not None and (
-            (ev.mate is not None and ev.mate > 0) or (ev.cp or 0) >= task.resign_cp)
+            (ev.mate is not None and ev.mate > 0) or (ev.cp or 0) >= task.resign_cp
+        )
         streak = streak + 1 if at_bar else 0
         if streak >= RESIGN_MOVES:
             return State("won", f"Stockfish resigns ({ev}, from {task.start_eval} at the start).", streak)
@@ -299,8 +346,13 @@ def _exact(task: Task, tb: tuple[int | None, int | None, int] | None) -> str | N
         return None
     _, before, now = tb
     if task.goal == "win" and now < 2:
-        what = ("it still wins, but not within the 50-move rule" if now == 1
-                else "with perfect defence it's a draw now" if now >= 0 else "with perfect play you are lost now")
+        what = (
+            "it still wins, but not within the 50-move rule"
+            if now == 1
+            else "with perfect defence it's a draw now"
+            if now >= 0
+            else "with perfect play you are lost now"
+        )
         if before == 2:
             return f"That move throws away the win: {what} (tablebase)."
         return f"The win is gone: {what} (tablebase)."
@@ -326,10 +378,13 @@ def _milestone(task: Task, board: chess.Board, me: chess.Color, ev: Eval, decisi
 
 def _bare_king(start: chess.Board, board: chess.Board, me: chess.Color) -> bool:
     """The defender is down to its king (it had more at the start) and I still have a queen or rook."""
+
     def only_king(b: chess.Board) -> bool:
         return not b.occupied_co[not me] & ~b.kings
-    return (not only_king(start) and only_king(board)
-            and bool(board.pieces(chess.QUEEN, me) | board.pieces(chess.ROOK, me)))
+
+    return (
+        not only_king(start) and only_king(board) and bool(board.pieces(chess.QUEEN, me) | board.pieces(chess.ROOK, me))
+    )
 
 
 def _draw_reason(board: chess.Board) -> str | None:

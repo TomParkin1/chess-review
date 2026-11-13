@@ -1,4 +1,5 @@
 """Getting started: finding the config and Stockfish, and importing the sample games from the command line."""
+
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ def no_config(tmp_path, monkeypatch):
 
 # ------------------------------------------------------------ config
 
+
 def test_without_a_config_file_every_setting_has_its_default(no_config):
     cfg = load_config()
     assert cfg.engine.path == "" and cfg.player.username == ""
@@ -41,13 +43,16 @@ def test_a_relative_database_path_is_relative_to_the_config_file(no_config):
     assert load_config(folder / "my.toml").db_path == folder / "db" / "chess.db"
 
 
-@pytest.mark.parametrize("text, message", [
-    ("[engine\npath = 1", "isn't valid TOML"),
-    ("[engine]\nspeed = 3\n", r"unknown setting 'speed' in \[engine\]"),
-    ("[enigne]\npath = 'x'\n", r"unknown section \[enigne\]"),
-    ("engine = 3\n", r"engine must be a \[engine\] section"),
-    ("[database]\npath = 3\n", r"\[database\] path must be a string"),
-])
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("[engine\npath = 1", "isn't valid TOML"),
+        ("[engine]\nspeed = 3\n", r"unknown setting 'speed' in \[engine\]"),
+        ("[enigne]\npath = 'x'\n", r"unknown section \[enigne\]"),
+        ("engine = 3\n", r"engine must be a \[engine\] section"),
+        ("[database]\npath = 3\n", r"\[database\] path must be a string"),
+    ],
+)
 def test_a_bad_config_file_names_the_problem(no_config, text, message):
     (no_config / "config.toml").write_text(text)
     with pytest.raises(ConfigError, match=message):
@@ -67,6 +72,7 @@ def test_stockfish_path_variable_overrides_the_config(no_config, monkeypatch):
 
 # ------------------------------------------------------------ Stockfish
 
+
 def test_a_configured_stockfish_that_is_missing_is_an_error_with_install_help():
     with pytest.raises(engine.StockfishNotFound, match="brew install stockfish"):
         engine.find_stockfish("/no/such/stockfish")
@@ -77,13 +83,14 @@ def test_stockfish_is_found_on_path_then_in_the_usual_folders(monkeypatch):
     monkeypatch.setattr(engine.shutil, "which", on_path.get)
     assert engine.find_stockfish() == "/bin/stockfish-on-path"
     del on_path["stockfish"]
-    assert engine.find_stockfish() == "/usr/games/stockfish"         # Debian/Ubuntu's apt, often not on PATH
+    assert engine.find_stockfish() == "/usr/games/stockfish"  # Debian/Ubuntu's apt, often not on PATH
     on_path.clear()
     with pytest.raises(engine.StockfishNotFound):
         engine.find_stockfish()
 
 
 # ------------------------------------------------------------ command line
+
 
 def run(monkeypatch, *argv: str) -> None:
     monkeypatch.setattr(sys, "argv", ["chessreview", *argv])
@@ -126,5 +133,5 @@ def test_import_as_a_name_with_no_games_leaves_the_player_unset(no_config, monke
     """A typo in --as used to stick, and then refused the right name."""
     run(monkeypatch, "import", str(SAMPLES), "--as", "Sample Playr")
     assert "player is unchanged" in capsys.readouterr().out
-    run(monkeypatch, "import", str(SAMPLES), "--as", "sample player")         # names match in any case
+    run(monkeypatch, "import", str(SAMPLES), "--as", "sample player")  # names match in any case
     assert "Imported:     5" in capsys.readouterr().out

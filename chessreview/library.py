@@ -36,26 +36,52 @@ from . import backup, db, level, srs
 URL = "https://database.lichess.org/lichess_db_puzzle.csv.zst"
 BUCKET = 100
 MIN_RATING, MAX_RATING = 400, 3100
-SAMPLE_PER_CELL = 25        # puzzles kept per (rating bucket, theme)
+SAMPLE_PER_CELL = 25  # puzzles kept per (rating bucket, theme)
 MIN_POPULARITY, MIN_PLAYS, MAX_DEVIATION = 80, 300, 90
 RATING_KEY, COUNT_KEY, FETCHED_KEY = "puzzle_rating", "puzzle_count", "puzzle_library_fetched"
-THEMES_KEY = "puzzle_library_themes"     # the THEMES the stored sample was drawn for (E2)
+THEMES_KEY = "puzzle_library_themes"  # the THEMES the stored sample was drawn for (E2)
 DEFAULT_RATING = 1500
 
 # Lichess theme tag -> label. Only these themes are sampled (phase/length tags are not).
 THEMES = {
-    "mateIn1": "Mate in 1", "mateIn2": "Mate in 2", "mateIn3": "Mate in 3", "backRankMate": "Back-rank mate",
-    "smotheredMate": "Smothered mate", "fork": "Fork", "pin": "Pin", "skewer": "Skewer",
-    "discoveredAttack": "Discovered attack", "doubleCheck": "Double check", "hangingPiece": "Hanging piece",
-    "trappedPiece": "Trapped piece", "sacrifice": "Sacrifice", "deflection": "Deflection", "attraction": "Attraction",
-    "clearance": "Clearance", "interference": "Interference", "intermezzo": "In-between move",
-    "xRayAttack": "X-ray", "capturingDefender": "Capture the defender", "zugzwang": "Zugzwang",
-    "defensiveMove": "Defensive move", "quietMove": "Quiet move", "exposedKing": "Exposed king",
-    "kingsideAttack": "Kingside attack", "attackingF2F7": "Attacking f2/f7", "advancedPawn": "Advanced pawn",
-    "promotion": "Promotion", "endgame": "Endgame", "rookEndgame": "Rook endgame", "pawnEndgame": "Pawn endgame",
-    "queenEndgame": "Queen endgame", "bishopEndgame": "Bishop endgame", "knightEndgame": "Knight endgame",
+    "mateIn1": "Mate in 1",
+    "mateIn2": "Mate in 2",
+    "mateIn3": "Mate in 3",
+    "backRankMate": "Back-rank mate",
+    "smotheredMate": "Smothered mate",
+    "fork": "Fork",
+    "pin": "Pin",
+    "skewer": "Skewer",
+    "discoveredAttack": "Discovered attack",
+    "doubleCheck": "Double check",
+    "hangingPiece": "Hanging piece",
+    "trappedPiece": "Trapped piece",
+    "sacrifice": "Sacrifice",
+    "deflection": "Deflection",
+    "attraction": "Attraction",
+    "clearance": "Clearance",
+    "interference": "Interference",
+    "intermezzo": "In-between move",
+    "xRayAttack": "X-ray",
+    "capturingDefender": "Capture the defender",
+    "zugzwang": "Zugzwang",
+    "defensiveMove": "Defensive move",
+    "quietMove": "Quiet move",
+    "exposedKing": "Exposed king",
+    "kingsideAttack": "Kingside attack",
+    "attackingF2F7": "Attacking f2/f7",
+    "advancedPawn": "Advanced pawn",
+    "promotion": "Promotion",
+    "endgame": "Endgame",
+    "rookEndgame": "Rook endgame",
+    "pawnEndgame": "Pawn endgame",
+    "queenEndgame": "Queen endgame",
+    "bishopEndgame": "Bishop endgame",
+    "knightEndgame": "Knight endgame",
     "queenRookEndgame": "Queen and rook endgame",
-    "opening": "Opening", "crushing": "Crushing", "advantage": "Winning an advantage",
+    "opening": "Opening",
+    "crushing": "Crushing",
+    "advantage": "Winning an advantage",
 }
 
 # Too broad to be a useful hint.
@@ -78,8 +104,18 @@ KIND_THEMES = {
 # Endgame types (E2), and the order Today's endgame block cycles through them: roughly how often
 # each comes up (Lichess frequency), rook endgames most.
 ENDGAME_THEMES = ["rookEndgame", "pawnEndgame", "queenEndgame", "bishopEndgame", "knightEndgame", "queenRookEndgame"]
-ENDGAME_ROTATION = ["rookEndgame", "pawnEndgame", "rookEndgame", "queenEndgame", "pawnEndgame", "bishopEndgame",
-                    "rookEndgame", "knightEndgame", "pawnEndgame", "queenRookEndgame"]
+ENDGAME_ROTATION = [
+    "rookEndgame",
+    "pawnEndgame",
+    "rookEndgame",
+    "queenEndgame",
+    "pawnEndgame",
+    "bishopEndgame",
+    "rookEndgame",
+    "knightEndgame",
+    "pawnEndgame",
+    "queenRookEndgame",
+]
 PHASE_THEMES = {"endgame": ENDGAME_THEMES, "opening": ["opening"], "middlegame": ["kingsideAttack", "sacrifice"]}
 
 
@@ -95,9 +131,10 @@ def themes_for(train: dict | None) -> list[str]:
 
 # ------------------------------------------------------------ download + sampling
 
+
 @dataclass
 class FetchProgress:
-    state: str = "idle"          # idle | running | done | error
+    state: str = "idle"  # idle | running | done | error
     bytes_read: int = 0
     bytes_total: int = 0
     rows: int = 0
@@ -128,10 +165,11 @@ class _CountingReader(io.RawIOBase):
 @dataclass
 class Sampler:
     """Reservoir sample per (rating bucket, theme)."""
+
     per_cell: int = SAMPLE_PER_CELL
     seed: int = 1
-    cells: dict = field(default_factory=dict)       # (bucket, theme) -> [rows]
-    seen: dict = field(default_factory=dict)        # (bucket, theme) -> count
+    cells: dict = field(default_factory=dict)  # (bucket, theme) -> [rows]
+    seen: dict = field(default_factory=dict)  # (bucket, theme) -> count
 
     def __post_init__(self):
         self.rng = random.Random(self.seed)
@@ -139,10 +177,14 @@ class Sampler:
     def offer(self, row: list[str]) -> None:
         try:
             rating, deviation, popularity, plays = int(row[3]), int(row[4]), int(row[5]), int(row[6])
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             return
-        if not (MIN_RATING <= rating < MAX_RATING) or deviation > MAX_DEVIATION \
-                or popularity < MIN_POPULARITY or plays < MIN_PLAYS:
+        if (
+            not (MIN_RATING <= rating < MAX_RATING)
+            or deviation > MAX_DEVIATION
+            or popularity < MIN_POPULARITY
+            or plays < MIN_PLAYS
+        ):
             return
         bucket = rating // BUCKET * BUCKET
         for theme in row[7].split():
@@ -163,8 +205,9 @@ class Sampler:
         return {row[0]: row for rows in self.cells.values() for row in rows}
 
 
-def fetch(conn: sqlite3.Connection, progress: FetchProgress | None = None, url: str = URL,
-          opener=urllib.request.urlopen) -> int:
+def fetch(
+    conn: sqlite3.Connection, progress: FetchProgress | None = None, url: str = URL, opener=urllib.request.urlopen
+) -> int:
     """Download and sample the puzzle database, replacing the stored library (puzzles I have
     tried are kept, see below). Returns the number of puzzles in the new sample."""
     from compression import zstd  # stdlib since Python 3.14
@@ -178,7 +221,7 @@ def fetch(conn: sqlite3.Connection, progress: FetchProgress | None = None, url: 
         raw = io.BufferedReader(_CountingReader(response, progress), buffer_size=1 << 20)
         text = io.TextIOWrapper(zstd.ZstdFile(raw), encoding="utf-8", newline="")
         reader = csv.reader(text)
-        next(reader, None)                      # header
+        next(reader, None)  # header
         for row in reader:
             sampler.offer(row)
             progress.rows += 1
@@ -193,8 +236,11 @@ def fetch(conn: sqlite3.Connection, progress: FetchProgress | None = None, url: 
         conn.executemany(
             """INSERT OR IGNORE INTO puzzles (id, fen, moves, rating, deviation, popularity, plays, themes, game_url)
                VALUES (?,?,?,?,?,?,?,?,?)""",
-            [(r[0], r[1], r[2], int(r[3]), int(r[4]), int(r[5]), int(r[6]), f" {r[7]} ", r[8])
-             for r in puzzles.values()])
+            [
+                (r[0], r[1], r[2], int(r[3]), int(r[4]), int(r[5]), int(r[6]), f" {r[7]} ", r[8])
+                for r in puzzles.values()
+            ],
+        )
         db.set_meta(conn, FETCHED_KEY, time.strftime("%Y-%m-%d"))
         db.set_meta(conn, THEMES_KEY, themes_stamp())
     progress.kept, progress.state = len(puzzles), "done"
@@ -217,6 +263,7 @@ def outdated(conn: sqlite3.Connection) -> bool:
 
 # ------------------------------------------------------------ puzzle rating
 
+
 def rating(conn: sqlite3.Connection) -> int:
     stored = db.get_meta(conn, RATING_KEY)
     if stored is not None:
@@ -224,11 +271,11 @@ def rating(conn: sqlite3.Connection) -> int:
     return level.current_rating(conn) or DEFAULT_RATING
 
 
-SCORES = {"solved": 1.0, "solved_with_help": 0.5}     # anything else scores 0
+SCORES = {"solved": 1.0, "solved_with_help": 0.5}  # anything else scores 0
 
 
 def k_factor(played: int) -> float:
-    return max(16.0, 40 - 24 * min(played, 100) / 100, 120 * 0.8 ** played)
+    return max(16.0, 40 - 24 * min(played, 100) / 100, 120 * 0.8**played)
 
 
 def update_rating(conn: sqlite3.Connection, puzzle_rating: int, score: float) -> tuple[int, int]:
@@ -252,15 +299,18 @@ def record(conn: sqlite3.Connection, puzzle_id: str, result: str) -> dict:
     p = conn.execute("SELECT rating FROM puzzles WHERE id = ?", (puzzle_id,)).fetchone()
     if p is None:
         raise LookupError(puzzle_id)
-    with _record_lock:      # "first attempt?" and the rating update are one step (a double submit)
+    with _record_lock:  # "first attempt?" and the rating update are one step (a double submit)
         first = conn.execute("SELECT 1 FROM puzzle_attempts WHERE puzzle_id = ?", (puzzle_id,)).fetchone() is None
         if first:
             before, after = update_rating(conn, p["rating"], SCORES.get(result, 0.0))
         else:
             before = after = rating(conn)
         with conn:
-            conn.execute("""INSERT INTO puzzle_attempts (puzzle_id, result, rating_before, rating_after)
-                            VALUES (?, ?, ?, ?)""", (puzzle_id, result, before, after))
+            conn.execute(
+                """INSERT INTO puzzle_attempts (puzzle_id, result, rating_before, rating_after)
+                            VALUES (?, ?, ?, ?)""",
+                (puzzle_id, result, before, after),
+            )
     card = conn.execute("SELECT 1 FROM cards WHERE kind = 'library' AND key = ?", (puzzle_id,)).fetchone()
     if card or result not in srs.SOLVED:
         srs.record_key(conn, "library", puzzle_id, result)
@@ -269,8 +319,15 @@ def record(conn: sqlite3.Connection, puzzle_id: str, result: str) -> dict:
 
 # ------------------------------------------------------------ choosing puzzles
 
-def pick(conn: sqlite3.Connection, n: int, themes: list[str] | None = None, around: int | None = None,
-         exclude: set[str] | None = None, seed: str | None = None) -> list[str]:
+
+def pick(
+    conn: sqlite3.Connection,
+    n: int,
+    themes: list[str] | None = None,
+    around: int | None = None,
+    exclude: set[str] | None = None,
+    seed: str | None = None,
+) -> list[str]:
     """Up to `n` puzzle ids I have never tried, near my puzzle rating (the window widens
     until enough are found), optionally with any of `themes`. `seed` makes it deterministic."""
     around = around or rating(conn)
@@ -280,11 +337,13 @@ def pick(conn: sqlite3.Connection, n: int, themes: list[str] | None = None, arou
         theme_sql = " AND (" + " OR ".join("themes LIKE ?" for _ in themes) + ")"
         params = [f"% {t} %" for t in themes]
     for width in (100, 200, 400, 800):
-        rows = conn.execute(f"""
+        rows = conn.execute(
+            f"""
             SELECT id FROM puzzles WHERE rating BETWEEN ? AND ?{theme_sql}
               AND id NOT IN (SELECT puzzle_id FROM puzzle_attempts)
               AND id NOT IN (SELECT puzzle_id FROM calc_attempts WHERE puzzle_id IS NOT NULL) ORDER BY id""",
-            [around - width, around + width, *params]).fetchall()
+            [around - width, around + width, *params],
+        ).fetchall()
         ids = [r["id"] for r in rows if r["id"] not in exclude]
         if len(ids) >= n or width == 800:
             random.Random(seed).shuffle(ids)
@@ -302,8 +361,9 @@ def pick_endgames(conn: sqlite3.Connection, n: int, on, exclude: set[str] | None
     for i in range(n):
         theme = ENDGAME_ROTATION[(start + i) % len(ENDGAME_ROTATION)]
         seed = f"{on.isoformat()}:{i}"
-        found = pick(conn, 1, [theme], exclude=exclude, seed=seed) \
-            or pick(conn, 1, ENDGAME_THEMES + ["endgame"], exclude=exclude, seed=seed)
+        found = pick(conn, 1, [theme], exclude=exclude, seed=seed) or pick(
+            conn, 1, ENDGAME_THEMES + ["endgame"], exclude=exclude, seed=seed
+        )
         if found:
             exclude.add(found[0])
             out.append(found[0])
@@ -314,8 +374,9 @@ def endgame_types(conn: sqlite3.Connection, ids: list[str]) -> list[str]:
     """The endgame types (labels, in ENDGAME_THEMES order) among these puzzles."""
     if not ids:
         return []
-    tags = " ".join(r["themes"] for r in conn.execute(
-        f"SELECT themes FROM puzzles WHERE id IN ({','.join('?' * len(ids))})", ids)).split()
+    tags = " ".join(
+        r["themes"] for r in conn.execute(f"SELECT themes FROM puzzles WHERE id IN ({','.join('?' * len(ids))})", ids)
+    ).split()
     return [THEMES[t] for t in ENDGAME_THEMES if t in tags]
 
 
@@ -330,10 +391,21 @@ def puzzle_json(row: sqlite3.Row) -> dict:
     best = chess.Move.from_uci(moves[1])
     specific = [t for t in themes if t not in GENERIC_THEMES]
     return {
-        "mode": "library", "puzzle_id": row["id"], "fen": board.fen(), "start_fen": row["fen"],
-        "prev_move_uci": moves[0], "solution": moves[1:], "best_pv_uci": moves[1:], "best_uci": moves[1],
-        "best_san": board.san(best), "my_color": "white" if board.turn else "black",
-        "rating": row["rating"], "themes": themes, "game_url": row["game_url"],
-        "playout_moves": len(moves) // 2, "move_label": f"Puzzle {row['id']}", "ply": board.ply(),
+        "mode": "library",
+        "puzzle_id": row["id"],
+        "fen": board.fen(),
+        "start_fen": row["fen"],
+        "prev_move_uci": moves[0],
+        "solution": moves[1:],
+        "best_pv_uci": moves[1:],
+        "best_uci": moves[1],
+        "best_san": board.san(best),
+        "my_color": "white" if board.turn else "black",
+        "rating": row["rating"],
+        "themes": themes,
+        "game_url": row["game_url"],
+        "playout_moves": len(moves) // 2,
+        "move_label": f"Puzzle {row['id']}",
+        "ply": board.ply(),
         "hint": f"Theme: {specific[0].lower()}." if specific else "Look at every check and capture first.",
     }

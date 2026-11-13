@@ -29,7 +29,7 @@ from . import backup
 if TYPE_CHECKING:
     from .config import Config
 
-USERNAME_KEY = "player_username"   # chess.com username set in the app (overrides config.toml)
+USERNAME_KEY = "player_username"  # chess.com username set in the app (overrides config.toml)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
@@ -116,9 +116,18 @@ def content_hash(white: str, black: str, date: str, moves_uci: str) -> str:
 
 def _migrate_1(conn: sqlite3.Connection) -> None:
     """v2 data: sources/batches, clocks, multi-PV analysis, both-side marks, accuracy."""
-    for column in ("content_hash TEXT", "end_time TEXT", "uuid TEXT", "rated INTEGER",
-                   "source TEXT", "batch_id INTEGER", "clocks_ms TEXT",
-                   "analysis_version INTEGER", "accuracy_white REAL", "accuracy_black REAL"):
+    for column in (
+        "content_hash TEXT",
+        "end_time TEXT",
+        "uuid TEXT",
+        "rated INTEGER",
+        "source TEXT",
+        "batch_id INTEGER",
+        "clocks_ms TEXT",
+        "analysis_version INTEGER",
+        "accuracy_white REAL",
+        "accuracy_black REAL",
+    ):
         conn.execute(f"ALTER TABLE games ADD COLUMN {column}")
     for column in ("second_cp INTEGER", "second_mate INTEGER", "second_uci TEXT"):
         conn.execute(f"ALTER TABLE positions ADD COLUMN {column}")
@@ -145,12 +154,15 @@ def _migrate_1(conn: sqlite3.Connection) -> None:
             """UPDATE games SET content_hash = ?, end_time = ?, source = 'upload',
                    analysis_version = CASE WHEN analysed_at IS NULL THEN NULL ELSE 1 END
                WHERE id = ?""",
-            (content_hash(r["white"], r["black"], r["date"], r["moves_uci"]),
-             f"{r['date']} 00:00:00", r["id"]))
+            (content_hash(r["white"], r["black"], r["date"], r["moves_uci"]), f"{r['date']} 00:00:00", r["id"]),
+        )
     # Every existing game becomes part of one "earlier games" batch, already reviewed.
     if rows:
-        cur = conn.execute("""INSERT INTO imports (source, label, games_added, session_done_at)
-                              VALUES ('upload', 'Earlier games', ?, CURRENT_TIMESTAMP)""", (len(rows),))
+        cur = conn.execute(
+            """INSERT INTO imports (source, label, games_added, session_done_at)
+                              VALUES ('upload', 'Earlier games', ?, CURRENT_TIMESTAMP)""",
+            (len(rows),),
+        )
         conn.execute("UPDATE games SET batch_id = ?", (cur.lastrowid,))
 
 
@@ -182,8 +194,11 @@ def _migrate_3(conn: sqlite3.Connection) -> None:
     first = conn.execute("""SELECT id FROM imports WHERE source = 'chess.com'
                             ORDER BY id LIMIT 1""").fetchone()
     if first:
-        conn.execute("""UPDATE imports SET session_done_at = COALESCE(session_done_at, CURRENT_TIMESTAMP),
-                            label = 'chess.com history import' WHERE id = ?""", (first["id"],))
+        conn.execute(
+            """UPDATE imports SET session_done_at = COALESCE(session_done_at, CURRENT_TIMESTAMP),
+                            label = 'chess.com history import' WHERE id = ?""",
+            (first["id"],),
+        )
 
 
 def _migrate_4(conn: sqlite3.Connection) -> None:
@@ -257,25 +272,26 @@ def _migrate_8(conn: sqlite3.Connection) -> None:
             result  TEXT NOT NULL
         );
     """)
-    intervals = [1, 3, 7, 14, 30, 60]          # srs.INTERVALS when this migration was written
-    reach = [sum(intervals[:i]) for i in range(len(intervals) + 1)]   # days to reach box i + 1
+    intervals = [1, 3, 7, 14, 30, 60]  # srs.INTERVALS when this migration was written
+    reach = [sum(intervals[:i]) for i in range(len(intervals) + 1)]  # days to reach box i + 1
     for card in conn.execute("SELECT * FROM cards WHERE introduced_on IS NOT NULL").fetchall():
         last = card["mastered_on"] or card["last_on"] or card["introduced_on"]
         days = (date.fromisoformat(last) - date.fromisoformat(card["introduced_on"])).days
-        allowed = max(i + 1 for i, d in enumerate(reach) if d <= days)      # len(intervals) + 1 = mastered
+        allowed = max(i + 1 for i, d in enumerate(reach) if d <= days)  # len(intervals) + 1 = mastered
         box = len(intervals) + 1 if card["mastered_on"] else card["box"]
         if box > allowed:
             due = date.fromisoformat(last) + timedelta(days=intervals[allowed - 1])
-            conn.execute("UPDATE cards SET box = ?, due_on = ?, mastered_on = NULL WHERE id = ?",
-                         (allowed, due.isoformat(), card["id"]))
+            conn.execute(
+                "UPDATE cards SET box = ?, due_on = ?, mastered_on = NULL WHERE id = ?",
+                (allowed, due.isoformat(), card["id"]),
+            )
 
 
 def _migrate_9(conn: sqlite3.Connection) -> None:
     """Endgames that teach (Finish M4): these endgames now end at a milestone (promotion, a bare
     king) or start from a new position (Vancura), so a "solved" from the old three-move rule says
     nothing. Their cards start again as new; training_log keeps the attempts (streak)."""
-    changed = ("kp_front", "square", "lucena", "rook_pawn_cutoff", "outside_passer", "q_vs_pawn", "q_vs_r",
-               "vancura")
+    changed = ("kp_front", "square", "lucena", "rook_pawn_cutoff", "outside_passer", "q_vs_pawn", "q_vs_r", "vancura")
     conn.execute(f"DELETE FROM cards WHERE kind = 'endgame' AND key IN ({','.join('?' * len(changed))})", changed)
 
 
@@ -304,19 +320,30 @@ def _migrate_12(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_calc_attempts_key ON calc_attempts(key)")
 
 
-MIGRATIONS = [_migrate_1, _migrate_2, _migrate_3, _migrate_4, _migrate_5, _migrate_6, _migrate_7,
-              _migrate_8, _migrate_9, _migrate_10, _migrate_11, _migrate_12]   # index i upgrades user_version i -> i + 1
+MIGRATIONS = [
+    _migrate_1,
+    _migrate_2,
+    _migrate_3,
+    _migrate_4,
+    _migrate_5,
+    _migrate_6,
+    _migrate_7,
+    _migrate_8,
+    _migrate_9,
+    _migrate_10,
+    _migrate_11,
+    _migrate_12,
+]  # index i upgrades user_version i -> i + 1
 
 
-_schema_lock = threading.Lock()     # requests opening a new database at once must not both set it up
+_schema_lock = threading.Lock()  # requests opening a new database at once must not both set it up
 
 
 def migrate(conn: sqlite3.Connection) -> None:
     with _schema_lock:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version < len(MIGRATIONS) and (
-                version > 0 or conn.execute("SELECT 1 FROM games LIMIT 1").fetchone()):
-            backup.make(conn, "before-migration")    # an existing database is about to change
+        if version < len(MIGRATIONS) and (version > 0 or conn.execute("SELECT 1 FROM games LIMIT 1").fetchone()):
+            backup.make(conn, "before-migration")  # an existing database is about to change
         for i, step in enumerate(MIGRATIONS[version:], start=version):
             with conn:
                 step(conn)
@@ -329,7 +356,7 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    with _schema_lock:      # switching a new file to WAL fails at once ("locked") if two try together
+    with _schema_lock:  # switching a new file to WAL fails at once ("locked") if two try together
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
     migrate(conn)
@@ -338,8 +365,7 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
 
 def create_batch(conn: sqlite3.Connection, source: str, label: str) -> int:
     with conn:
-        return conn.execute("INSERT INTO imports (source, label) VALUES (?, ?)",
-                            (source, label)).lastrowid
+        return conn.execute("INSERT INTO imports (source, label) VALUES (?, ?)", (source, label)).lastrowid
 
 
 def finish_batch(conn: sqlite3.Connection, batch_id: int) -> int:
@@ -360,9 +386,7 @@ def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
 
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute(
-        "INSERT INTO meta(key, value) VALUES(?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (key, value),
+        "INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value)
     )
 
 

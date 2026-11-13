@@ -124,9 +124,16 @@ def my_result(result: str, my_color: str) -> str | None:
     return None
 
 
-def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
-                source: str, stats: ImportStats, batch_id: int | None = None,
-                origin: str = "upload", extra: dict | None = None) -> None:
+def import_game(
+    conn: sqlite3.Connection,
+    game: chess.pgn.Game,
+    cfg: Config,
+    source: str,
+    stats: ImportStats,
+    batch_id: int | None = None,
+    origin: str = "upload",
+    extra: dict | None = None,
+) -> None:
     """Store one game if it is mine, standard chess, finished and new.
 
     `origin` is 'upload' or 'chess.com'; `extra` may carry API-only fields (uuid, rated).
@@ -165,12 +172,12 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
 
     moves_uci = " ".join(moves)
     key = dedupe_key(game, moves_uci)
-    chash = db.content_hash(h.get("White", ""), h.get("Black", ""),
-                            h.get("Date", "").replace(".", "-"), moves_uci)
+    chash = db.content_hash(h.get("White", ""), h.get("Black", ""), h.get("Date", "").replace(".", "-"), moves_uci)
     link = h.get("Link") or None
     known_game = conn.execute(
         "SELECT 1 FROM games WHERE dedupe_key = ? OR content_hash = ? OR (link IS NOT NULL AND link = ?)",
-        (key, chash, link)).fetchone()
+        (key, chash, link),
+    ).fetchone()
     if known_game:
         stats.duplicates += 1
         return
@@ -191,16 +198,34 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT (dedupe_key) DO NOTHING""",
         (
-            key, link, h.get("White"), h.get("Black"),
-            _int(h.get("WhiteElo")), _int(h.get("BlackElo")),
-            color, res, result, h.get("Termination"),
+            key,
+            link,
+            h.get("White"),
+            h.get("Black"),
+            _int(h.get("WhiteElo")),
+            _int(h.get("BlackElo")),
+            color,
+            res,
+            result,
+            h.get("Termination"),
             h.get("Date", "").replace(".", "-"),
-            h.get("TimeControl"), time_class(h.get("TimeControl", "")),
-            eco, opening, family, start_fen,
-            moves_uci, len(moves), str(game), source,
-            chash, end_time(h), extra.get("uuid"),
+            h.get("TimeControl"),
+            time_class(h.get("TimeControl", "")),
+            eco,
+            opening,
+            family,
+            start_fen,
+            moves_uci,
+            len(moves),
+            str(game),
+            source,
+            chash,
+            end_time(h),
+            extra.get("uuid"),
             None if extra.get("rated") is None else int(bool(extra["rated"])),
-            origin, batch_id, clocks_ms(game),
+            origin,
+            batch_id,
+            clocks_ms(game),
         ),
     )
     if cur.rowcount == 0:
@@ -209,8 +234,9 @@ def import_game(conn: sqlite3.Connection, game: chess.pgn.Game, cfg: Config,
     stats.imported += 1
 
 
-def import_pgn_text(conn: sqlite3.Connection, text: str, cfg: Config,
-                    source: str = "", batch_id: int | None = None) -> ImportStats:
+def import_pgn_text(
+    conn: sqlite3.Connection, text: str, cfg: Config, source: str = "", batch_id: int | None = None
+) -> ImportStats:
     """Import every game in a PGN string. Commits once at the end."""
     stats = ImportStats(files=1)
     stream = io.StringIO(text)
@@ -238,7 +264,7 @@ def import_paths(conn: sqlite3.Connection, paths: list[Path], cfg: Config) -> Im
                 text = f.read_text(encoding="utf-8", errors="replace")
                 total.merge(import_pgn_text(conn, text, cfg, source=f.name, batch_id=batch_id))
     finally:
-        session.finish_import(conn, cfg, batch_id)     # an empty batch is dropped, even after an error
+        session.finish_import(conn, cfg, batch_id)  # an empty batch is dropped, even after an error
     return total
 
 

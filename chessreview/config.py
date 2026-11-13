@@ -9,13 +9,24 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 CONFIG_NAME = "config.toml"
-CONFIG_ENV = "CHESSREVIEW_CONFIG"      # path of the config file to use
-STOCKFISH_ENV = "STOCKFISH_PATH"       # overrides [engine] path
+CONFIG_ENV = "CHESSREVIEW_CONFIG"  # path of the config file to use
+STOCKFISH_ENV = "STOCKFISH_PATH"  # overrides [engine] path
 
 
 # The [sections] of config.toml ("import" is ImportConfig, "database" only holds the path).
-SECTIONS = {"player", "import", "engine", "classification", "phases", "database", "review", "analysis",
-            "training", "coach", "backup"}
+SECTIONS = {
+    "player",
+    "import",
+    "engine",
+    "classification",
+    "phases",
+    "database",
+    "review",
+    "analysis",
+    "training",
+    "coach",
+    "backup",
+}
 
 
 class ConfigError(ValueError):
@@ -24,7 +35,7 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class PlayerConfig:
-    username: str = ""          # chess.com username; the app's Settings can set it instead (db.username)
+    username: str = ""  # chess.com username; the app's Settings can set it instead (db.username)
 
 
 @dataclass(frozen=True)
@@ -35,11 +46,11 @@ class ImportConfig:
 
 @dataclass(frozen=True)
 class EngineConfig:
-    path: str = ""              # Stockfish executable; empty = find it (engine.find_stockfish)
+    path: str = ""  # Stockfish executable; empty = find it (engine.find_stockfish)
     time_per_position: float = 0.3
-    max_depth: int = 0          # stop a position early at this depth (0 = no depth limit)
-    workers: int = 0            # parallel Stockfish processes; 0 = automatic (about 2/3 of CPU cores)
-    threads: int = 1            # threads per process (1 is most efficient for many positions)
+    max_depth: int = 0  # stop a position early at this depth (0 = no depth limit)
+    workers: int = 0  # parallel Stockfish processes; 0 = automatic (about 2/3 of CPU cores)
+    threads: int = 1  # threads per process (1 is most efficient for many positions)
     hash_mb: int = 128
     pv_length: int = 8
 
@@ -60,7 +71,7 @@ class ClassificationConfig:
     cp_inaccuracy: int = 50
     cp_mistake: int = 100
     cp_blunder: int = 300
-    adaptive: bool = True        # thresholds follow the mover's rating (Settings page can override)
+    adaptive: bool = True  # thresholds follow the mover's rating (Settings page can override)
 
 
 @dataclass(frozen=True)
@@ -71,43 +82,43 @@ class PhaseConfig:
 
 @dataclass(frozen=True)
 class ReviewConfig:
-    playout_tactical: int = 3   # my moves to play out when I missed a mate/tactic/capture
-    playout_other: int = 1      # my moves to play out for defensive/positional mistakes
-    live_time: float = 0.35     # seconds per position when judging moves I try (4 threads)
+    playout_tactical: int = 3  # my moves to play out when I missed a mate/tactic/capture
+    playout_other: int = 1  # my moves to play out for defensive/positional mistakes
+    live_time: float = 0.35  # seconds per position when judging moves I try (4 threads)
 
 
 @dataclass(frozen=True)
 class AnalysisConfig:
-    max_seconds: float = 10     # live analysis stops after this long per position
-    multipv: int = 3            # engine lines shown on the analysis board
+    max_seconds: float = 10  # live analysis stops after this long per position
+    multipv: int = 3  # engine lines shown on the analysis board
 
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    new_per_day: int = 10            # new mistakes introduced into daily training per day
+    new_per_day: int = 10  # new mistakes introduced into daily training per day
     include_inaccuracies: bool = False
-    blind: bool = True               # Train shows positions "as in a real game" (no badge, no arrow)
+    blind: bool = True  # Train shows positions "as in a real game" (no badge, no arrow)
 
 
 @dataclass(frozen=True)
 class CoachConfig:
-    calm_ratio: float = 0.3          # share of the real-game deck that is positions I handled well
-    recent_games: int = 100          # calm positions come from my last N games
-    budget_minutes: int = 20         # Today: default time budget (10, 20 or 30; the Today page changes it)
-    seconds_per_puzzle: float = 60   # Today: time per puzzle until my own pace can be measured
-    review_share: float = 0.8        # Today: due reviews fill at most this share of the puzzles...
-    new_share: float = 0.7           # ...and new cards come only while they fill less than this share
-    session_days: int = 3            # an unfinished new-games session joins daily training after this
-    history_days: int = 14           # an import of games mostly older than this is history, not a session
-    progress_window: int = 25        # Progress: compare my last N games with the N before
-    self_review_games: int = 5       # New-games session: games to self-review before the engine
+    calm_ratio: float = 0.3  # share of the real-game deck that is positions I handled well
+    recent_games: int = 100  # calm positions come from my last N games
+    budget_minutes: int = 20  # Today: default time budget (10, 20 or 30; the Today page changes it)
+    seconds_per_puzzle: float = 60  # Today: time per puzzle until my own pace can be measured
+    review_share: float = 0.8  # Today: due reviews fill at most this share of the puzzles...
+    new_share: float = 0.7  # ...and new cards come only while they fill less than this share
+    session_days: int = 3  # an unfinished new-games session joins daily training after this
+    history_days: int = 14  # an import of games mostly older than this is history, not a session
+    progress_window: int = 25  # Progress: compare my last N games with the N before
+    self_review_games: int = 5  # New-games session: games to self-review before the engine
 
 
 @dataclass(frozen=True)
 class BackupConfig:
-    daily: int = 7                   # daily copies kept in data/backups (backup.py)
-    weekly: int = 4                  # weekly copies kept
-    other: int = 10                  # copies made by hand or before Delete all, reclassify, migrations...
+    daily: int = 7  # daily copies kept in data/backups (backup.py)
+    weekly: int = 4  # weekly copies kept
+    other: int = 10  # copies made by hand or before Delete all, reclassify, migrations...
 
 
 @dataclass(frozen=True)

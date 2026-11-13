@@ -27,10 +27,10 @@ import chess
 from . import backup, db, explain, openings, phases, report
 from .config import Config
 
-CP_CAP = 1000          # Lichess caps evals at +-10 pawns for win chances
-MATE_CP = 1000         # a forced mate counts as the cap
+CP_CAP = 1000  # Lichess caps evals at +-10 pawns for win chances
+MATE_CP = 1000  # a forced mate counts as the cap
 SETTINGS_KEY = "classification_settings"
-CLASSIFY_VERSION = 6   # bump when judge() logic changes so stored judgements are rebuilt
+CLASSIFY_VERSION = 6  # bump when judge() logic changes so stored judgements are rebuilt
 # A lost mate longer than this (moves) while still >= +7 is at most an inaccuracy: the short search
 # after the move often can't see the slower mate (it is usually still there), and +7 still wins.
 LONG_MATE = 5
@@ -41,8 +41,9 @@ JUDGEMENTS = ("good", "inaccuracy", "mistake", "blunder")
 @dataclass(frozen=True)
 class Eval:
     """An evaluation from one side's point of view."""
+
     cp: int | None
-    mate: int | None   # >0: this side mates in N; <0: this side gets mated
+    mate: int | None  # >0: this side mates in N; <0: this side gets mated
 
     @classmethod
     def from_row(cls, row: sqlite3.Row, color: chess.Color) -> Eval:
@@ -50,8 +51,7 @@ class Eval:
         sign = 1 if color == chess.WHITE else -1
         cp = row["score_cp"]
         mate = row["score_mate"]
-        return cls(cp * sign if cp is not None else None,
-                   mate * sign if mate is not None else None)
+        return cls(cp * sign if cp is not None else None, mate * sign if mate is not None else None)
 
     def as_cp(self) -> int:
         if self.mate is not None:
@@ -96,7 +96,7 @@ ADAPTIVE_BANDS = [
     (2000, 0.10, 0.20, 0.30),
     (None, 0.08, 0.17, 0.27),
 ]
-MODE_KEY = "thresholds_mode"   # meta override set from the Settings page: 'adaptive' | 'standard'
+MODE_KEY = "thresholds_mode"  # meta override set from the Settings page: 'adaptive' | 'standard'
 
 
 @dataclass(frozen=True)
@@ -132,8 +132,7 @@ def keeps_long_mate(before: Eval, after: Eval) -> bool:
     """A move in a position with a long forced mate (more than LONG_MATE moves) that keeps a
     position the search scores at the cap (+10) but without a mate: a short search after the
     move usually can't see the slower mate, so the move most likely still mates."""
-    return (before.mate is not None and before.mate > LONG_MATE and after.mate is None
-            and after.as_cp() >= CP_CAP)
+    return before.mate is not None and before.mate > LONG_MATE and after.mate is None and after.as_cp() >= CP_CAP
 
 
 def adaptive_enabled(conn: sqlite3.Connection, cfg: Config) -> bool:
@@ -182,14 +181,15 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config, adaptive:
     Also stores both players' accuracy on the game row. Returns rows written.
     """
     game = conn.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
-    positions = conn.execute(
-        "SELECT * FROM positions WHERE game_id = ? ORDER BY ply", (game_id,)).fetchall()
+    positions = conn.execute("SELECT * FROM positions WHERE game_id = ? ORDER BY ply", (game_id,)).fetchall()
     me = chess.WHITE if game["my_color"] == "white" else chess.BLACK
     if adaptive is None:
         adaptive = adaptive_enabled(conn, cfg)
     # Each side is judged at its own level (its rating in this game).
-    side_thresholds = {chess.WHITE: thresholds_for(game["white_elo"], cfg, adaptive),
-                       chess.BLACK: thresholds_for(game["black_elo"], cfg, adaptive)}
+    side_thresholds = {
+        chess.WHITE: thresholds_for(game["white_elo"], cfg, adaptive),
+        chess.BLACK: thresholds_for(game["black_elo"], cfg, adaptive),
+    }
 
     rows = []
     white_pcts = [report.win_pct(Eval.from_row(p, chess.WHITE).win_chance()) for p in positions]
@@ -217,15 +217,21 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config, adaptive:
         board_after = board.copy(stack=False)
         board_after.push(move)
         gap = _second_gap(before_row, mover, before_pct)
-        mark = report.mark_move(report.MarkInput(
-            judgement=judgement, drop_pct=max(0.0, before_pct - after_pct),
-            before_pct=before_pct, after_pct=after_pct, is_best=is_best, forced=forced,
-            book=before_row["ply"] < report.BOOK_MAX_PLY and openings.is_book(board_after),
-            second_gap_pct=gap,
-            prev_opponent_judgement=previous_judgement,
-            sacrifice=report.is_sacrifice(board, move),
-            is_recapture=_is_recapture(board, move, previous_move, previous_board),
-        ))
+        mark = report.mark_move(
+            report.MarkInput(
+                judgement=judgement,
+                drop_pct=max(0.0, before_pct - after_pct),
+                before_pct=before_pct,
+                after_pct=after_pct,
+                is_best=is_best,
+                forced=forced,
+                book=before_row["ply"] < report.BOOK_MAX_PLY and openings.is_book(board_after),
+                second_gap_pct=gap,
+                prev_opponent_judgement=previous_judgement,
+                sacrifice=report.is_sacrifice(board, move),
+                is_recapture=_is_recapture(board, move, previous_move, previous_board),
+            )
+        )
 
         th = side_thresholds[mover]
         # Hopeless before the move, or still crushing after it: little to learn from
@@ -236,34 +242,55 @@ def classify_game(conn: sqlite3.Connection, game_id: int, cfg: Config, adaptive:
         kind = text = None
         if judgement != "good":
             ctx = explain.MoveContext(
-                board=board, move=move,
+                board=board,
+                move=move,
                 best=chess.Move.from_uci(before_row["best_uci"]) if before_row["best_uci"] else None,
                 best_line=_line(before_row["pv_uci"]),
                 reply_line=_line(after_row["pv_uci"]),
-                before=before, after=after,
+                before=before,
+                after=after,
                 prev_capture=capture_square(previous_board, previous_move),
                 min_loss=th.min_loss,
             )
             kind, text = explain.explain(ctx)
             if mover != me:
                 text = None  # explanations are worded for my moves; the coach words opponent moves
-        rows.append((game_id, before_row["ply"], judgement, before.win_chance(), after.win_chance(),
-                     drop, cp_loss, phases.phase(board, before_row["ply"], cfg), kind, text,
-                     int(mover == me), mark, round(accuracy, 1),
-                     None if gap is None else round(gap / 50, 3), decided))
+        rows.append(
+            (
+                game_id,
+                before_row["ply"],
+                judgement,
+                before.win_chance(),
+                after.win_chance(),
+                drop,
+                cp_loss,
+                phases.phase(board, before_row["ply"], cfg),
+                kind,
+                text,
+                int(mover == me),
+                mark,
+                round(accuracy, 1),
+                None if gap is None else round(gap / 50, 3),
+                decided,
+            )
+        )
         previous_judgement = judgement
         previous_move, previous_board = move, board
 
-    acc_white, acc_black = report.game_accuracy(white_pcts[:len(accuracies) + 1], accuracies,
-                                                white_to_move_first=first_turn == chess.WHITE)
+    acc_white, acc_black = report.game_accuracy(
+        white_pcts[: len(accuracies) + 1], accuracies, white_to_move_first=first_turn == chess.WHITE
+    )
     with conn:
         conn.execute("DELETE FROM mistakes WHERE game_id = ?", (game_id,))
         conn.executemany(
             """INSERT INTO mistakes (game_id, ply, judgement, win_before, win_after, win_drop,
                    cp_loss, phase, kind, explanation, is_mine, mark, accuracy, sharpness, decided)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", rows)
-        conn.execute("UPDATE games SET accuracy_white = ?, accuracy_black = ? WHERE id = ?",
-                     (acc_white, acc_black, game_id))
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            rows,
+        )
+        conn.execute(
+            "UPDATE games SET accuracy_white = ?, accuracy_black = ? WHERE id = ?", (acc_white, acc_black, game_id)
+        )
     return len(rows)
 
 
@@ -274,12 +301,17 @@ def capture_square(board: chess.Board | None, move: chess.Move | None) -> chess.
     return move.to_square
 
 
-def _is_recapture(board: chess.Board, move: chess.Move, previous_move: chess.Move | None,
-                  previous_board: chess.Board | None) -> bool:
+def _is_recapture(
+    board: chess.Board, move: chess.Move, previous_move: chess.Move | None, previous_board: chess.Board | None
+) -> bool:
     """Taking back on the square where the opponent just captured."""
-    return (previous_move is not None and previous_board is not None
-            and previous_board.is_capture(previous_move)
-            and board.is_capture(move) and move.to_square == previous_move.to_square)
+    return (
+        previous_move is not None
+        and previous_board is not None
+        and previous_board.is_capture(previous_move)
+        and board.is_capture(move)
+        and move.to_square == previous_move.to_square
+    )
 
 
 def _second_gap(row: sqlite3.Row, mover: chess.Color, best_pct: float) -> float | None:
@@ -292,14 +324,19 @@ def _second_gap(row: sqlite3.Row, mover: chess.Color, best_pct: float) -> float 
 
 def settings_fingerprint(cfg: Config, adaptive: bool = False) -> str:
     """Changes whenever anything that affects classification output changes."""
-    data = {"classification": asdict(cfg.classification), "phases": asdict(cfg.phases), "adaptive": adaptive,
-            "explain_version": explain.VERSION, "classify_version": CLASSIFY_VERSION}
+    data = {
+        "classification": asdict(cfg.classification),
+        "phases": asdict(cfg.phases),
+        "adaptive": adaptive,
+        "explain_version": explain.VERSION,
+        "classify_version": CLASSIFY_VERSION,
+    }
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
-_lock = threading.Lock()          # one classification run at a time
+_lock = threading.Lock()  # one classification run at a time
 _start_lock = threading.Lock()
-REBUILD = {"running": False, "done": 0, "total": 0, "error": None}   # the background rebuild's progress
+REBUILD = {"running": False, "done": 0, "total": 0, "error": None}  # the background rebuild's progress
 
 
 def ensure_classified(conn: sqlite3.Connection, cfg: Config, force: bool = False) -> int:
@@ -318,7 +355,7 @@ def refresh(conn: sqlite3.Connection, cfg: Config) -> None:
     full rebuild of stored rows to `start_rebuild()`. Meanwhile requests read the rows as they
     are: each game is replaced in one transaction, so no game is ever half-classified."""
     if REBUILD["running"]:
-        return                  # the rebuild classifies new games too
+        return  # the rebuild classifies new games too
     if needs_rebuild(conn, cfg) and conn.execute("SELECT 1 FROM mistakes LIMIT 1").fetchone():
         start_rebuild(cfg)
         return
@@ -339,23 +376,25 @@ def start_rebuild(cfg: Config) -> bool:
         try:
             with _lock:
                 _classify(conn, cfg, False, progress=lambda done, total: REBUILD.update(done=done, total=total))
-        except Exception as exc:   # shown in Settings; the next request tries again
+        except Exception as exc:  # shown in Settings; the next request tries again
             REBUILD["error"] = str(exc)
         finally:
             conn.close()
             REBUILD["running"] = False
+
     threading.Thread(target=run, daemon=True, name="reclassify").start()
     return True
 
 
-def _classify(conn: sqlite3.Connection, cfg: Config, force: bool,
-              progress: Callable[[int, int], None] | None = None) -> int:
+def _classify(
+    conn: sqlite3.Connection, cfg: Config, force: bool, progress: Callable[[int, int], None] | None = None
+) -> int:
     adaptive = adaptive_enabled(conn, cfg)
     fingerprint = settings_fingerprint(cfg, adaptive)
     rebuild_all = force or db.get_meta(conn, SETTINGS_KEY) != fingerprint
     if rebuild_all:
         if conn.execute("SELECT 1 FROM mistakes LIMIT 1").fetchone():
-            backup.make(conn, "before-reclassify")    # every judgement is about to be rewritten
+            backup.make(conn, "before-reclassify")  # every judgement is about to be rewritten
         sql = "SELECT id FROM games WHERE analysed_at IS NOT NULL"
     else:
         sql = """SELECT id FROM games g WHERE analysed_at IS NOT NULL

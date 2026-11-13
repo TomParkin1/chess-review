@@ -33,26 +33,26 @@ from .classify import Eval
 
 OFFSETS = list(range(-200, 301, 50))
 OFFSET_KEY = "spar_offset"
-DEFAULT_RATING = 1200               # before any rated game
-ELO_FLOOR, ELO_MAX = 1320, 3190     # Stockfish's UCI_Elo range
-MOVE_TIME = 0.3                     # seconds per engine move
+DEFAULT_RATING = 1200  # before any rated game
+ELO_FLOOR, ELO_MAX = 1320, 3190  # Stockfish's UCI_Elo range
+MOVE_TIME = 0.3  # seconds per engine move
 # Below the floor: (share of moves swapped, measured Elo against UCI_Elo 1320).
 TOP5_CALIBRATION = [(0.0, 1320), (0.3, 1201), (0.6, 997), (1.0, 857)]
 RANDOM_CALIBRATION = [(0.25, 938), (0.32, 768), (0.40, 684)]
 MIN_ELO = RANDOM_CALIBRATION[-1][1]
 EQUAL_CP = 150
-MAX_POSITIONS = 40                  # per phase
+MAX_POSITIONS = 40  # per phase
 PHASES = ("middlegame", "endgame")
 
 
 @dataclass(frozen=True)
 class Strength:
-    elo: int                        # the target (clamped to MIN_ELO..ELO_MAX)
-    options: dict                   # UCI options for the limited engine
+    elo: int  # the target (clamped to MIN_ELO..ELO_MAX)
+    options: dict  # UCI options for the limited engine
     limit: chess.engine.Limit
-    exact: bool                     # False below ELO_FLOOR: calibrated by matches, not by Stockfish
-    swap: float = 0.0               # share of moves swapped for weaker ones (below the floor)
-    swap_kind: str | None = None    # 'top5' | 'random'
+    exact: bool  # False below ELO_FLOOR: calibrated by matches, not by Stockfish
+    swap: float = 0.0  # share of moves swapped for weaker ones (below the floor)
+    swap_kind: str | None = None  # 'top5' | 'random'
 
     @property
     def label(self) -> str:
@@ -109,6 +109,7 @@ def save_offset(conn: sqlite3.Connection, offset: int) -> None:
 
 # ------------------------------------------------------------ start positions
 
+
 def positions(conn: sqlite3.Connection) -> dict[str, list[dict]]:
     """Per game, the first equal-or-better middlegame position short of clearly winning (Convert
     has those) and the first equal-or-better endgame position where it was my move; newest games
@@ -130,26 +131,44 @@ def positions(conn: sqlite3.Connection) -> dict[str, list[dict]]:
         if chess.Board(r["fen"]).turn != me:
             continue
         ev = Eval.from_row(r, me)
-        fits = (ev.mate is None and -EQUAL_CP <= (ev.cp or 0) < winning) if r["phase"] == "middlegame" \
+        fits = (
+            (ev.mate is None and -EQUAL_CP <= (ev.cp or 0) < winning)
+            if r["phase"] == "middlegame"
             else (ev.mate is None and (ev.cp or 0) >= -EQUAL_CP) or (ev.mate is not None and ev.mate > 0)
+        )
         if not fits:
             continue
         seen.add((r["game_id"], r["phase"]))
-        out[r["phase"]].append({
-            "key": f"{r['game_id']}:{r['ply']}", "game_id": r["game_id"], "ply": r["ply"], "phase": r["phase"],
-            "fen": r["fen"], "color": r["my_color"], "eval": str(ev), "result": r["my_result"],
-            "opponent": r["black"] if r["my_color"] == "white" else r["white"], "date": r["date"]})
+        out[r["phase"]].append(
+            {
+                "key": f"{r['game_id']}:{r['ply']}",
+                "game_id": r["game_id"],
+                "ply": r["ply"],
+                "phase": r["phase"],
+                "fen": r["fen"],
+                "color": r["my_color"],
+                "eval": str(ev),
+                "result": r["my_result"],
+                "opponent": r["black"] if r["my_color"] == "white" else r["white"],
+                "date": r["date"],
+            }
+        )
     return out
 
 
 # ------------------------------------------------------------ playing
 
+
 def outcome(board: chess.Board, me: chess.Color) -> tuple[str, str] | None:
     """('win' | 'draw' | 'loss', reason) once the game is over (draws by rule are taken at once)."""
     if board.is_checkmate():
         return ("win", "Checkmate!") if board.turn != me else ("loss", "Checkmated.")
-    for test, reason in ((board.is_stalemate, "Stalemate"), (board.is_insufficient_material, "No mating material"),
-                         (board.is_fifty_moves, "50-move rule"), (lambda: board.is_repetition(3), "Threefold repetition")):
+    for test, reason in (
+        (board.is_stalemate, "Stalemate"),
+        (board.is_insufficient_material, "No mating material"),
+        (board.is_fifty_moves, "50-move rule"),
+        (lambda: board.is_repetition(3), "Threefold repetition"),
+    ):
         if test():
             return "draw", reason
     return None
@@ -168,13 +187,24 @@ def replay(fen: str, moves: list[str]) -> chess.Board:
 
 # ------------------------------------------------------------ results
 
-def record(conn: sqlite3.Connection, source: str, fen: str, color: str, elo: int, offset: int,
-           moves: list[str], result: str, reason: str) -> int:
+
+def record(
+    conn: sqlite3.Connection,
+    source: str,
+    fen: str,
+    color: str,
+    elo: int,
+    offset: int,
+    moves: list[str],
+    result: str,
+    reason: str,
+) -> int:
     with conn:
         return conn.execute(
             """INSERT INTO spar_games (source, start_fen, color, elo, elo_offset, moves, result, reason)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (source, fen, color, elo, offset, " ".join(moves), result, reason)).lastrowid
+            (source, fen, color, elo, offset, " ".join(moves), result, reason),
+        ).lastrowid
 
 
 def history(conn: sqlite3.Connection, limit: int = 20) -> dict:
@@ -184,11 +214,23 @@ def history(conn: sqlite3.Connection, limit: int = 20) -> dict:
     for r in rows:
         by_offset.setdefault(r["elo_offset"], []).append(r["result"])
     return {
-        "games": [{"id": r["id"], "elo": r["elo"], "offset": r["elo_offset"], "result": r["result"],
-                   "reason": r["reason"], "color": r["color"], "moves": len(r["moves"].split()), "at": r["at"]}
-                  for r in rows],
-        "by_offset": [{"offset": o, "won": rs.count("win"), "drawn": rs.count("draw"), "lost": rs.count("loss")}
-                      for o, rs in sorted(by_offset.items())],
+        "games": [
+            {
+                "id": r["id"],
+                "elo": r["elo"],
+                "offset": r["elo_offset"],
+                "result": r["result"],
+                "reason": r["reason"],
+                "color": r["color"],
+                "moves": len(r["moves"].split()),
+                "at": r["at"],
+            }
+            for r in rows
+        ],
+        "by_offset": [
+            {"offset": o, "won": rs.count("win"), "drawn": rs.count("draw"), "lost": rs.count("loss")}
+            for o, rs in sorted(by_offset.items())
+        ],
     }
 
 

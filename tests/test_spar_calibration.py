@@ -4,6 +4,7 @@ must score less. Re-run when Stockfish changes:
   CHESSREVIEW_CALIBRATION=1 .venv/bin/pytest tests/test_spar_calibration.py
 (The full calibration behind spar.TOP5_CALIBRATION / RANDOM_CALIBRATION was 100 games a level.)
 """
+
 import os
 import random
 from concurrent.futures import ThreadPoolExecutor
@@ -16,12 +17,16 @@ from chessreview import spar
 from chessreview.config import load_config
 from chessreview.engine import find_stockfish
 
-pytestmark = pytest.mark.skipif(not os.environ.get("CHESSREVIEW_CALIBRATION"), reason="slow: set CHESSREVIEW_CALIBRATION=1")
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("CHESSREVIEW_CALIBRATION"), reason="slow: set CHESSREVIEW_CALIBRATION=1"
+)
 GAMES = 40
-OPENINGS = ["r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
-            "rnbqkb1r/pp2pppp/3p1n2/8/3NP3/8/PPP2PPP/RNBQKB1R w KQkq - 1 5",
-            "rnbqkbnr/pp3ppp/4p3/2ppP3/3P4/8/PPP2PPP/RNBQKBNR w KQkq - 0 4",
-            "rnbqkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RNBQKB1R w KQkq - 2 3"]
+OPENINGS = [
+    "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+    "rnbqkb1r/pp2pppp/3p1n2/8/3NP3/8/PPP2PPP/RNBQKB1R w KQkq - 1 5",
+    "rnbqkbnr/pp3ppp/4p3/2ppP3/3P4/8/PPP2PPP/RNBQKBNR w KQkq - 0 4",
+    "rnbqkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RNBQKB1R w KQkq - 2 3",
+]
 
 
 def play(engine: chess.engine.SimpleEngine, board: chess.Board, st: spar.Strength, rng: random.Random) -> chess.Move:
@@ -60,4 +65,4 @@ def score(elo: int) -> float:
 def test_weaker_levels_score_less_against_1320():
     scores = [score(elo) for elo in (1320, 1000, 700)]
     assert scores[0] > scores[1] > scores[2], scores
-    assert 0.3 <= scores[0] <= 0.7          # 1320 against itself: about even
+    assert 0.3 <= scores[0] <= 0.7  # 1320 against itself: about even

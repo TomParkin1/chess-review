@@ -35,8 +35,8 @@ from .config import Config
 from .level import current_thresholds
 from .threats import training_threat
 
-INTERVALS = [1, 3, 7, 14, 30, 60]          # days, indexed by box - 1
-MASTERED_BOX = len(INTERVALS)               # passing this box retires the card
+INTERVALS = [1, 3, 7, 14, 30, 60]  # days, indexed by box - 1
+MASTERED_BOX = len(INTERVALS)  # passing this box retires the card
 SOLVED = {"solved", "solved_with_help"}
 
 # How much there is to learn from a mistake, for ordering new cards: the size of the drop,
@@ -46,7 +46,7 @@ PUZZLE_VALUE = """(m.win_drop * (CASE WHEN m.kind IN ('positional', 'missed_oppo
                    + 0.5 * MIN(COALESCE(m.sharpness, 0), 0.5))"""
 
 
-DAY_START_HOUR = 4     # the training day runs from 04:00 to 04:00
+DAY_START_HOUR = 4  # the training day runs from 04:00 to 04:00
 
 
 def today(now: datetime | None = None) -> date:
@@ -79,7 +79,7 @@ def schedule(box: int, result: str, on: date) -> tuple[int, str | None, str | No
         return box, (on + timedelta(days=INTERVALS[box - 1])).isoformat(), None
     if result == "solved_with_help":
         return max(box, 1), (on + timedelta(days=1)).isoformat(), None
-    return 0, (on + timedelta(days=1)).isoformat(), None      # failed / skipped
+    return 0, (on + timedelta(days=1)).isoformat(), None  # failed / skipped
 
 
 def next_state(card: sqlite3.Row, result: str, on: date) -> tuple[int, str | None, str | None] | None:
@@ -105,11 +105,13 @@ def _apply(conn: sqlite3.Connection, card: sqlite3.Row, result: str, on: date) -
         conn.execute(
             """UPDATE cards SET box = ?, due_on = ?, mastered_on = ?, last_result = ?, reps = reps + 1,
                    lapses = lapses + ?, introduced_on = COALESCE(introduced_on, ?), last_on = ? WHERE id = ?""",
-            (box, due_on, mastered_on, result, lapse, day, day, card["id"]))
+            (box, due_on, mastered_on, result, lapse, day, day, card["id"]),
+        )
 
 
-def record(conn: sqlite3.Connection, game_id: int, ply: int, result: str, on: date | None = None,
-           kind: str = "mistake") -> None:
+def record(
+    conn: sqlite3.Connection, game_id: int, ply: int, result: str, on: date | None = None, kind: str = "mistake"
+) -> None:
     """Update the card of a position after an attempt, creating it if needed. A calm position
     (kind 'position') only becomes a card once I fail it."""
     on = on or today()
@@ -149,16 +151,21 @@ def due_cards(conn: sqlite3.Connection, cfg: Config, on: date) -> list[tuple]:
     is still in the library."""
     ensure_cards(conn, cfg)
     day = on.isoformat()
-    mine = conn.execute(f"""
+    mine = conn.execute(
+        f"""
         SELECT c.id, c.game_id, c.ply, c.box, c.due_on, {PUZZLE_VALUE} AS value
         FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
         WHERE c.mastered_on IS NULL AND c.due_on IS NOT NULL AND c.due_on <= ?
           AND ((c.kind = 'mistake' AND m.judgement IN ({_judgements(cfg)})) OR c.kind = 'position')""",
-        (day,)).fetchall()
-    library = conn.execute("""
+        (day,),
+    ).fetchall()
+    library = conn.execute(
+        """
         SELECT id, 'lib' AS game_id, key AS ply, box, due_on, 0 AS value FROM cards
         WHERE kind = 'library' AND mastered_on IS NULL AND due_on IS NOT NULL AND due_on <= ?
-          AND key IN (SELECT id FROM puzzles)""", (day,)).fetchall()
+          AND key IN (SELECT id FROM puzzles)""",
+        (day,),
+    ).fetchall()
     return [(r["game_id"], r["ply"]) for r in _review_order(mine + library, on)]
 
 
@@ -167,12 +174,15 @@ def new_cards(conn: sqlite3.Connection, cfg: Config, limit: int, exclude: set | 
     if limit <= 0:
         return []
     ensure_cards(conn, cfg)
-    rows = conn.execute(f"""
+    rows = conn.execute(
+        f"""
         SELECT c.game_id, c.ply FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
         WHERE c.kind = 'mistake' AND c.due_on IS NULL AND c.mastered_on IS NULL
           AND m.judgement IN ({_judgements(cfg)}) AND m.decided = 0
           AND c.game_id NOT IN ({OPEN_SESSION_GAMES})
-        ORDER BY {PUZZLE_VALUE} DESC LIMIT ?""", (limit + len(exclude),)).fetchall()
+        ORDER BY {PUZZLE_VALUE} DESC LIMIT ?""",
+        (limit + len(exclude),),
+    ).fetchall()
     return [k for k in ((r["game_id"], r["ply"]) for r in rows) if k not in exclude][:limit]
 
 
@@ -180,9 +190,11 @@ def _review_order(rows: list[sqlite3.Row], on: date) -> list[sqlite3.Row]:
     """Due cards by value: the most overdue relative to their interval first (a box-1 card a
     day late before a box-5 card three days late, and nothing waits for ever), then the
     bigger lesson, then the oldest."""
+
     def key(r):
         late = (on - date.fromisoformat(r["due_on"])).days + 1
         return -late / INTERVALS[max(r["box"], 1) - 1], -(r["value"] or 0), r["due_on"], r["id"]
+
     return sorted(rows, key=key)
 
 
@@ -190,8 +202,9 @@ def introduced_on(conn: sqlite3.Connection, on: date) -> int:
     """Positions from my games (mistakes and failed calm positions) studied for the first time on
     day `on`: what training.new_per_day limits. Failed library puzzles, drilled opening lines and
     endgames don't use it up."""
-    return conn.execute("SELECT COUNT(*) FROM cards WHERE introduced_on = ? AND kind IN ('mistake', 'position')",
-                        (on.isoformat(),)).fetchone()[0]
+    return conn.execute(
+        "SELECT COUNT(*) FROM cards WHERE introduced_on = ? AND kind IN ('mistake', 'position')", (on.isoformat(),)
+    ).fetchone()[0]
 
 
 def stats(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> dict:
@@ -203,21 +216,30 @@ def stats(conn: sqlite3.Connection, cfg: Config, on: date | None = None) -> dict
                SUM(due_on IS NULL AND mastered_on IS NULL) AS unseen
         FROM cards WHERE kind IN ('mistake', 'position')""").fetchone()
     done_today = conn.execute(
-        f"SELECT COUNT(*) FROM review_results WHERE {day_sql('at')} = ?", (on.isoformat(),)).fetchone()[0]
-    return {"due": len(q["due"]), "new": len(q["new"]), "done_today": done_today,
-            "mastered": row["mastered"] or 0, "learning": row["learning"] or 0, "unseen": row["unseen"] or 0,
-            "streak": streak(conn, on)}
+        f"SELECT COUNT(*) FROM review_results WHERE {day_sql('at')} = ?", (on.isoformat(),)
+    ).fetchone()[0]
+    return {
+        "due": len(q["due"]),
+        "new": len(q["new"]),
+        "done_today": done_today,
+        "mastered": row["mastered"] or 0,
+        "learning": row["learning"] or 0,
+        "unseen": row["unseen"] or 0,
+        "streak": streak(conn, on),
+    }
 
 
-def calm_positions(conn: sqlite3.Connection, cfg: Config, count: int, seed: str,
-                   exclude: set | frozenset = frozenset()) -> list[tuple[int, int]]:
+def calm_positions(
+    conn: sqlite3.Connection, cfg: Config, count: int, seed: str, exclude: set | frozenset = frozenset()
+) -> list[tuple[int, int]]:
     """`count` positions from my recent games where I played a good move: half where the
     opponent had a real threat (I defended it), half quiet. Deterministic per `seed` (the day).
     Games of an open new-games session count too: only their mistakes wait for the session."""
     if count <= 0:
         return []
     th = current_thresholds(conn, cfg)
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT m.game_id, m.ply, g.my_color, p.fen, p.score_cp, p.score_mate, p.threat_cp, p.threat_mate,
                p.threat_uci, p.threat_pv, p0.fen AS prev_fen, p0.move_uci AS prev_move_uci
         FROM mistakes m JOIN positions p ON p.game_id = m.game_id AND p.ply = m.ply
@@ -228,7 +250,9 @@ def calm_positions(conn: sqlite3.Connection, cfg: Config, count: int, seed: str,
           AND m.game_id IN (SELECT id FROM games WHERE analysed_at IS NOT NULL
                             ORDER BY end_time DESC, id DESC LIMIT ?)
           AND NOT EXISTS (SELECT 1 FROM cards c WHERE c.game_id = m.game_id AND c.ply = m.ply)
-        ORDER BY m.game_id, m.ply""", (cfg.coach.recent_games,)).fetchall()
+        ORDER BY m.game_id, m.ply""",
+        (cfg.coach.recent_games,),
+    ).fetchall()
     threatened, quiet = [], []
     for r in rows:
         if (r["game_id"], r["ply"]) in exclude:
@@ -253,8 +277,7 @@ def spread(cards: list, calm: list) -> list:
 
 
 # Everything that counts as training, with its timestamp column.
-TRAINING_SOURCES = ("review_results", "puzzle_attempts", "self_reviews", "training_log", "spar_games",
-                    "calc_attempts")
+TRAINING_SOURCES = ("review_results", "puzzle_attempts", "self_reviews", "training_log", "spar_games", "calc_attempts")
 
 
 def training_days(conn: sqlite3.Connection) -> set[date]:
@@ -279,6 +302,7 @@ def streak(conn: sqlite3.Connection, on: date | None = None) -> int:
 
 # ---------------------------------------------------------------- opening-line cards
 
+
 def record_line(conn: sqlite3.Connection, key: str, result: str, on: date | None = None) -> None:
     """Update (or create) the card for one of my repertoire positions after a drill attempt."""
     record_key(conn, "line", key, result, on)
@@ -298,10 +322,14 @@ def record_key(conn: sqlite3.Connection, kind: str, key: str, result: str, on: d
 
 def due_lines(conn: sqlite3.Connection, color: str, on: date | None = None) -> list[str]:
     on = on or today()
-    return [r[0] for r in conn.execute(
-        """SELECT key FROM cards WHERE kind = 'line' AND key LIKE ? AND mastered_on IS NULL
+    return [
+        r[0]
+        for r in conn.execute(
+            """SELECT key FROM cards WHERE kind = 'line' AND key LIKE ? AND mastered_on IS NULL
            AND due_on IS NOT NULL AND due_on <= ? ORDER BY due_on, box""",
-        (f"{color}:%", on.isoformat()))]
+            (f"{color}:%", on.isoformat()),
+        )
+    ]
 
 
 def line_stats(conn: sqlite3.Connection, color: str, on: date | None = None) -> dict:
@@ -309,5 +337,7 @@ def line_stats(conn: sqlite3.Connection, color: str, on: date | None = None) -> 
     row = conn.execute(
         """SELECT COUNT(*) AS seen, SUM(mastered_on IS NOT NULL) AS mastered,
                   SUM(mastered_on IS NULL AND due_on <= ?) AS due
-           FROM cards WHERE kind = 'line' AND key LIKE ?""", (on.isoformat(), f"{color}:%")).fetchone()
+           FROM cards WHERE kind = 'line' AND key LIKE ?""",
+        (on.isoformat(), f"{color}:%"),
+    ).fetchone()
     return {"seen": row["seen"] or 0, "mastered": row["mastered"] or 0, "due": row["due"] or 0}

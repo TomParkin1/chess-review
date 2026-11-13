@@ -15,9 +15,11 @@ PIECE_VALUES = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, 
 
 
 def non_pawn_material(board: chess.Board) -> int:
-    return sum(PIECE_VALUES[pt] * len(board.pieces(pt, color))
-               for color in chess.COLORS
-               for pt in (chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN))
+    return sum(
+        PIECE_VALUES[pt] * len(board.pieces(pt, color))
+        for color in chess.COLORS
+        for pt in (chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN)
+    )
 
 
 def phase(board: chess.Board, ply: int, cfg: Config) -> str:

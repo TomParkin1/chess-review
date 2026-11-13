@@ -30,8 +30,19 @@ import chess
 
 from .phases import PIECE_VALUES
 
-MARKS = ["brilliant", "great", "best", "excellent", "good", "book", "forced",
-         "inaccuracy", "mistake", "miss", "blunder"]
+MARKS = [
+    "brilliant",
+    "great",
+    "best",
+    "excellent",
+    "good",
+    "book",
+    "forced",
+    "inaccuracy",
+    "mistake",
+    "miss",
+    "blunder",
+]
 BOOK_MAX_PLY = 30
 
 
@@ -41,6 +52,7 @@ def win_pct(win_chance: float) -> float:
 
 
 # ------------------------------------------------------------------ marks
+
 
 def is_sacrifice(board: chess.Board, move: chess.Move) -> bool:
     """Does `move` leave the moved piece (knight or more) where it can be won?
@@ -69,9 +81,9 @@ def is_sacrifice(board: chess.Board, move: chess.Move) -> bool:
 
 @dataclass
 class MarkInput:
-    judgement: str               # good | inaccuracy | mistake | blunder (classify.judge)
-    drop_pct: float              # win% points lost by the move, mover's point of view
-    before_pct: float            # mover's win% before the move
+    judgement: str  # good | inaccuracy | mistake | blunder (classify.judge)
+    drop_pct: float  # win% points lost by the move, mover's point of view
+    before_pct: float  # mover's win% before the move
     after_pct: float
     is_best: bool
     forced: bool
@@ -79,7 +91,7 @@ class MarkInput:
     second_gap_pct: float | None  # best line minus second-best line, mover's win% (None: unknown)
     prev_opponent_judgement: str | None
     sacrifice: bool
-    is_recapture: bool = False   # captures on the square the opponent just captured on
+    is_recapture: bool = False  # captures on the square the opponent just captured on
 
 
 def mark_move(m: MarkInput) -> str:
@@ -95,8 +107,13 @@ def mark_move(m: MarkInput) -> str:
     near_best = m.is_best or m.drop_pct <= 2
     if near_best and m.sacrifice and m.before_pct < 90 and m.after_pct >= 45:
         return "brilliant"
-    if (m.is_best and not m.is_recapture and m.second_gap_pct is not None
-            and m.second_gap_pct >= 15 and 5 < m.before_pct < 95):
+    if (
+        m.is_best
+        and not m.is_recapture
+        and m.second_gap_pct is not None
+        and m.second_gap_pct >= 15
+        and 5 < m.before_pct < 95
+    ):
         return "great"
     if m.is_best or m.drop_pct <= 0.5:
         return "best"
@@ -107,6 +124,7 @@ def mark_move(m: MarkInput) -> str:
 
 # ------------------------------------------------------------------ accuracy
 
+
 def move_accuracy(before_pct: float, after_pct: float) -> float:
     """Lichess per-move accuracy from the mover's win% before and after."""
     if after_pct >= before_pct:
@@ -115,8 +133,9 @@ def move_accuracy(before_pct: float, after_pct: float) -> float:
     return max(0.0, min(100.0, raw + 1))
 
 
-def game_accuracy(white_pcts: list[float], accuracies: list[float], white_to_move_first: bool = True
-                  ) -> tuple[float | None, float | None]:
+def game_accuracy(
+    white_pcts: list[float], accuracies: list[float], white_to_move_first: bool = True
+) -> tuple[float | None, float | None]:
     """(white accuracy, black accuracy) the Lichess way.
 
     white_pcts: White's win% for every position (len = moves + 1).
@@ -126,12 +145,13 @@ def game_accuracy(white_pcts: list[float], accuracies: list[float], white_to_mov
     if n < 2:
         return None, None
     window = max(2, min(8, n // 10))
-    padded = [white_pcts[:window]] * (window - 2) + [white_pcts[i:i + window]
-                                                     for i in range(len(white_pcts) - window + 1)]
+    padded = [white_pcts[:window]] * (window - 2) + [
+        white_pcts[i : i + window] for i in range(len(white_pcts) - window + 1)
+    ]
     weights = [max(0.5, min(12.0, _stdev(w))) for w in padded][:n]
 
     out = []
-    for side in (0, 1):   # 0: the side that moved first
+    for side in (0, 1):  # 0: the side that moved first
         idx = [i for i in range(n) if i % 2 == side]
         if not idx:
             out.append(None)
@@ -152,6 +172,7 @@ def _stdev(values: list[float]) -> float:
 
 # ------------------------------------------------------------------ time use
 
+
 def parse_time_control(tc: str | None) -> tuple[int | None, int]:
     """'600+5' -> (600000 ms base, 5000 ms increment); daily/unknown -> (None, 0)."""
     if not tc or "/" in tc or tc == "-":
@@ -171,7 +192,7 @@ def time_spent(clocks_ms: str | None, time_control: str | None) -> list[int | No
     base, inc = parse_time_control(time_control)
     spent = []
     for i, clock in enumerate(clocks):
-        previous = clocks[i - 2] if i >= 2 else base   # the same side's clock one move earlier
+        previous = clocks[i - 2] if i >= 2 else base  # the same side's clock one move earlier
         if clock is None or previous is None:
             spent.append(None)
         else:

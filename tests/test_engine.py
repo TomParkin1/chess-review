@@ -70,14 +70,14 @@ def test_both_sides_classified_with_marks_and_accuracy(cfg):
 
     rows = conn.execute("SELECT * FROM mistakes").fetchall()
     total_moves = conn.execute("SELECT SUM(num_plies) FROM games").fetchone()[0]
-    assert len(rows) == total_moves                      # every move, both sides
+    assert len(rows) == total_moves  # every move, both sides
     assert {r["is_mine"] for r in rows} == {0, 1}
     assert all(r["mark"] in MARKS and 0 <= r["accuracy"] <= 100 for r in rows)
-    assert any(r["mark"] == "book" for r in rows)        # all sample games start in theory
+    assert any(r["mark"] == "book" for r in rows)  # all sample games start in theory
     assert all(r["explanation"] is None for r in rows if not r["is_mine"])
     for g in conn.execute("SELECT * FROM games"):
         assert g["analysis_version"] == 2
         assert 0 <= g["accuracy_white"] <= 100 and 0 <= g["accuracy_black"] <= 100
     positions = conn.execute("SELECT * FROM positions WHERE best_uci IS NOT NULL").fetchall()
-    assert any(p["second_uci"] for p in positions)       # MultiPV 2 stored
+    assert any(p["second_uci"] for p in positions)  # MultiPV 2 stored
     conn.close()

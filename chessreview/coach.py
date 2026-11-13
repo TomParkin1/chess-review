@@ -53,23 +53,23 @@ from .config import Config
 
 PLAN_KEY = "today_plan"
 BUDGET_KEY = "today_budget"
-BUDGETS = (10, 20, 30)          # minutes offered on the Today page
+BUDGETS = (10, 20, 30)  # minutes offered on the Today page
 FOCUS_JUDGEMENTS = ("mistake", "blunder")
 
-PLAN_VERSION = 3                # 2: no opening block, endgame blocks (E2); 3: focus `calc` link (E6)
-ENDGAME_SHARE = 0.30            # endgames take this share of the budget
-ENDGAME_SECONDS = 120           # one essential endgame
-CONVERT_SECONDS = 180           # one won position from my games
-SITTING_GAP = 300               # seconds: a longer pause between two attempts is a break
-MIN_GAPS = 30                   # attempts needed before my own pace replaces coach.seconds_per_puzzle
-PACE_RANGE = (20.0, 180.0)      # seconds per puzzle, whatever the data says
+PLAN_VERSION = 3  # 2: no opening block, endgame blocks (E2); 3: focus `calc` link (E6)
+ENDGAME_SHARE = 0.30  # endgames take this share of the budget
+ENDGAME_SECONDS = 120  # one essential endgame
+CONVERT_SECONDS = 180  # one won position from my games
+SITTING_GAP = 300  # seconds: a longer pause between two attempts is a break
+MIN_GAPS = 30  # attempts needed before my own pace replaces coach.seconds_per_puzzle
+PACE_RANGE = (20.0, 180.0)  # seconds per puzzle, whatever the data says
 
 
 # Weaknesses (mistake kinds) that calculation trains: Today's focus row then links to /calculate (E6),
 # an extra outside the plan (not counted, no budget).
 CALC_KINDS = ("missed_tactic", "fork", "discovered_attack", "missed_mate", "missed_opportunity")
 BLOCK_ORDER = ["reviews", "convert", "endgame", "real", "focus"]
-ELSEWHERE = ("convert",)        # blocks played on their own page
+ELSEWHERE = ("convert",)  # blocks played on their own page
 
 
 def today_plan(conn: sqlite3.Connection, cfg: Config, on: date | None = None, refresh: bool = False) -> dict:
@@ -85,13 +85,13 @@ def today_plan(conn: sqlite3.Connection, cfg: Config, on: date | None = None, re
     if not plan or plan.get("day") != day:
         plan = _save(conn, build_plan(conn, cfg, on), basis)
     else:
-        if "basis" not in plan:                # a plan stored before plans had a basis
+        if "basis" not in plan:  # a plan stored before plans had a basis
             plan = _save(conn, plan, basis)
         items = [i for b in plan["blocks"] for i in b["items"]]
         attempted = attempted_today(conn, on)
         vanished = len(_servable(conn, items)) < len({_key(i) for i in items})
         untouched = not any(_key(i) in attempted for i in items)
-        unsized = "budget" not in plan         # a plan stored before the time budget existed
+        unsized = "budget" not in plan  # a plan stored before the time budget existed
         outdated = plan.get("version") != PLAN_VERSION
         if refresh or vanished or unsized or outdated or (plan["basis"] != basis and untouched):
             plan = _save(conn, _rebuild(conn, cfg, on, plan, attempted), basis)
@@ -136,10 +136,15 @@ def attempt_seconds(conn: sqlite3.Connection, cfg: Config) -> float:
 
 def _recent_attempts(conn: sqlite3.Connection, n: int = 200) -> list[tuple[str, str, str]]:
     """(what was tried, when, its training day) for my last `n` attempts."""
-    return [(r[0], r[1], r[2]) for r in conn.execute(
-        f"""SELECT key, at, {srs.day_sql('at')} FROM (SELECT game_id || ':' || ply AS key, at FROM review_results
+    return [
+        (r[0], r[1], r[2])
+        for r in conn.execute(
+            f"""SELECT key, at, {srs.day_sql("at")} FROM (SELECT game_id || ':' || ply AS key, at FROM review_results
                                 UNION ALL SELECT puzzle_id, at FROM puzzle_attempts)
-            WHERE at IS NOT NULL ORDER BY at DESC LIMIT ?""", (n,))]
+            WHERE at IS NOT NULL ORDER BY at DESC LIMIT ?""",
+            (n,),
+        )
+    ]
 
 
 def _save(conn: sqlite3.Connection, plan: dict, basis: int) -> dict:
@@ -162,8 +167,15 @@ def _rebuild(conn: sqlite3.Connection, cfg: Config, on: date, old: dict, attempt
     played = {b["id"]: b for b in known if b["id"] in ELSEWHERE and _block_done(conn, b, on)}
     played_s = sum(_elsewhere_seconds(b) for b in played.values())
     endgame_kept = sum(_key(i) in kept for b in known if b["id"] == "endgame" for i in b["items"])
-    plan = build_plan(conn, cfg, on, spent=len(kept) * pace_s + played_s, exclude=kept, skip=set(played),
-                      endgame_spent=endgame_kept * pace_s + played_s)
+    plan = build_plan(
+        conn,
+        cfg,
+        on,
+        spent=len(kept) * pace_s + played_s,
+        exclude=kept,
+        skip=set(played),
+        endgame_spent=endgame_kept * pace_s + played_s,
+    )
     blocks = {b["id"]: b for b in plan["blocks"]} | played
     for old_block in known:
         carried = [i for i in old_block["items"] if _key(i) in kept]
@@ -171,14 +183,21 @@ def _rebuild(conn: sqlite3.Connection, cfg: Config, on: date, old: dict, attempt
             continue
         block = blocks.setdefault(old_block["id"], {**old_block, "items": []})
         block["items"] = carried + [i for i in block["items"] if _key(i) not in kept]
-    plan["blocks"] = sorted((b for b in blocks.values() if b["items"] or b["id"] in ELSEWHERE),
-                            key=lambda b: BLOCK_ORDER.index(b["id"]))
+    plan["blocks"] = sorted(
+        (b for b in blocks.values() if b["items"] or b["id"] in ELSEWHERE), key=lambda b: BLOCK_ORDER.index(b["id"])
+    )
     return plan
 
 
-def build_plan(conn: sqlite3.Connection, cfg: Config, on: date, spent: float = 0.0,
-               exclude: set | frozenset = frozenset(), skip: set | frozenset = frozenset(),
-               endgame_spent: float = 0.0) -> dict:
+def build_plan(
+    conn: sqlite3.Connection,
+    cfg: Config,
+    on: date,
+    spent: float = 0.0,
+    exclude: set | frozenset = frozenset(),
+    skip: set | frozenset = frozenset(),
+    endgame_spent: float = 0.0,
+) -> dict:
     """Today's blocks, sized to the budget (see the module docstring). For a rebuild, `spent`
     seconds of the budget are already used by the items in `exclude` and the blocks in `skip`,
     `endgame_spent` of them on endgames."""
@@ -201,12 +220,13 @@ def build_plan(conn: sqlite3.Connection, cfg: Config, on: date, spent: float = 0
     slots = max(0, int(seconds // pace_s))
     endgame_slots = min(slots, int(endgame_s // pace_s))
     # New cards: while the due reviews fill less than new_share of the day, at most new_per_day.
-    new_room = max(0, min(round(slots * c.new_share) - len(due),
-                          cfg.training.new_per_day - srs.introduced_on(conn, on)))
+    new_room = max(
+        0, min(round(slots * c.new_share) - len(due), cfg.training.new_per_day - srs.introduced_on(conn, on))
+    )
     endgame, endgame_new = _endgame_items(conn, endgame_slots, due, set(exclude), on, new_room)
     in_endgame = {_key(i) for i in endgame}
     due = [k for k in due if k not in in_endgame]
-    slots -= len(endgame)          # places the endgame block can't fill go to the other blocks
+    slots -= len(endgame)  # places the endgame block can't fill go to the other blocks
 
     reviews = due[: slots if len(due) > slots else round(slots * c.review_share)]
     fresh = slots - len(reviews)
@@ -216,8 +236,9 @@ def build_plan(conn: sqlite3.Connection, cfg: Config, on: date, spent: float = 0
     taken = set(due) | set(exclude) | in_endgame
     new = srs.new_cards(conn, cfg, min(allowance, real_size - calm_min), taken)
     taken |= set(new)
-    weakness, focus = _focus_items(conn, cfg, fresh - real_size, taken, on, allowance - len(new),
-                                   {i[1] for i in endgame if i[0] == "lib"})
+    weakness, focus = _focus_items(
+        conn, cfg, fresh - real_size, taken, on, allowance - len(new), {i[1] for i in endgame if i[0] == "lib"}
+    )
     # Places the focus block can't fill go to waiting reviews first, then to calm positions.
     spare = fresh - real_size - len(focus)
     extra = min(spare, len(due) - len(reviews))
@@ -227,27 +248,47 @@ def build_plan(conn: sqlite3.Connection, cfg: Config, on: date, spent: float = 0
     waiting = len(due) - len(reviews)
 
     blocks = [
-        {"id": "reviews", "title": "Review", "items": [[g, p, "due"] for g, p in reviews],
-         "subtitle": "Positions you got wrong before, back at the right time."
-                     + (f" {waiting} more {'is' if waiting == 1 else 'are'} waiting: they come first tomorrow."
-                        if waiting else "")},
+        {
+            "id": "reviews",
+            "title": "Review",
+            "items": [[g, p, "due"] for g, p in reviews],
+            "subtitle": "Positions you got wrong before, back at the right time."
+            + (
+                f" {waiting} more {'is' if waiting == 1 else 'are'} waiting: they come first tomorrow."
+                if waiting
+                else ""
+            ),
+        }
     ]
     if task:
         blocks.append(_drill_block(task))
     blocks += [
-        {"id": "endgame", "title": "Endgame puzzles", "items": endgame,
-         "subtitle": _endgame_subtitle(conn, endgame)},
-        {"id": "real", "title": "Real-game positions", "items": real,
-         "subtitle": "Spot the threat, then play your move. Not every position hides a mistake."},
-        {"id": "focus", "title": f"Focus: {weakness['title']}" if weakness else "Focus", "items": focus,
-         "subtitle": weakness["detail"] if weakness else "", "train": weakness["train"] if weakness else None,
-         "calc": bool(weakness) and (weakness["train"] or {}).get("kind") in CALC_KINDS},
+        {"id": "endgame", "title": "Endgame puzzles", "items": endgame, "subtitle": _endgame_subtitle(conn, endgame)},
+        {
+            "id": "real",
+            "title": "Real-game positions",
+            "items": real,
+            "subtitle": "Spot the threat, then play your move. Not every position hides a mistake.",
+        },
+        {
+            "id": "focus",
+            "title": f"Focus: {weakness['title']}" if weakness else "Focus",
+            "items": focus,
+            "subtitle": weakness["detail"] if weakness else "",
+            "train": weakness["train"] if weakness else None,
+            "calc": bool(weakness) and (weakness["train"] or {}).get("kind") in CALC_KINDS,
+        },
     ]
     servable = _servable(conn, [i for b in blocks for i in b["items"]])
     for b in blocks:
         b["items"] = [i for i in b["items"] if _key(i) in servable]
-    return {"day": on.isoformat(), "budget": minutes, "pace": round(pace_s, 1), "version": PLAN_VERSION,
-            "blocks": [b for b in blocks if b["items"] or b["id"] in ELSEWHERE]}
+    return {
+        "day": on.isoformat(),
+        "budget": minutes,
+        "pace": round(pace_s, 1),
+        "version": PLAN_VERSION,
+        "blocks": [b for b in blocks if b["items"] or b["id"] in ELSEWHERE],
+    }
 
 
 def drill_seconds(key: str) -> float:
@@ -257,16 +298,28 @@ def drill_seconds(key: str) -> float:
 
 def _drill_block(task: convert.Task) -> dict:
     if task.kind == "endgame":
-        return {"id": "convert", "title": f"Endgame: {task.title}", "items": [], "key": task.key,
-                "subtitle": f"{task.subtitle}. Play it out against Stockfish."}
-    return {"id": "convert", "title": "Convert a won position", "items": [], "key": task.key,
-            "subtitle": f"{task.title} ({task.start_eval}): win it against Stockfish. {task.subtitle}."}
+        return {
+            "id": "convert",
+            "title": f"Endgame: {task.title}",
+            "items": [],
+            "key": task.key,
+            "subtitle": f"{task.subtitle}. Play it out against Stockfish.",
+        }
+    return {
+        "id": "convert",
+        "title": "Convert a won position",
+        "items": [],
+        "key": task.key,
+        "subtitle": f"{task.title} ({task.start_eval}): win it against Stockfish. {task.subtitle}.",
+    }
 
 
 # ------------------------------------------------------------ endgame block
 
-def _endgame_items(conn: sqlite3.Connection, size: int, due: list[tuple], exclude: set[tuple], on: date,
-                   new_left: int) -> tuple[list[list], int]:
+
+def _endgame_items(
+    conn: sqlite3.Connection, size: int, due: list[tuple], exclude: set[tuple], on: date, new_left: int
+) -> tuple[list[list], int]:
     """Up to `size` endgame puzzles, and how many of them are new cards: my due endgame cards
     (my positions and library puzzles) first, as many as there are (capped at half the block,
     they piled up: simulation, 30 min, backlog 55 -> 104), then my endgame mistakes never studied
@@ -275,18 +328,15 @@ def _endgame_items(conn: sqlite3.Connection, size: int, due: list[tuple], exclud
     if size <= 0:
         return [], 0
     endgame_due = [k for k in due if k in _endgame_keys(conn, due)]
-    fresh = _matching_mistakes(conn, {"phase": "endgame"}, set(due) | exclude, new_left,
-                               recent=None, unseen_only=True)
+    fresh = _matching_mistakes(conn, {"phase": "endgame"}, set(due) | exclude, new_left, recent=None, unseen_only=True)
     own = endgame_due + fresh
     has_library = library.count(conn) > 0
     own_n = min(len(own), max(len(endgame_due), (size + 1) // 2) if has_library else size)
-    lib = library.pick_endgames(conn, size - own_n, on, {k[1] for k in exclude if k[0] == "lib"}) \
-        if has_library else []
+    lib = library.pick_endgames(conn, size - own_n, on, {k[1] for k in exclude if k[0] == "lib"}) if has_library else []
     own_n = min(len(own), size - len(lib))
     picked = own[:own_n]
     fresh_set = set(fresh)
-    items = [[g, p, "new" if (g, p) in fresh_set else "due"] for g, p in picked] \
-        + [["lib", i, "endgame"] for i in lib]
+    items = [[g, p, "new" if (g, p) in fresh_set else "due"] for g, p in picked] + [["lib", i, "endgame"] for i in lib]
     return srs.spread(items[:own_n], items[own_n:]), sum(k in fresh_set for k in picked)
 
 
@@ -296,21 +346,26 @@ def _endgame_keys(conn: sqlite3.Connection, keys: list[tuple]) -> set[tuple]:
     out: set[tuple] = set()
     mine = [k for k in keys if k[0] != "lib"]
     for chunk in range(0, len(mine), 400):
-        part = mine[chunk:chunk + 400]
-        rows = conn.execute(f"""SELECT game_id, ply FROM mistakes WHERE phase = 'endgame' AND is_mine = 1
+        part = mine[chunk : chunk + 400]
+        rows = conn.execute(
+            f"""SELECT game_id, ply FROM mistakes WHERE phase = 'endgame' AND is_mine = 1
                                 AND (game_id, ply) IN (VALUES {",".join("(?, ?)" for _ in part)})""",
-                            [v for k in part for v in k])
+            [v for k in part for v in k],
+        )
         out |= {(r["game_id"], r["ply"]) for r in rows}
     lib = [k[1] for k in keys if k[0] == "lib"]
     if lib:
-        rows = conn.execute(f"""SELECT id FROM puzzles WHERE themes LIKE '% endgame %'
-                                AND id IN ({",".join("?" * len(lib))})""", lib)
+        rows = conn.execute(
+            f"""SELECT id FROM puzzles WHERE themes LIKE '% endgame %'
+                                AND id IN ({",".join("?" * len(lib))})""",
+            lib,
+        )
         out |= {("lib", r["id"]) for r in rows}
     return out
 
 
 def _endgame_subtitle(conn: sqlite3.Connection, items: list[list]) -> str:
-    """"2 from your own games. Rook endgame, pawn endgame puzzles near your rating." """
+    """ "2 from your own games. Rook endgame, pawn endgame puzzles near your rating." """
     mine = sum(i[0] != "lib" for i in items)
     types = library.endgame_types(conn, [i[1] for i in items if i[0] == "lib"])
     parts = [f"{mine} from your own games"] if mine else []
@@ -330,13 +385,15 @@ def _servable(conn: sqlite3.Connection, items: list[list]) -> set[tuple]:
     mine = list({_key(i) for i in items if i[0] != "lib"})
     out: set[tuple] = set()
     for chunk in range(0, len(mine), 400):
-        part = mine[chunk:chunk + 400]
-        rows = conn.execute(f"""
+        part = mine[chunk : chunk + 400]
+        rows = conn.execute(
+            f"""
             SELECT m.game_id, m.ply FROM mistakes m
             JOIN positions p ON p.game_id = m.game_id AND p.ply = m.ply
             JOIN positions p2 ON p2.game_id = m.game_id AND p2.ply = m.ply + 1
             WHERE m.is_mine = 1 AND (m.game_id, m.ply) IN (VALUES {",".join("(?, ?)" for _ in part)})""",
-            [v for k in part for v in k])
+            [v for k in part for v in k],
+        )
         out |= {(r["game_id"], r["ply"]) for r in rows}
     lib = list({i[1] for i in items if i[0] == "lib"})
     if lib:
@@ -374,8 +431,12 @@ def _block_done(conn: sqlite3.Connection, block: dict, on: date) -> bool:
     """The endgame block is done once its planned endgame or won position was played today (not
     any other one: E2)."""
     kind, _, key = block.get("key", "").partition("/")
-    return conn.execute("SELECT 1 FROM cards WHERE kind = ? AND key = ? AND last_on = ? LIMIT 1",
-                        (kind, key, on.isoformat())).fetchone() is not None
+    return (
+        conn.execute(
+            "SELECT 1 FROM cards WHERE kind = ? AND key = ? AND last_on = ? LIMIT 1", (kind, key, on.isoformat())
+        ).fetchone()
+        is not None
+    )
 
 
 def _elsewhere_seconds(block: dict) -> float:
@@ -386,10 +447,14 @@ def _elsewhere_seconds(block: dict) -> float:
 def attempted_today(conn: sqlite3.Connection, on: date) -> set[tuple]:
     """(game_id, ply) of my positions and ("lib", puzzle_id) of library puzzles tried today."""
     day = on.isoformat()
-    mine = {(r["game_id"], r["ply"]) for r in conn.execute(
-        f"SELECT game_id, ply FROM review_results WHERE {srs.day_sql('at')} = ?", (day,))}
-    return mine | {("lib", r["puzzle_id"]) for r in conn.execute(
-        f"SELECT puzzle_id FROM puzzle_attempts WHERE {srs.day_sql('at')} = ?", (day,))}
+    mine = {
+        (r["game_id"], r["ply"])
+        for r in conn.execute(f"SELECT game_id, ply FROM review_results WHERE {srs.day_sql('at')} = ?", (day,))
+    }
+    return mine | {
+        ("lib", r["puzzle_id"])
+        for r in conn.execute(f"SELECT puzzle_id FROM puzzle_attempts WHERE {srs.day_sql('at')} = ?", (day,))
+    }
 
 
 def block_items(plan: dict, block_id: str) -> list[tuple[tuple[int, int], str]]:
@@ -400,15 +465,23 @@ def block_items(plan: dict, block_id: str) -> list[tuple[tuple[int, int], str]]:
 
 # ------------------------------------------------------------ focus block
 
-def _focus_items(conn: sqlite3.Connection, cfg: Config, size: int, taken: set[tuple],
-                 on: date, new_left: int, lib_taken: set[str] = frozenset()) -> tuple[dict | None, list[list]]:
+
+def _focus_items(
+    conn: sqlite3.Connection,
+    cfg: Config,
+    size: int,
+    taken: set[tuple],
+    on: date,
+    new_left: int,
+    lib_taken: set[str] = frozenset(),
+) -> tuple[dict | None, list[list]]:
     """My #1 weakness that has puzzles, and up to `size` of them: my own mistakes of that kind
     (unsolved first, best lessons first; at most `new_left` never studied, as they become new
     cards) and, with the library loaded, themed library puzzles."""
     if size <= 0:
         return None, []
     has_library = library.count(conn) > 0
-    for weakness in insights.compute(conn, last=100).get("weaknesses", []):   # none before any analysis
+    for weakness in insights.compute(conn, last=100).get("weaknesses", []):  # none before any analysis
         train = weakness.get("train") or {}
         own = _matching_mistakes(conn, train, taken, new_left)
         themes = library.themes_for(train) if has_library else []
@@ -422,33 +495,50 @@ def _focus_items(conn: sqlite3.Connection, cfg: Config, size: int, taken: set[tu
     return None, []
 
 
-def _matching_mistakes(conn: sqlite3.Connection, train: dict, taken: set[tuple], new_left: int,
-                       recent: int | None = 100, unseen_only: bool = False) -> list[tuple[int, int]]:
+def _matching_mistakes(
+    conn: sqlite3.Connection,
+    train: dict,
+    taken: set[tuple],
+    new_left: int,
+    recent: int | None = 100,
+    unseen_only: bool = False,
+) -> list[tuple[int, int]]:
     """My mistakes matching a weakness' Practice filter (see insights.weaknesses) in my last
     `recent` games (None: all), at most `new_left` of them never studied (`unseen_only`: only
     those). Mistakes of an open new-games session wait for it."""
     if not train:
-        return []    # a weakness without a position-level filter
-    where = ["m.is_mine = 1", "m.judgement IN ('mistake', 'blunder')", "m.decided = 0",
-             "g.id IN (SELECT id FROM games ORDER BY end_time DESC, id DESC LIMIT ?)",
-             f"g.id NOT IN ({srs.OPEN_SESSION_GAMES})",
-             "NOT EXISTS (SELECT 1 FROM cards c WHERE c.game_id = m.game_id AND c.ply = m.ply"
-             " AND c.mastered_on IS NOT NULL)"]
-    params: list = [recent if recent is not None else -1]     # LIMIT -1: no limit
-    for key, column in (("kind", "m.kind"), ("phase", "m.phase"), ("opening", "g.opening_family"),
-                        ("color", "g.my_color")):
+        return []  # a weakness without a position-level filter
+    where = [
+        "m.is_mine = 1",
+        "m.judgement IN ('mistake', 'blunder')",
+        "m.decided = 0",
+        "g.id IN (SELECT id FROM games ORDER BY end_time DESC, id DESC LIMIT ?)",
+        f"g.id NOT IN ({srs.OPEN_SESSION_GAMES})",
+        "NOT EXISTS (SELECT 1 FROM cards c WHERE c.game_id = m.game_id AND c.ply = m.ply"
+        " AND c.mastered_on IS NOT NULL)",
+    ]
+    params: list = [recent if recent is not None else -1]  # LIMIT -1: no limit
+    for key, column in (
+        ("kind", "m.kind"),
+        ("phase", "m.phase"),
+        ("opening", "g.opening_family"),
+        ("color", "g.my_color"),
+    ):
         if train.get(key):
             where.append(f"{column} = ?")
             params.append(train[key])
-    rows = conn.execute(f"""
+    rows = conn.execute(
+        f"""
         SELECT m.game_id, m.ply, g.clocks_ms, g.time_control,
                (SELECT r.result FROM review_results r WHERE r.game_id = m.game_id AND r.ply = m.ply
                 ORDER BY r.id DESC LIMIT 1) AS status,
                COALESCE((SELECT c.due_on IS NULL FROM cards c WHERE c.game_id = m.game_id AND c.ply = m.ply), 1)
                    AS unseen
         FROM mistakes m JOIN games g ON g.id = m.game_id
-        WHERE {' AND '.join(where)}
-        ORDER BY (status IN ('solved', 'solved_with_help')), {srs.PUZZLE_VALUE} DESC""", params).fetchall()
+        WHERE {" AND ".join(where)}
+        ORDER BY (status IN ('solved', 'solved_with_help')), {srs.PUZZLE_VALUE} DESC""",
+        params,
+    ).fetchall()
     out = []
     for r in rows:
         if (r["game_id"], r["ply"]) in taken:

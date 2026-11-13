@@ -17,11 +17,14 @@ def current_rating(conn: sqlite3.Connection, time_class: str | None = None) -> i
         row = conn.execute("""SELECT time_class FROM games WHERE time_class IS NOT NULL
                               GROUP BY time_class ORDER BY COUNT(*) DESC LIMIT 1""").fetchone()
         time_class = row[0] if row else None
-    row = conn.execute("""
+    row = conn.execute(
+        """
         SELECT CASE WHEN my_color = 'white' THEN white_elo ELSE black_elo END AS elo FROM games
         WHERE (time_class = ? OR ? IS NULL) AND COALESCE(rated, 1) = 1
           AND (CASE WHEN my_color = 'white' THEN white_elo ELSE black_elo END) IS NOT NULL
-        ORDER BY end_time DESC, id DESC LIMIT 1""", (time_class, time_class)).fetchone()
+        ORDER BY end_time DESC, id DESC LIMIT 1""",
+        (time_class, time_class),
+    ).fetchone()
     return row["elo"] if row else None
 
 

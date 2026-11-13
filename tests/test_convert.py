@@ -8,10 +8,28 @@ from chessreview.classify import Eval
 from chessreview.convert import Task, state
 
 
-def task(goal="win", finish="resign", kind="convert", color="white", max_plies=120, fen=chess.STARTING_FEN,
-         resign_cp=convert.RESIGN_CP, start_eval="+5.00"):
-    return Task(key="x/1", kind=kind, fen=fen, color=color, goal=goal, finish=finish,
-                title="t", max_plies=max_plies, start_eval=start_eval, resign_cp=resign_cp)
+def task(
+    goal="win",
+    finish="resign",
+    kind="convert",
+    color="white",
+    max_plies=120,
+    fen=chess.STARTING_FEN,
+    resign_cp=convert.RESIGN_CP,
+    start_eval="+5.00",
+):
+    return Task(
+        key="x/1",
+        kind=kind,
+        fen=fen,
+        color=color,
+        goal=goal,
+        finish=finish,
+        title="t",
+        max_plies=max_plies,
+        start_eval=start_eval,
+        resign_cp=resign_cp,
+    )
 
 
 def played(fen, *ucis):
@@ -28,8 +46,8 @@ def test_endgames_are_valid_and_my_side_moves_first():
         board = chess.Board(t.fen)
         assert board.is_valid(), t.key
         assert t.goal in ("win", "draw") and t.finish in convert.FINISHES
-        assert (t.goal == "draw") == (t.finish == "hold"), t.key      # every win names its milestone (P11)
-        assert t.finish != "resign", t.key                             # resigning on the eval is for converts
+        assert (t.goal == "draw") == (t.finish == "hold"), t.key  # every win names its milestone (P11)
+        assert t.finish != "resign", t.key  # resigning on the eval is for converts
         assert (board.turn == chess.WHITE) == (t.color == "white")
         assert t.level in convert.LEVELS
 
@@ -45,7 +63,7 @@ def test_levels_unlock_in_order(tmp_path):
 
 
 def test_checkmate_and_draws():
-    mated = chess.Board("R5k1/5ppp/8/8/8/8/5PPP/6K1 b - - 1 1")         # black is mated, I am white
+    mated = chess.Board("R5k1/5ppp/8/8/8/8/5PPP/6K1 b - - 1 1")  # black is mated, I am white
     assert state(task(), mated, None, 0, 1000).status == "won"
     stalemate = chess.Board("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1")
     assert state(task(), stalemate, None, 0, 1000).status == "failed"
@@ -54,7 +72,7 @@ def test_checkmate_and_draws():
 
 def test_stockfish_resigns_at_a_short_mate_except_in_the_basic_mates():
     b = chess.Board()
-    assert state(task(), b, Eval(None, 4), 0, 1000).status == "won"                 # mate in 4
+    assert state(task(), b, Eval(None, 4), 0, 1000).status == "won"  # mate in 4
     assert state(task(finish="promote", kind="endgame"), b, Eval(None, 5), 0, 1000).status == "won"
     assert state(task(finish="bare_king", kind="endgame"), b, Eval(None, 6), 0, 1000).status == "playing"
     assert state(task(finish="mate", kind="endgame"), b, Eval(None, 4), 0, 1000).status == "playing"
@@ -64,8 +82,8 @@ def test_resigning_is_relative_to_the_start():
     """P11: a convert that starts at +8.45 isn't won by three moves that keep +9."""
     assert convert.resign_cp(Eval(845, None)) == 1145
     assert convert.resign_cp(Eval(500, None)) == 800
-    assert convert.resign_cp(Eval(200, None)) == convert.RESIGN_CP      # never below +7
-    assert convert.resign_cp(Eval(None, 7)) is None                    # a forced mate: finish it
+    assert convert.resign_cp(Eval(200, None)) == convert.RESIGN_CP  # never below +7
+    assert convert.resign_cp(Eval(None, 7)) is None  # a forced mate: finish it
     t = task(resign_cp=1145, start_eval="+8.45")
     b = chess.Board()
     s = state(t, b, Eval(900, None), 2, 1000)
@@ -86,7 +104,7 @@ def test_promotion_finishes_only_when_still_decisive():
     promote = task(finish="promote", kind="endgame", fen=PAWN_E7)
     b = played(PAWN_E7, "e7e8q", "g7f6")
     assert state(promote, b, Eval(None, 9), 0, 1000).reason == "You promoted safely: Stockfish resigns."
-    assert state(promote, b, Eval(40, None), 0, 1000).status == "playing"        # e.g. the queen was lost
+    assert state(promote, b, Eval(40, None), 0, 1000).status == "playing"  # e.g. the queen was lost
     # A high eval without the promotion is not the milestone.
     assert state(promote, played(PAWN_E7, "e1d2", "g7f6"), Eval(2000, None), 2, 1000).status == "playing"
     # Stockfish's promotion is not mine.
@@ -101,7 +119,7 @@ def test_bare_king_finishes_only_if_stockfish_had_more():
     bare = task(finish="bare_king", kind="endgame", fen=fen)
     assert state(bare, b, Eval(None, 9), 0, 1000).reason == "Only Stockfish's king is left: it resigns."
     assert state(bare, played(fen, "h2h3", "d1e1"), Eval(None, 9), 0, 1000).status == "playing"
-    cutoff = "8/8/8/8/4k3/8/R3P3/4K3 w - - 0 1"                 # a bare king from the start
+    cutoff = "8/8/8/8/4k3/8/R3P3/4K3 w - - 0 1"  # a bare king from the start
     b = played(cutoff, "a2a3", "e4d4")
     assert state(task(finish="bare_king", kind="endgame", fen=cutoff), b, Eval(1500, None), 2, 1000).status == "playing"
     # Converts count both milestones.
@@ -136,17 +154,28 @@ def test_draw_goal_holds_or_fails():
 @pytest.fixture
 def conn(tmp_path):
     c = db.connect(tmp_path / "c.db")
-    for gid, result, wins in ((1, "loss", [0.1, 0.75, 0.8, 0.2]), (2, "win", [0.75, 0.8, 0.9, 0.9]),
-                              (3, "draw", [0.1, 0.75, 0.3, 0.75])):
-        c.execute("""INSERT INTO games (id, dedupe_key, white, black, white_elo, black_elo, my_color, my_result, date,
+    for gid, result, wins in (
+        (1, "loss", [0.1, 0.75, 0.8, 0.2]),
+        (2, "win", [0.75, 0.8, 0.9, 0.9]),
+        (3, "draw", [0.1, 0.75, 0.3, 0.75]),
+    ):
+        c.execute(
+            """INSERT INTO games (id, dedupe_key, white, black, white_elo, black_elo, my_color, my_result, date,
                          moves_uci, num_plies, pgn, analysed_at, end_time, time_class, rated)
                      VALUES (?, ?, 'me', 'opp', 1000, 1000, 'white', ?, '2026-10-01', 'e2e4', 8, '', '2026-10-01',
-                             ?, 'rapid', 1)""", (gid, f"k{gid}", result, f"2026-10-0{gid} 12:00"))
+                             ?, 'rapid', 1)""",
+            (gid, f"k{gid}", result, f"2026-10-0{gid} 12:00"),
+        )
         for i, w in enumerate(wins):
-            c.execute("""INSERT INTO mistakes (game_id, ply, judgement, win_before, win_drop, is_mine)
-                         VALUES (?, ?, 'good', ?, 0, 1)""", (gid, 2 * i, w))
-            c.execute("INSERT INTO positions (game_id, ply, fen, score_cp) VALUES (?, ?, ?, 600)",
-                      (gid, 2 * i, chess.STARTING_FEN))
+            c.execute(
+                """INSERT INTO mistakes (game_id, ply, judgement, win_before, win_drop, is_mine)
+                         VALUES (?, ?, 'good', ?, 0, 1)""",
+                (gid, 2 * i, w),
+            )
+            c.execute(
+                "INSERT INTO positions (game_id, ply, fen, score_cp) VALUES (?, ?, ?, 600)",
+                (gid, 2 * i, chess.STARTING_FEN),
+            )
     c.commit()
     yield c
     c.close()
@@ -155,14 +184,14 @@ def conn(tmp_path):
 def test_convert_positions(conn):
     keys = [p["key"] for p in convert.convert_positions(conn)]
     # winning bar at 1000: +5 = 0.726 win chance; game 3 never holds it for two moves
-    assert keys == ["convert/1:2", "convert/2:0"]           # the lost game first
+    assert keys == ["convert/1:2", "convert/2:0"]  # the lost game first
     assert convert.next_convert(conn) == "convert/1:2"
     srs.record_key(conn, "convert", "1:2", "failed")
-    assert convert.next_convert(conn) == "convert/2:0"      # tried today: due again tomorrow
+    assert convert.next_convert(conn) == "convert/2:0"  # tried today: due again tomorrow
     t = convert.task_for(conn, "convert/1:2")
     assert t.goal == "win" and t.color == "white" and "lost" in t.subtitle
-    assert t.start_cp is not None and t.start_cp > 0      # for "where it slipped" after a failed try
-    assert t.resign_cp == 900                              # +6 at the start: Stockfish resigns at +9
+    assert t.start_cp is not None and t.start_cp > 0  # for "where it slipped" after a failed try
+    assert t.resign_cp == 900  # +6 at the start: Stockfish resigns at +9
 
 
 def test_migration_resets_endgames_solved_under_the_old_rule(conn):

@@ -61,10 +61,19 @@ THREAT_RESULTS = {"correct", "wrong", "skipped"}
 STATUS_SQL = """(SELECT r.result FROM review_results r
                  WHERE r.game_id = m.game_id AND r.ply = m.ply ORDER BY r.id DESC LIMIT 1)"""
 # Practice filters that narrow each other (B16): name -> column; fixed display order where it matters.
-FACETS = [("opening", "g.opening_family"), ("phase", "m.phase"), ("result", "g.my_result"),
-          ("color", "g.my_color"), ("time_class", "g.time_class"), ("kind", "m.kind")]
-FACET_ORDER = {"phase": ["opening", "middlegame", "endgame"], "result": ["win", "draw", "loss"],
-               "color": ["white", "black"]}
+FACETS = [
+    ("opening", "g.opening_family"),
+    ("phase", "m.phase"),
+    ("result", "g.my_result"),
+    ("color", "g.my_color"),
+    ("time_class", "g.time_class"),
+    ("kind", "m.kind"),
+]
+FACET_ORDER = {
+    "phase": ["opening", "middlegame", "endgame"],
+    "result": ["win", "draw", "loss"],
+    "color": ["white", "black"],
+}
 STATUS_FILTERS = {
     "new": f"{STATUS_SQL} IS NULL",
     "unsolved": f"({STATUS_SQL} IS NULL OR {STATUS_SQL} IN ('failed', 'skipped'))",
@@ -73,7 +82,7 @@ STATUS_FILTERS = {
 }
 
 
-MAX_LIMIT = 200     # puzzle items built in one request (one SQL term each)
+MAX_LIMIT = 200  # puzzle items built in one request (one SQL term each)
 
 
 def _body() -> dict:
@@ -91,7 +100,7 @@ def _int(data: dict, key: str, default: int | None = None) -> int:
         raise BadRequest(f"{key} is required.")
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise BadRequest(f"{key} must be a whole number.") from None
 
 
@@ -124,8 +133,8 @@ def create_app(cfg: Config | None = None) -> Flask:
     app.config["TEMPLATES_AUTO_RELOAD"] = True  # edited pages show up without a server restart
 
     state = {"job": AnalysisJob(cfg), "library": library.FetchProgress(), "library_thread": None}
-    import_lock = threading.Lock()    # one upload, chess.com sync, restore or Delete all at a time
-    job_lock = threading.Lock()       # checking and starting the analysis job is one step
+    import_lock = threading.Lock()  # one upload, chess.com sync, restore or Delete all at a time
+    job_lock = threading.Lock()  # checking and starting the analysis job is one step
     live = LiveEngine(cfg)
     app.extensions["live"] = live  # closed by the `serve` command on shutdown
 
@@ -187,8 +196,13 @@ def create_app(cfg: Config | None = None) -> Flask:
             stockfish = find_stockfish(cfg.engine.path)
         except StockfishNotFound:
             stockfish = "not found (see the README to install it)"
-        return render_template("settings.html", cfg=cfg, workers=effective_workers(cfg.engine),
-                               account=_account(conn()), stockfish=stockfish)
+        return render_template(
+            "settings.html",
+            cfg=cfg,
+            workers=effective_workers(cfg.engine),
+            account=_account(conn()),
+            stockfish=stockfish,
+        )
 
     # ------------------------------------------------------------ account (first run)
 
@@ -196,11 +210,13 @@ def create_app(cfg: Config | None = None) -> Flask:
         """Who I am and how far the first run has got."""
         name = db.username(c, cfg)
         first_import = c.execute(f"SELECT MIN({srs.day_sql('at')}) FROM imports").fetchone()[0]
-        return {"username": name, "username_source": "app" if db.get_meta(c, db.USERNAME_KEY) else
-                ("config" if name else None),
-                "games": c.execute("SELECT COUNT(*) FROM games").fetchone()[0],
-                "synced": db.get_meta(c, chesscom.LAST_MONTH_KEY) is not None,
-                "returning": first_import is not None and first_import < srs.today().isoformat()}
+        return {
+            "username": name,
+            "username_source": "app" if db.get_meta(c, db.USERNAME_KEY) else ("config" if name else None),
+            "games": c.execute("SELECT COUNT(*) FROM games").fetchone()[0],
+            "synced": db.get_meta(c, chesscom.LAST_MONTH_KEY) is not None,
+            "returning": first_import is not None and first_import < srs.today().isoformat(),
+        }
 
     @app.get("/api/account")
     def account():
@@ -208,7 +224,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         c = conn()
         out = _account(c)
         if request.args.get("archives") and out["username"]:
-            with contextlib.suppress(LookupError, OSError):    # the summary is optional
+            with contextlib.suppress(LookupError, OSError):  # the summary is optional
                 out |= _archive_summary(chesscom.archives_of(out["username"], fetch=chesscom.fetch_json))
         return jsonify(out)
 
@@ -228,7 +244,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         changed = db.username(c, cfg).lower() != name.lower()
         with c:
             db.set_meta(c, db.USERNAME_KEY, name)
-            if changed:     # the next sync starts from the new account's first month
+            if changed:  # the next sync starts from the new account's first month
                 c.execute("DELETE FROM meta WHERE key = ?", (chesscom.LAST_MONTH_KEY,))
         return jsonify(_account(c) | _archive_summary(archives))
 
@@ -254,18 +270,22 @@ def create_app(cfg: Config | None = None) -> Flask:
             try:
                 for f in files:
                     text = f.read().decode("utf-8", errors="replace")
-                    total.merge(import_pgn_text(c, text, cfg, source=f.filename or "upload",
-                                                batch_id=batch_id))
+                    total.merge(import_pgn_text(c, text, cfg, source=f.filename or "upload", batch_id=batch_id))
             finally:
-                session.finish_import(c, cfg, batch_id)     # an empty batch is dropped, even after an error
+                session.finish_import(c, cfg, batch_id)  # an empty batch is dropped, even after an error
         finally:
             import_lock.release()
         _start_job()
-        return jsonify(files=total.files, games_seen=total.games_seen, imported=total.imported,
-                       duplicates=total.duplicates, skipped=total.skipped)
+        return jsonify(
+            files=total.files,
+            games_seen=total.games_seen,
+            imported=total.imported,
+            duplicates=total.duplicates,
+            skipped=total.skipped,
+        )
 
     def _start_job():
-        with job_lock:      # two requests at once must not start two jobs (the first would be orphaned)
+        with job_lock:  # two requests at once must not start two jobs (the first would be orphaned)
             if not state["job"].is_running():
                 state["job"] = AnalysisJob(cfg)
                 state["job"].start()
@@ -276,9 +296,11 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/sync")
     def sync_status():
         c = conn()
-        return jsonify(username=db.username(c, cfg),
-                       last_month=db.get_meta(c, chesscom.LAST_MONTH_KEY),
-                       running=import_lock.locked())
+        return jsonify(
+            username=db.username(c, cfg),
+            last_month=db.get_meta(c, chesscom.LAST_MONTH_KEY),
+            running=import_lock.locked(),
+        )
 
     @app.post("/api/sync")
     def sync_now():
@@ -288,7 +310,7 @@ def create_app(cfg: Config | None = None) -> Flask:
             return jsonify(error="A sync or upload is already running. Try again when it has finished."), 409
         try:
             result = chesscom.sync(conn(), cfg, since=since, fetch=chesscom.fetch_json)
-        except ValueError as exc:       # no username yet
+        except ValueError as exc:  # no username yet
             return jsonify(error=str(exc)), 400
         except LookupError as exc:
             return jsonify(error=str(exc)), 404
@@ -362,10 +384,8 @@ def create_app(cfg: Config | None = None) -> Flask:
         row = c.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
         if row is None:
             return jsonify(error="Game not found. It may have been deleted."), 404
-        positions = c.execute(
-            "SELECT * FROM positions WHERE game_id = ? ORDER BY ply", (game_id,)).fetchall()
-        mistakes = {r["ply"]: dict(r) for r in c.execute(
-            "SELECT * FROM mistakes WHERE game_id = ?", (game_id,))}
+        positions = c.execute("SELECT * FROM positions WHERE game_id = ? ORDER BY ply", (game_id,)).fetchall()
+        mistakes = {r["ply"]: dict(r) for r in c.execute("SELECT * FROM mistakes WHERE game_id = ?", (game_id,))}
 
         if positions:
             out_positions = [_position_json(p, mistakes.get(p["ply"])) for p in positions]
@@ -388,11 +408,10 @@ def create_app(cfg: Config | None = None) -> Flask:
         refresh(c, cfg)
         args = request.args
         where, params = ["m.is_mine = 1"], []
-        if args.get("judgement") == "miss":     # mistakes/blunders that let the opponent's error go
+        if args.get("judgement") == "miss":  # mistakes/blunders that let the opponent's error go
             where.append("m.mark = 'miss'")
         else:
-            judgements = [j for j in args.get("judgement", "mistake,blunder").split(",")
-                          if j in JUDGEMENT_ORDER]
+            judgements = [j for j in args.get("judgement", "mistake,blunder").split(",") if j in JUDGEMENT_ORDER]
             where.append(f"m.judgement IN ({','.join('?' * len(judgements))})")
             params += judgements
         if args.get("game", type=int):
@@ -413,28 +432,50 @@ def create_app(cfg: Config | None = None) -> Flask:
 
         # One light query for every candidate (no positions, no explanations), then the facets.
         columns = ", ".join(f"{column} AS {name}" for name, column in FACETS)
-        rows = c.execute(f"""SELECT m.game_id, m.ply, {columns} FROM mistakes m JOIN games g ON g.id = m.game_id
-                             WHERE {' AND '.join(where)} ORDER BY {order}""", params).fetchall()
+        rows = c.execute(
+            f"""SELECT m.game_id, m.ply, {columns} FROM mistakes m JOIN games g ON g.id = m.game_id
+                             WHERE {" AND ".join(where)} ORDER BY {order}""",
+            params,
+        ).fetchall()
         # In time trouble / played very fast when I made the mistake (needs chess.com clocks).
         for flag, test in (("low_clock", insights.in_time_trouble), ("fast", insights.fast_move)):
             if args.get(flag):
-                clocks = {r["id"]: r for r in c.execute(
-                    "SELECT id, clocks_ms, time_control FROM games WHERE clocks_ms IS NOT NULL")}
-                rows = [r for r in rows if r["game_id"] in clocks and test(
-                    clocks[r["game_id"]]["clocks_ms"], clocks[r["game_id"]]["time_control"], r["ply"])]
+                clocks = {
+                    r["id"]: r
+                    for r in c.execute("SELECT id, clocks_ms, time_control FROM games WHERE clocks_ms IS NOT NULL")
+                }
+                rows = [
+                    r
+                    for r in rows
+                    if r["game_id"] in clocks
+                    and test(clocks[r["game_id"]]["clocks_ms"], clocks[r["game_id"]]["time_control"], r["ply"])
+                ]
         chosen = {name: args[name] for name, _ in FACETS if args.get(name)}
         hits = [r for r in rows if _facets_match(r, chosen)]
         limit = args.get("limit", type=int)
         if limit is None:
-            by_key = {(i["game_id"], i["ply"]): i for i in _query_mistakes(
-                c, cfg, where + [f"{column} = ?" for name, column in FACETS if name in chosen],
-                params + [chosen[name] for name, _ in FACETS if name in chosen], order)}
+            by_key = {
+                (i["game_id"], i["ply"]): i
+                for i in _query_mistakes(
+                    c,
+                    cfg,
+                    where + [f"{column} = ?" for name, column in FACETS if name in chosen],
+                    params + [chosen[name] for name, _ in FACETS if name in chosen],
+                    order,
+                )
+            }
             items = [by_key[(r["game_id"], r["ply"])] for r in hits]
         else:
-            items = _items_for(c, [((r["game_id"], r["ply"]), "practice")
-                                   for r in hits[:min(max(0, limit), MAX_LIMIT)]])
-        return jsonify(total=len(hits), keys=[f"{r['game_id']}:{r['ply']}" for r in hits], items=items,
-                       options=_facet_options(rows, chosen), analysed=coach.analysed_games(c))
+            items = _items_for(
+                c, [((r["game_id"], r["ply"]), "practice") for r in hits[: min(max(0, limit), MAX_LIMIT)]]
+            )
+        return jsonify(
+            total=len(hits),
+            keys=[f"{r['game_id']}:{r['ply']}" for r in hits],
+            items=items,
+            options=_facet_options(rows, chosen),
+            analysed=coach.analysed_games(c),
+        )
 
     @app.get("/api/mistakes/items")
     def mistake_items():
@@ -459,8 +500,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     def insights_data():
         c = conn()
         refresh(c, cfg)
-        return jsonify(insights.compute(c, request.args.get("time_class") or None,
-                                        request.args.get("last", type=int)))
+        return jsonify(insights.compute(c, request.args.get("time_class") or None, request.args.get("last", type=int)))
 
     @app.get("/api/settings/thresholds")
     def thresholds_info():
@@ -469,17 +509,22 @@ def create_app(cfg: Config | None = None) -> Flask:
         adaptive = adaptive_enabled(c, cfg)
         th = thresholds_for(rating, cfg, True)
         std = thresholds_for(None, cfg, False)
+
         def pct(v: float) -> float:
-            return round(v * 50, 1)   # -1..1 win-chance drop -> win% points
+            return round(v * 50, 1)  # -1..1 win-chance drop -> win% points
 
         mine = c.execute("""SELECT SUM(judgement = 'inaccuracy') AS i, SUM(judgement = 'mistake') AS m,
                                    SUM(judgement = 'blunder') AS b FROM mistakes WHERE is_mine = 1""").fetchone()
-        return jsonify(adaptive=adaptive, rating=rating, band=th.band,
-                       adaptive_thresholds=[pct(th.inaccuracy), pct(th.mistake), pct(th.blunder)],
-                       standard_thresholds=[pct(std.inaccuracy), pct(std.mistake), pct(std.blunder)],
-                       bands=[{"below": b, "values": [pct(i), pct(m), pct(x)]} for b, i, m, x in ADAPTIVE_BANDS],
-                       rebuild=dict(REBUILD), counts={"inaccuracies": mine["i"] or 0, "mistakes": mine["m"] or 0,
-                                                      "blunders": mine["b"] or 0})
+        return jsonify(
+            adaptive=adaptive,
+            rating=rating,
+            band=th.band,
+            adaptive_thresholds=[pct(th.inaccuracy), pct(th.mistake), pct(th.blunder)],
+            standard_thresholds=[pct(std.inaccuracy), pct(std.mistake), pct(std.blunder)],
+            bands=[{"below": b, "values": [pct(i), pct(m), pct(x)]} for b, i, m, x in ADAPTIVE_BANDS],
+            rebuild=dict(REBUILD),
+            counts={"inaccuracies": mine["i"] or 0, "mistakes": mine["m"] or 0, "blunders": mine["b"] or 0},
+        )
 
     @app.post("/api/settings/thresholds")
     def thresholds_set():
@@ -489,7 +534,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         c = conn()
         with c:
             db.set_meta(c, MODE_KEY, "adaptive" if adaptive else "standard")
-        refresh(c, cfg)    # the fingerprint changed: starts the rebuild
+        refresh(c, cfg)  # the fingerprint changed: starts the rebuild
         return jsonify(adaptive=adaptive, rebuild=dict(REBUILD))
 
     @app.get("/api/insights/endgame-training")
@@ -527,12 +572,20 @@ def create_app(cfg: Config | None = None) -> Flask:
         refresh(c, cfg)
         color = _color(request.args.get("color"))
         tree = _tree(color)
-        families = [dict(r) for r in c.execute(
-            """SELECT opening_family AS family, COUNT(*) AS games FROM games WHERE my_color = ?
-               GROUP BY opening_family ORDER BY games DESC""", (color,))]
-        return jsonify(families=families, problems=repertoire.problems(tree),
-                       stats=srs.line_stats(c, color), positions=sum(
-                           1 for n in tree.values() if n.my_turn and n.repertoire()[1]))
+        families = [
+            dict(r)
+            for r in c.execute(
+                """SELECT opening_family AS family, COUNT(*) AS games FROM games WHERE my_color = ?
+               GROUP BY opening_family ORDER BY games DESC""",
+                (color,),
+            )
+        ]
+        return jsonify(
+            families=families,
+            problems=repertoire.problems(tree),
+            stats=srs.line_stats(c, color),
+            positions=sum(1 for n in tree.values() if n.my_turn and n.repertoire()[1]),
+        )
 
     @app.get("/api/openings/node")
     def openings_node():
@@ -613,11 +666,17 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     def _today_json(c: sqlite3.Connection, plan: dict):
         for block in plan["blocks"]:
-            del block["items"]      # the keys are internal; /api/today/<block> serves the puzzles
+            del block["items"]  # the keys are internal; /api/today/<block> serves the puzzles
         games = c.execute("SELECT COUNT(*) AS total, SUM(analysed_at IS NOT NULL) AS analysed FROM games").fetchone()
-        return jsonify(plan=plan, streak=srs.streak(c), blind=cfg.training.blind, budgets=coach.BUDGETS,
-                       session=session.status(c, cfg), username=db.username(c, cfg),
-                       games={"total": games["total"], "analysed": games["analysed"] or 0})
+        return jsonify(
+            plan=plan,
+            streak=srs.streak(c),
+            blind=cfg.training.blind,
+            budgets=coach.BUDGETS,
+            session=session.status(c, cfg),
+            username=db.username(c, cfg),
+            games={"total": games["total"], "analysed": games["analysed"] or 0},
+        )
 
     @app.get("/api/today/<block_id>")
     def today_block(block_id: str):
@@ -651,9 +710,15 @@ def create_app(cfg: Config | None = None) -> Flask:
         c = conn()
         refresh(c, cfg)
         rating = level.current_rating(c)
-        return jsonify(positions=convert.convert_overview(c), endgames=convert.endgame_overview(c),
-                       next=convert.next_convert(c), rating=rating, winning_cp=level.winning_cp(rating),
-                       levels=convert.LEVELS, analysed=coach.analysed_games(c))
+        return jsonify(
+            positions=convert.convert_overview(c),
+            endgames=convert.endgame_overview(c),
+            next=convert.next_convert(c),
+            rating=rating,
+            winning_cp=level.winning_cp(rating),
+            levels=convert.LEVELS,
+            analysed=coach.analysed_games(c),
+        )
 
     @app.get("/api/convert/task")
     def convert_task():
@@ -691,25 +756,31 @@ def create_app(cfg: Config | None = None) -> Flask:
         me = chess.WHITE if task.color == "white" else chess.BLACK
         rating = level.current_rating(c)
         out = {"san": board.san(move), "uci": move.uci()}
-        before = tablebase.probe(c, board)          # the position I moved in (E3: blame a move only if known)
+        before = tablebase.probe(c, board)  # the position I moved in (E3: blame a move only if known)
         board.push(move)
         st = convert.state(task, board, None, streak, rating)
         if st.status == "playing":
-            analysis = live.analyse(board)      # Stockfish's eval of the position after its best reply
+            analysis = live.analyse(board)  # Stockfish's eval of the position after its best reply
             # With 7 pieces or fewer the tablebase defends perfectly and judges my move exactly (E3).
             tb = tablebase.probe(c, board)
             best = tablebase.choose(tb, analysis.best) if tb else None
             reply = chess.Move.from_uci(best.uci) if best else analysis.best
-            out |= {"reply_uci": reply.uci(), "reply_san": board.san(reply),
-                    "reply_source": "tablebase" if best else "stockfish"}
+            out |= {
+                "reply_uci": reply.uci(),
+                "reply_san": board.san(reply),
+                "reply_source": "tablebase" if best else "stockfish",
+            }
             board.push(reply)
             ev = analysis.for_side(me)
             out |= {"eval": str(ev), "cp": ev.as_cp()}
             exact = (_start_wdl(c, task), before.wdl if before else None, -tb.wdl) if tb else None
-            if exact:       # my side, before and after my move (the Convert lesson finds the slip by it)
-                out["tablebase"] = {"wdl": exact[2], "verdict": tablebase.verdict(exact[2]),
-                                    "before_wdl": exact[1],
-                                    "before_verdict": tablebase.verdict(exact[1]) if exact[1] is not None else None}
+            if exact:  # my side, before and after my move (the Convert lesson finds the slip by it)
+                out["tablebase"] = {
+                    "wdl": exact[2],
+                    "verdict": tablebase.verdict(exact[2]),
+                    "before_wdl": exact[1],
+                    "before_verdict": tablebase.verdict(exact[1]) if exact[1] is not None else None,
+                }
             st = convert.state(task, board, ev, st.streak, rating, tb=exact)
         out |= {"fen": board.fen(), "status": st.status, "reason": st.reason, "streak": st.streak}
         return jsonify(out)
@@ -726,7 +797,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         tb = tablebase.probe(c, board)
-        if tb and tb.best:      # perfect play (E3); in a draw, the engine's drawing move
+        if tb and tb.best:  # perfect play (E3); in a draw, the engine's drawing move
             move = tablebase.choose(tb, live.analyse(board).best if tb.best.wdl == 0 else None)
             return jsonify(uci=move.uci, san=move.san, source="tablebase")
         best = live.analyse(board).best
@@ -770,7 +841,7 @@ def create_app(cfg: Config | None = None) -> Flask:
             return jsonify(error="key and answer are required"), 400
         try:
             result = calc.answer(conn(), data["key"], data["answer"])
-        except calc.Unreadable as exc:          # a typo isn't a miss: nothing recorded
+        except calc.Unreadable as exc:  # a typo isn't a miss: nothing recorded
             return jsonify(error=str(exc)), 400
         if result is None:
             return jsonify(error="no such question"), 404
@@ -778,7 +849,7 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     # ------------------------------------------------------------ sparring (E5)
 
-    REVIEW_CHUNK = 12        # plies judged per /api/spar/review request
+    REVIEW_CHUNK = 12  # plies judged per /api/spar/review request
 
     @app.get("/spar")
     def spar_page():
@@ -788,8 +859,13 @@ def create_app(cfg: Config | None = None) -> Flask:
     def spar_overview():
         c = conn()
         refresh(c, cfg)
-        return jsonify(positions=spar.positions(c), levels=spar.levels(c), offset=spar.saved_offset(c),
-                       rating=level.current_rating(c), history=spar.history(c))
+        return jsonify(
+            positions=spar.positions(c),
+            levels=spar.levels(c),
+            offset=spar.saved_offset(c),
+            rating=level.current_rating(c),
+            history=spar.history(c),
+        )
 
     @app.post("/api/spar/offset")
     def spar_offset():
@@ -799,7 +875,7 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     def _spar_game(data: dict) -> tuple[chess.Board, chess.Color, list[str]]:
         start = _board(data.get("fen"))
-        if not start.is_valid():        # e.g. no kings, pawns on the back rank: the engine can't play it
+        if not start.is_valid():  # e.g. no kings, pawns on the back rank: the engine can't play it
             raise BadRequest("that position isn't legal")
         moves = _moves(data)
         try:
@@ -836,8 +912,12 @@ def create_app(cfg: Config | None = None) -> Flask:
             out |= {"reply_uci": reply.uci(), "reply_san": board.san(reply)}
             board.push(reply)
             over = spar.outcome(board, me)
-        out |= {"fen": board.fen(), "status": over[0] if over else "playing", "reason": over[1] if over else "",
-                "elo": st.elo}
+        out |= {
+            "fen": board.fen(),
+            "status": over[0] if over else "playing",
+            "reason": over[1] if over else "",
+            "elo": st.elo,
+        }
         return jsonify(out)
 
     @app.post("/api/spar/finish")
@@ -849,7 +929,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         over = spar.outcome(board, me)
         start = chess.Board(data["fen"])
         if not any(i % 2 == (0 if start.turn == me else 1) for i in range(len(moves))):
-            return jsonify(error="you haven't played a move: nothing to record"), 400   # leaving isn't losing
+            return jsonify(error="you haven't played a move: nothing to record"), 400  # leaving isn't losing
         if over is None:
             if not data.get("resigned"):
                 return jsonify(error="the game isn't over"), 400
@@ -858,8 +938,17 @@ def create_app(cfg: Config | None = None) -> Flask:
         offset = spar.clamp_offset(_int(data, "offset", 0))
         elo = spar.strength(spar.target_elo(level.current_rating(c), offset)).elo
         source = str(data.get("source") or "fen")[:40]
-        game_id = spar.record(c, source, chess.Board(data["fen"]).fen(), "white" if me == chess.WHITE else "black",
-                              elo, offset, moves, over[0], over[1])
+        game_id = spar.record(
+            c,
+            source,
+            chess.Board(data["fen"]).fen(),
+            "white" if me == chess.WHITE else "black",
+            elo,
+            offset,
+            moves,
+            over[0],
+            over[1],
+        )
         return jsonify(id=game_id, result=over[0], reason=over[1], history=spar.history(c))
 
     @app.post("/api/spar/review")
@@ -887,9 +976,12 @@ def create_app(cfg: Config | None = None) -> Flask:
                 after = live.analyse(after_board)
                 verdict, _, _ = judge(before.for_side(me), after.for_side(me), cfg, th)
                 is_best = before.best == move
-                entry |= {"judgement": "good" if is_best else verdict, "before": str(before.for_side(me)),
-                          "after": str(after.for_side(me)),
-                          "best_san": board.san(before.best) if before.best and not is_best else None}
+                entry |= {
+                    "judgement": "good" if is_best else verdict,
+                    "before": str(before.for_side(me)),
+                    "after": str(after.for_side(me)),
+                    "best_san": board.san(before.best) if before.best and not is_best else None,
+                }
             out.append(entry)
             board.push(move)
         nxt = start + REVIEW_CHUNK
@@ -913,8 +1005,10 @@ def create_app(cfg: Config | None = None) -> Flask:
         if mine:
             pairs = " OR ".join("(m.game_id = ? AND m.ply = ?)" for _ in mine)
             flat = [v for k in mine for v in k]
-            by_key = {(i["game_id"], i["ply"]): i
-                      for i in _query_mistakes(c, cfg, ["m.is_mine = 1", f"({pairs})"], flat, "m.game_id")}
+            by_key = {
+                (i["game_id"], i["ply"]): i
+                for i in _query_mistakes(c, cfg, ["m.is_mine = 1", f"({pairs})"], flat, "m.game_id")
+            }
         lib_ids = [k[1] for k, _ in keyed if k[0] == "lib"]
         if lib_ids:
             rows = c.execute(f"SELECT * FROM puzzles WHERE id IN ({','.join('?' * len(lib_ids))})", lib_ids)
@@ -923,8 +1017,13 @@ def create_app(cfg: Config | None = None) -> Flask:
         for k, tag in keyed:
             if k in by_key:
                 item = by_key[k]
-                out.append({**item, "queue": tag,
-                            "calm": item.get("mode") != "library" and (tag == "calm" or item["judgement"] == "good")})
+                out.append(
+                    {
+                        **item,
+                        "queue": tag,
+                        "calm": item.get("mode") != "library" and (tag == "calm" or item["judgement"] == "good"),
+                    }
+                )
         return out
 
     # ------------------------------------------------------------ puzzle library
@@ -936,10 +1035,14 @@ def create_app(cfg: Config | None = None) -> Flask:
     @app.get("/api/library/status")
     def library_status():
         c = conn()
-        return jsonify(count=library.count(c), fetched_on=db.get_meta(c, library.FETCHED_KEY),
-                       outdated=library.outdated(c),
-                       rating=library.rating(c), played=int(db.get_meta(c, library.COUNT_KEY) or 0),
-                       progress=state["library"].as_dict())
+        return jsonify(
+            count=library.count(c),
+            fetched_on=db.get_meta(c, library.FETCHED_KEY),
+            outdated=library.outdated(c),
+            rating=library.rating(c),
+            played=int(db.get_meta(c, library.COUNT_KEY) or 0),
+            progress=state["library"].as_dict(),
+        )
 
     @app.post("/api/library/fetch")
     def library_fetch():
@@ -953,10 +1056,11 @@ def create_app(cfg: Config | None = None) -> Flask:
             c = db.connect(cfg.db_path)
             try:
                 library.fetch(c, progress)
-            except Exception as exc:    # network or format problems: shown in Settings
+            except Exception as exc:  # network or format problems: shown in Settings
                 progress.state, progress.error = "error", str(exc)
             finally:
                 c.close()
+
         state["library_thread"] = threading.Thread(target=run, daemon=True, name="puzzle-library")
         state["library_thread"].start()
         return jsonify(progress.as_dict())
@@ -969,8 +1073,11 @@ def create_app(cfg: Config | None = None) -> Flask:
         themes = [theme] if theme in library.THEMES else None
         n = min(max(request.args.get("n", 10, type=int) or 10, 1), 50)
         ids = library.pick(c, n, themes)
-        return jsonify(items=_items_for(c, [(("lib", i), "library") for i in ids]),
-                       rating=library.rating(c), count=library.count(c))
+        return jsonify(
+            items=_items_for(c, [(("lib", i), "library") for i in ids]),
+            rating=library.rating(c),
+            count=library.count(c),
+        )
 
     @app.post("/api/library/result")
     def library_result():
@@ -1032,19 +1139,21 @@ def create_app(cfg: Config | None = None) -> Flask:
                     source.unlink(missing_ok=True)
                 return jsonify(error=str(exc)), 400
             backup.rotate(folder, cfg.backup)
-            repertoire.clear_cache()    # the stamp would almost surely differ, but a restore replaces everything
+            repertoire.clear_cache()  # the stamp would almost surely differ, but a restore replaces everything
             games = c.execute("SELECT COUNT(*) FROM games").fetchone()[0]
         finally:
             import_lock.release()
-        _start_job()        # a copy from before some games were analysed finishes them
+        _start_job()  # a copy from before some games were analysed finishes them
         return jsonify(restored=source.name, before=before.name if before else None, games=games)
 
     @app.get("/api/backups/export")
     def backups_export():
         """Export history: a consistent copy of the whole database (Restore can load it)."""
-        return Response(backup.snapshot_bytes(conn()), mimetype="application/vnd.sqlite3",
-                        headers={"Content-Disposition":
-                                 f'attachment; filename="chess-review-{date.today().isoformat()}.db"'})
+        return Response(
+            backup.snapshot_bytes(conn()),
+            mimetype="application/vnd.sqlite3",
+            headers={"Content-Disposition": f'attachment; filename="chess-review-{date.today().isoformat()}.db"'},
+        )
 
     @app.get("/api/session")
     def session_info():
@@ -1054,15 +1163,14 @@ def create_app(cfg: Config | None = None) -> Flask:
         if not st["open"]:
             return jsonify(st)
         where, params = session.puzzle_where(cfg, st["batch_ids"])
-        st["items"] = _query_mistakes(c, cfg, ["m.is_mine = 1", where], params,
-                                      "g.end_time, g.id, m.ply")
+        st["items"] = _query_mistakes(c, cfg, ["m.is_mine = 1", where], params, "g.end_time, g.id, m.ply")
         return jsonify(st)
 
     @app.get("/api/session/self-review")
     def self_review_games():
         """Games of the open session to self-review (moves only: no evals, no marks)."""
         c = conn()
-        refresh(c, cfg)     # loaded alongside /api/session: both must see the new games classified
+        refresh(c, cfg)  # loaded alongside /api/session: both must see the new games classified
         st = session.status(c, cfg)
         return jsonify(games=session.self_review_games(c, cfg, st["batch_ids"]) if st["open"] else [])
 
@@ -1072,9 +1180,10 @@ def create_app(cfg: Config | None = None) -> Flask:
         data = _body()
         ply = data.get("ply")
         try:
-            return jsonify(session.record_self_review(conn(), int(data.get("game_id")),
-                                                      None if ply is None else int(ply)))
-        except (LookupError, TypeError, ValueError):
+            return jsonify(
+                session.record_self_review(conn(), int(data.get("game_id")), None if ply is None else int(ply))
+            )
+        except LookupError, TypeError, ValueError:
             return jsonify(error="no turning point for this game"), 404
 
     @app.post("/api/session/done")
@@ -1101,14 +1210,17 @@ def create_app(cfg: Config | None = None) -> Flask:
             return jsonify(error="fen and uci are required"), 400
         before = prev_capture = None
         c = conn()
-        thresholds = level.current_thresholds(c, cfg)   # tries are judged at my level *now*
+        thresholds = level.current_thresholds(c, cfg)  # tries are judged at my level *now*
         if data.get("game_id") is not None and _int(data, "step", 0) == 0 and data.get("ply") is not None:
-            pos = c.execute("SELECT * FROM positions WHERE game_id = ? AND ply = ?",
-                            (_int(data, "game_id"), _int(data, "ply"))).fetchone()
+            pos = c.execute(
+                "SELECT * FROM positions WHERE game_id = ? AND ply = ?", (_int(data, "game_id"), _int(data, "ply"))
+            ).fetchone()
             if pos is not None and pos["fen"] == fen:
                 before = _stored_analysis(pos)
-                prev = c.execute("SELECT fen, move_uci FROM positions WHERE game_id = ? AND ply = ?",
-                                 (data["game_id"], pos["ply"] - 1)).fetchone()
+                prev = c.execute(
+                    "SELECT fen, move_uci FROM positions WHERE game_id = ? AND ply = ?",
+                    (data["game_id"], pos["ply"] - 1),
+                ).fetchone()
                 prev_capture = _prev_capture(prev["fen"], prev["move_uci"]) if prev else None
         try:
             result = live.judge(fen, uci, before, thresholds, prev_capture)
@@ -1127,14 +1239,25 @@ def create_app(cfg: Config | None = None) -> Flask:
         game_id, ply = _int(data, "game_id"), _int(data, "ply")
         attempts, hints = _int(data, "attempts", 0), _int(data, "hints_used", 0)
         c = conn()
-        if c.execute("SELECT 1 FROM mistakes WHERE game_id = ? AND ply = ? AND is_mine = 1",
-                     (game_id, ply)).fetchone() is None:
+        if (
+            c.execute("SELECT 1 FROM mistakes WHERE game_id = ? AND ply = ? AND is_mine = 1", (game_id, ply)).fetchone()
+            is None
+        ):
             return jsonify(error="unknown position"), 404
         with c:
-            c.execute("""INSERT INTO review_results (game_id, ply, result, attempts, hints_used, mode, threat_result)
+            c.execute(
+                """INSERT INTO review_results (game_id, ply, result, attempts, hints_used, mode, threat_result)
                          VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                      (game_id, ply, data["result"], attempts, hints,
-                       "blind" if data.get("mode") == "blind" else "labelled", threat_result))
+                (
+                    game_id,
+                    ply,
+                    data["result"],
+                    attempts,
+                    hints,
+                    "blind" if data.get("mode") == "blind" else "labelled",
+                    threat_result,
+                ),
+            )
         srs.record(c, game_id, ply, data["result"], kind="position" if data.get("calm") else "mistake")
         return jsonify(ok=True)
 
@@ -1144,8 +1267,11 @@ def create_app(cfg: Config | None = None) -> Flask:
         they threaten, played as if I passed) or uci = null for "no real threat"."""
         data = _body()
         c = conn()
-        row = c.execute("""SELECT p.*, g.my_color FROM positions p JOIN games g ON g.id = p.game_id
-                           WHERE p.game_id = ? AND p.ply = ?""", (_int(data, "game_id"), _int(data, "ply"))).fetchone()
+        row = c.execute(
+            """SELECT p.*, g.my_color FROM positions p JOIN games g ON g.id = p.game_id
+                           WHERE p.game_id = ? AND p.ply = ?""",
+            (_int(data, "game_id"), _int(data, "ply")),
+        ).fetchone()
         if row is None:
             return jsonify(error="unknown position"), 404
         me = chess.WHITE if row["my_color"] == "white" else chess.BLACK
@@ -1193,16 +1319,17 @@ def create_app(cfg: Config | None = None) -> Flask:
             for snapshot in live.stream(fen):
                 yield f"data: {json.dumps(snapshot)}\n\n"
 
-        return Response(events(), mimetype="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        return Response(
+            events(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        )
 
     return app
 
 
-def _query_mistakes(c: sqlite3.Connection, cfg: Config, where: list[str], params: list,
-                    order: str) -> list[dict]:
+def _query_mistakes(c: sqlite3.Connection, cfg: Config, where: list[str], params: list, order: str) -> list[dict]:
     """My mistakes as puzzle items (shared by Practice, Train and the new-games session)."""
-    rows = c.execute(f"""
+    rows = c.execute(
+        f"""
         SELECT m.*, p.fen, p.move_uci, p.move_san, p.best_uci, p.pv_uci,
                p.score_cp AS before_cp, p.score_mate AS before_mate,
                p.score_cp, p.score_mate, p.threat_cp, p.threat_mate, p.threat_uci, p.threat_pv,
@@ -1217,9 +1344,11 @@ def _query_mistakes(c: sqlite3.Connection, cfg: Config, where: list[str], params
         LEFT JOIN positions p0 ON p0.game_id = m.game_id AND p0.ply = m.ply - 1
         LEFT JOIN cards c ON c.game_id = m.game_id AND c.ply = m.ply
         JOIN games g ON g.id = m.game_id
-        WHERE {' AND '.join(where)}
+        WHERE {" AND ".join(where)}
         ORDER BY {order}
-    """, params).fetchall()
+    """,
+        params,
+    ).fetchall()
     th = level.current_thresholds(c, cfg)
     return [_mistake_json(r, cfg, th) for r in rows]
 
@@ -1239,14 +1368,19 @@ def _stored_analysis(pos: sqlite3.Row) -> PositionAnalysis:
 
 # ------------------------------------------------------------ JSON helpers
 
+
 def _eval_white(cp: int | None, mate: int | None) -> dict:
     return {"cp": cp, "mate": mate}
 
 
 def _position_json(p: sqlite3.Row, mistake: dict | None) -> dict:
     out = {
-        "ply": p["ply"], "fen": p["fen"], "move_uci": p["move_uci"], "move_san": p["move_san"],
-        "best_uci": p["best_uci"], "eval": _eval_white(p["score_cp"], p["score_mate"]),
+        "ply": p["ply"],
+        "fen": p["fen"],
+        "move_uci": p["move_uci"],
+        "move_san": p["move_san"],
+        "best_uci": p["best_uci"],
+        "eval": _eval_white(p["score_cp"], p["score_mate"]),
     }
     if p["best_uci"]:
         board = chess.Board(p["fen"])
@@ -1268,8 +1402,15 @@ def _unanalysed_positions(game: sqlite3.Row) -> list[dict]:
     out = []
     for ply, uci in enumerate(game["moves_uci"].split() + [None]):
         move = chess.Move.from_uci(uci) if uci else None
-        out.append({"ply": ply, "fen": board.fen(), "move_uci": uci,
-                    "move_san": board.san(move) if move else None, "eval": None})
+        out.append(
+            {
+                "ply": ply,
+                "fen": board.fen(),
+                "move_uci": uci,
+                "move_san": board.san(move) if move else None,
+                "eval": None,
+            }
+        )
         if move:
             board.push(move)
     return out
@@ -1293,32 +1434,61 @@ def _mistake_json(r: sqlite3.Row, cfg: Config, th) -> dict:
     after = Eval.from_row({"score_cp": r["after_cp"], "score_mate": r["after_mate"]}, me)
     ply = r["ply"]
     reply = [chess.Move.from_uci(u) for u in (r["after_pv"] or "").split()]
-    good = r["judgement"] == "good"    # a calm position: I played well in the game
-    best_explanation = explain_best(MoveContext(
-        board=board, move=chess.Move.from_uci(r["move_uci"]), best=best, best_line=line,
-        reply_line=reply, before=before, after=after, prev_capture=_prev_capture(r["prev_fen"], r["prev_move_uci"]),
-        min_loss=th.min_loss), r["kind"]) if best and not good else ""
+    good = r["judgement"] == "good"  # a calm position: I played well in the game
+    best_explanation = (
+        explain_best(
+            MoveContext(
+                board=board,
+                move=chess.Move.from_uci(r["move_uci"]),
+                best=best,
+                best_line=line,
+                reply_line=reply,
+                before=before,
+                after=after,
+                prev_capture=_prev_capture(r["prev_fen"], r["prev_move_uci"]),
+                min_loss=th.min_loss,
+            ),
+            r["kind"],
+        )
+        if best and not good
+        else ""
+    )
     threat = training_threat(r, me, th)
     return {
-        "game_id": r["game_id"], "ply": ply,
+        "game_id": r["game_id"],
+        "ply": ply,
         "move_label": f"{ply // 2 + 1}{'.' if ply % 2 == 0 else '...'}{r['move_san']}",
-        "judgement": r["judgement"], "kind": r["kind"], "explanation": r["explanation"],
-        "phase": r["phase"], "win_drop": r["win_drop"],
-        "fen": r["fen"], "move_uci": r["move_uci"], "move_san": r["move_san"],
-        "best_uci": r["best_uci"], "best_san": board.san(best) if best else None,
+        "judgement": r["judgement"],
+        "kind": r["kind"],
+        "explanation": r["explanation"],
+        "phase": r["phase"],
+        "win_drop": r["win_drop"],
+        "fen": r["fen"],
+        "move_uci": r["move_uci"],
+        "move_san": r["move_san"],
+        "best_uci": r["best_uci"],
+        "best_san": board.san(best) if best else None,
         "best_line": san_line(board, line, 6),
         "best_explanation": best_explanation,
         "best_pv_uci": [m.uci() for m in line],
-        "eval_before": str(before), "eval_after": str(after),
+        "eval_before": str(before),
+        "eval_after": str(after),
         "eval_before_white": _eval_white(r["before_cp"], r["before_mate"]),
         "my_color": r["my_color"],
         "opponent": r["black"] if r["my_color"] == "white" else r["white"],
-        "date": r["date"], "opening": r["opening"], "opening_family": r["opening_family"],
-        "my_result": r["my_result"], "time_class": r["time_class"],
-        "prev_move_uci": r["prev_move_uci"], "status": r["status"],
-        "hint": _calm_hint(threat) if good else hint(r["kind"]), "playout_moves": _playout_moves(r["kind"], before, cfg),
-        "card_box": r["card_box"], "card_due": r["card_due"],
-        "mark": r["mark"], "threat": threat.as_dict(r["fen"]) if threat else None,
+        "date": r["date"],
+        "opening": r["opening"],
+        "opening_family": r["opening_family"],
+        "my_result": r["my_result"],
+        "time_class": r["time_class"],
+        "prev_move_uci": r["prev_move_uci"],
+        "status": r["status"],
+        "hint": _calm_hint(threat) if good else hint(r["kind"]),
+        "playout_moves": _playout_moves(r["kind"], before, cfg),
+        "card_box": r["card_box"],
+        "card_due": r["card_due"],
+        "mark": r["mark"],
+        "threat": threat.as_dict(r["fen"]) if threat else None,
     }
 
 
