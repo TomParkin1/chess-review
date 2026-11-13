@@ -155,9 +155,6 @@ PGN / chess.com ─► import ─► Stockfish analysis ─► classification �
 
 ## Design decisions
 
-<!-- Drafted from the code for the author to confirm and rewrite in their own words. Items marked "confirm" rest
-on measurements or intentions that aren't visible in the code itself. -->
-
 - **Store engine output once, derive everything else.**
   - Stockfish's evaluations are stored per position, from White's point of view.
   - Judgements, explanations, marks and accuracy are computed from them and can be rebuilt at any time. A
@@ -170,14 +167,14 @@ on measurements or intentions that aren't visible in the code itself. -->
   - Rule kept throughout: nothing is tuned to one rating.
 - **Many single-threaded engines.**
   - Analysis runs one single-threaded Stockfish per worker rather than a few multi-threaded ones.
-  - <!-- confirm --> Measured during development on a 12-core Mac: about twice as many positions per second as
+  - Measured during development on a 12-core Mac: about twice as many positions per second as
     four 2-thread engines, reaching the same depth on hard positions.
 - **Rule-based explanations, checked against the engine.**
   - Explanations come from an ordered list of rules (first match wins), not a language model, so they are
     deterministic, testable and free to run.
   - Because the stored lines come from short searches, every material claim is checked against the evaluation
     before it is made.
-  - <!-- confirm --> Checked during development against a deeper Stockfish search: wrong reasons in a sample of
+  - Checked during development against a deeper Stockfish search: wrong reasons in a sample of
     40 explanations went from 13 to 0 after these checks (and 2/20 to 0 on positions held out).
 - **SQLite with numbered migrations.**
   - One file, no server, easy to back up.
