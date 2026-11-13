@@ -121,7 +121,14 @@ class MoveContext:
 
 
 def value(piece_type: chess.PieceType | None) -> int:
-    return PIECE_VALUES.get(piece_type, 0)
+    return PIECE_VALUES.get(piece_type, 0) if piece_type else 0
+
+
+def _name_at(board: chess.Board, square: chess.Square) -> str:
+    """Name of the piece on `square`, which must hold one ("knight")."""
+    piece_type = board.piece_type_at(square)
+    assert piece_type is not None, chess.square_name(square)
+    return chess.piece_name(piece_type)
 
 
 def balance(board: chess.Board, color: chess.Color) -> int:
@@ -155,7 +162,9 @@ def play_line(
     """
     b = board.copy(stack=False)
     start = balance(b, color)
-    lost, won, path = [], [], []
+    lost: list[chess.PieceType] = []
+    won: list[chess.PieceType] = []
+    path: list[int] = []
     last_taken = None
     for i, move in enumerate(line):
         if i >= max_plies and not b.is_capture(move):
@@ -381,7 +390,7 @@ def _beyond(ctx: MoveContext) -> LineResult:
 def _in_danger(board: chess.Board, square: chess.Square, victim: chess.Color) -> list[chess.Square]:
     """Pieces of `victim` that the piece on `square` attacks and that are really in danger: the
     king, or a piece (not a pawn) worth more than the attacker or undefended."""
-    attacker = board.piece_at(square)
+    attacker_value = value(board.piece_type_at(square))
     targets = []
     for sq in board.attacks(square):
         target = board.piece_at(sq)
@@ -389,7 +398,7 @@ def _in_danger(board: chess.Board, square: chess.Square, victim: chess.Color) ->
             continue
         if target.piece_type == chess.KING or (
             value(target.piece_type) >= 3
-            and (value(target.piece_type) > value(attacker.piece_type) or not board.is_attacked_by(victim, sq))
+            and (value(target.piece_type) > attacker_value or not board.is_attacked_by(victim, sq))
         ):
             targets.append(sq)
     return targets
@@ -460,7 +469,7 @@ def walked_into_fork(ctx: MoveContext):
     targets = _in_danger(after, reply.to_square, ctx.me)
     if len(targets) < 2:
         return None
-    names = [chess.piece_name(after.piece_at(sq).piece_type) for sq in targets]
+    names = [_name_at(after, sq) for sq in targets]
     attacked = " and ".join(f"your {n}" for n in names)
     return "fork", f"This walks into a fork: {reply_san} attacks {attacked}. {_you_lose(ctx)}"
 
@@ -547,7 +556,7 @@ def hanging_piece(ctx: MoveContext):
     if why:
         return "hanging_piece", f"{why}: after {ctx.board.san(ctx.move)}, {reply_san} takes it. {you_lose}"
     if ctx.recapture:
-        moved = chess.piece_name(ctx.board.piece_type_at(ctx.move.from_square))
+        moved = _name_at(ctx.board, ctx.move.from_square)
         taking = (
             "Taking back"
             if ctx.prev_capture == ctx.move.to_square
@@ -567,7 +576,7 @@ def _why_loose(ctx: MoveContext, target_sq: chess.Square) -> str | None:
     from the capturing piece's line, or was the piece guarding it."""
     reply = ctx.reply_line[0]
     frm = ctx.move.from_square
-    moved = f"{chess.piece_name(ctx.board.piece_type_at(frm))} on {chess.square_name(frm)}"
+    moved = f"{_name_at(ctx.board, frm)} on {chess.square_name(frm)}"
     target = piece_on(ctx.board, target_sq)
     capturer = ctx.board.piece_at(reply.from_square)
     if (
@@ -604,6 +613,7 @@ def _missed(ctx: MoveContext) -> tuple[str, str]:
 
 def _missed_material(ctx: MoveContext) -> tuple[str, str]:
     board, best = ctx.board, ctx.best
+    assert best is not None  # only asked when the best move wins material
     best_san = _san(board, best)
     won = describe_trade(_beyond(ctx), losing=False)
     line = ctx.gain_line()
@@ -613,7 +623,7 @@ def _missed_material(ctx: MoveContext) -> tuple[str, str]:
     after_best.push(best)
     if board.is_capture(ctx.move) and ctx.move.to_square == best.to_square:
         # Same capture, other piece: what matters is what the best one does next.
-        mine = chess.piece_name(board.piece_type_at(ctx.move.from_square))
+        mine = _name_at(board, ctx.move.from_square)
         threats = _new_threats(after_best, best, ctx.me)
         how = f"it also attacks {threats} and" if threats else "it"
         return "missed_capture", (
@@ -849,8 +859,8 @@ def explain_best(ctx: MoveContext, kind: str | None) -> str:
     elif gain.net >= 1 and not said_gain and _gain_ok(ctx) and not _understated(ctx):
         # (an amount the eval doesn't back, or one far below it, would teach the wrong size of the win)
         target = board.piece_at(ctx.best.to_square) if board.is_capture(ctx.best) else None
-        free = target and not board.is_attacked_by(not ctx.me, ctx.best.to_square)
-        if free and value(target.piece_type) >= gain.net:
+        free = target is not None and not board.is_attacked_by(not ctx.me, ctx.best.to_square)
+        if target is not None and free and value(target.piece_type) >= gain.net:
             sentences.append(f"{best_san} simply takes the undefended {chess.piece_name(target.piece_type)}.")
         else:
             shown = "." if kind == "missed_opportunity" else f": {ctx.gain_line()}."  # that text shows the line
@@ -867,8 +877,8 @@ def explain_best(ctx: MoveContext, kind: str | None) -> str:
 def _what_best_prevents(ctx: MoveContext, best_san: str, after_best: chess.Board) -> str:
     """Describe how the best move deals with the reply my move allowed."""
     after_mine = ctx.board_after()
-    threat = ctx.reply_line[0]
-    if threat not in after_mine.legal_moves:
+    threat, best = ctx.reply_line[0], ctx.best
+    if best is None or threat not in after_mine.legal_moves:
         return ""
     threat_san = after_mine.san(threat)
     if ctx.after.mate and ctx.after.mate < 0:
@@ -877,7 +887,7 @@ def _what_best_prevents(ctx: MoveContext, best_san: str, after_best: chess.Board
     target = after_mine.piece_at(target_sq)
     if target and target.color == ctx.me and target.piece_type != chess.KING:
         name = chess.piece_name(target.piece_type)
-        moved_from = ctx.best.from_square
+        moved_from = best.from_square
         if moved_from == target_sq or (ctx.move.to_square == target_sq and moved_from == ctx.move.from_square):
             return f"{best_san} keeps your {name} safe instead of leaving it to {threat_san}."
         if after_best.piece_at(target_sq) != target or after_mine.is_attacked_by(ctx.me, target_sq):
@@ -885,7 +895,7 @@ def _what_best_prevents(ctx: MoveContext, best_san: str, after_best: chess.Board
         guards = after_best.attackers(ctx.me, target_sq)
         if len(ctx.best_line) > 1 and ctx.best_line[1].to_square in guards:
             return ""  # the guard is taken straight away: guarding isn't what the best move is about
-        if ctx.best.to_square in guards:
+        if best.to_square in guards:
             return f"{best_san} defends your {name}, so {threat_san} no longer wins it."
         if ctx.move.from_square in guards:  # the piece my move took away still guards it
             return (
