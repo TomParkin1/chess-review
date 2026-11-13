@@ -47,7 +47,7 @@ from .classify import (
     thresholds_for,
 )
 from .config import Config, effective_workers, load_config
-from .engine import AnalysisJob, count_pending
+from .engine import AnalysisJob, StockfishNotFound, count_pending, find_stockfish
 from .explain import ATTACKING_KINDS, MoveContext, explain_best, hint, san_line
 from .live import LiveEngine, PositionAnalysis
 from .pgn_import import ImportStats, import_pgn_text
@@ -183,8 +183,12 @@ def create_app(cfg: Config | None = None) -> Flask:
 
     @app.get("/settings")
     def settings_page():
+        try:
+            stockfish = find_stockfish(cfg.engine.path)
+        except StockfishNotFound:
+            stockfish = "not found (see the README to install it)"
         return render_template("settings.html", cfg=cfg, workers=effective_workers(cfg.engine),
-                               account=_account(conn()))
+                               account=_account(conn()), stockfish=stockfish)
 
     # ------------------------------------------------------------ account (first run)
 

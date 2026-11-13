@@ -19,12 +19,13 @@ import sqlite3
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from . import backup, db
 from .classify import ensure_classified, refresh
-from .config import effective_workers, load_config
-from .engine import AnalysisJob, count_pending
+from .config import ConfigError, effective_workers, load_config
+from .engine import AnalysisJob, StockfishNotFound, count_pending, find_stockfish
 from .pgn_import import import_paths
 
 
@@ -277,7 +278,10 @@ def cmd_simulate(conn: sqlite3.Connection, cfg, args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="chessreview", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", default=None, help="path to config.toml")
+    parser.add_argument("--config", default=None,
+                        help="config file (default: $CHESSREVIEW_CONFIG, else ./config.toml if present)")
+    parser.add_argument("--stockfish", default=None, metavar="PATH",
+                        help="Stockfish executable (default: [engine] path, $STOCKFISH_PATH, PATH, usual folders)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("sync", help="fetch new games from chess.com")
@@ -332,7 +336,17 @@ def main() -> None:
     p.set_defaults(func=cmd_simulate)
 
     args = parser.parse_args()
-    cfg = load_config(args.config)
+    try:
+        cfg = load_config(args.config)
+    except ConfigError as exc:
+        sys.exit(str(exc))
+    if args.stockfish:
+        cfg = replace(cfg, engine=replace(cfg.engine, path=args.stockfish))
+    if args.func in (cmd_analyse, cmd_serve):      # both need the engine: say so now, not mid-analysis
+        try:
+            cfg = replace(cfg, engine=replace(cfg.engine, path=find_stockfish(cfg.engine.path)))
+        except StockfishNotFound as exc:
+            sys.exit(str(exc))
     if args.func is cmd_restore:    # no schema work first: the database may be what is broken
         Path(cfg.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(cfg.db_path, timeout=30)

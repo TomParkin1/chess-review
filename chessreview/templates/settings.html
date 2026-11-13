@@ -65,7 +65,7 @@
     <h2>Engine</h2>
     <p class="muted small">Change these in <code>config.toml</code> and restart the app.</p>
     <dl class="config">
-      <dt>Stockfish</dt><dd>{{ cfg.engine.path }}</dd>
+      <dt>Stockfish</dt><dd>{{ stockfish }}</dd>
       <dt>Analysis</dt><dd>up to {{ cfg.engine.time_per_position }} s or depth {{ cfg.engine.max_depth }} per position, {{ workers }} engines in parallel</dd>
       <dt>Puzzle play-out</dt><dd>{{ cfg.review.playout_tactical }} moves (tactics), {{ cfg.review.playout_other }} (other)</dd>
     </dl>
