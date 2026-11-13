@@ -321,7 +321,7 @@ def test_requests_keep_working_while_everything_is_reclassified(client, monkeypa
     assert done["rebuild"]["done"] == done["rebuild"]["total"] == 3 and done["rebuild"]["error"] is None
 
 
-def test_self_review_list_classifies_new_games_itself(client, tmp_path):
+def test_self_review_list_classifies_new_games_itself(client, tmp_path, real_stockfish):
     """The session page loads /api/session and /api/session/self-review at once; only the first
     classified new games, so straight after analysis the self-review list came back empty."""
     c, _app = client
