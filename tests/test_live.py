@@ -46,7 +46,7 @@ def test_illegal_move_raises(live):
         live.judge(MATE_IN_ONE, "a1h8")
 
 
-def test_stream_deepens_and_new_stream_cancels_old(live):
+def test_stream_deepens_and_new_stream_cancels_old(live, real_stockfish):
     start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     snapshots = list(live.stream(start))
     depths = [s["depth"] for s in snapshots]
