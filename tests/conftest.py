@@ -74,14 +74,30 @@ def no_tablebase_network(monkeypatch):
     tablebase.clear_cache()
 
 
+LOCAL_HOSTS = {
+    "127.0.0.1",
+    "::1",
+    "localhost",
+}  # asyncio (inside python-chess) talks to itself over loopback on Windows
+
+
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    """No test reaches the internet (chess.com, Lichess): one that needs a reply patches the fetch itself."""
+    """No test reaches the internet (chess.com, Lichess): one that needs a reply patches the fetch itself.
 
-    def refuse(self, address):
-        if self.family == getattr(socket, "AF_UNIX", None):  # local sockets are fine (no AF_UNIX on Windows)
-            return original(self, address)
-        raise OSError(f"network disabled in tests (tried {address})")
+    Name lookups and connections to anything but this machine raise OSError.
+    """
+    connect, getaddrinfo = socket.socket.connect, socket.getaddrinfo
 
-    original = socket.socket.connect
-    monkeypatch.setattr(socket.socket, "connect", refuse)
+    def local_connect(self, address):
+        if isinstance(address, tuple) and address[0] not in LOCAL_HOSTS:
+            raise OSError(f"network disabled in tests (tried {address})")
+        return connect(self, address)  # loopback, or a Unix socket path
+
+    def local_getaddrinfo(host, *args, **kwargs):
+        if host is not None and host not in LOCAL_HOSTS:
+            raise OSError(f"network disabled in tests (looked up {host})")
+        return getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "connect", local_connect)
+    monkeypatch.setattr(socket, "getaddrinfo", local_getaddrinfo)
