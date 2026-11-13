@@ -21,8 +21,10 @@ from .phases import PIECE_VALUES
 
 @dataclass(frozen=True)
 class Threat:
-    uci: str | None      # the opponent's best move if I passed
-    gain: float          # drop in my win chance if I passed (>= 0 in practice)
+    """What the opponent would do if I passed, and whether it really threatens something."""
+
+    uci: str | None  # the opponent's best move if I passed
+    gain: float  # drop in my win chance if I passed (>= 0 in practice)
     real: bool
 
     def as_dict(self, fen: str) -> dict:
@@ -73,6 +75,8 @@ def _threatened(board: chess.Board, sq: chess.Square, me: chess.Color) -> bool:
     """My newly attacked piece on `sq` is really in danger: undefended, or worth more than its
     cheapest attacker (this also covers discovered attacks). A king can't take a defended piece."""
     piece = board.piece_at(sq)
+    if piece is None:
+        return False
     if not board.is_attacked_by(me, sq):
         return True
     attackers = [board.piece_at(a) for a in board.attackers(not me, sq)]
@@ -82,9 +86,11 @@ def _threatened(board: chess.Board, sq: chess.Square, me: chess.Color) -> bool:
 
 def _attacked_pieces(board: chess.Board, me: chess.Color) -> set[chess.Square]:
     """Squares of my pieces (not pawns or the king) that the opponent attacks."""
-    return {sq for sq, piece in board.piece_map().items()
-            if piece.color == me and piece.piece_type not in (chess.PAWN, chess.KING)
-            and board.is_attacked_by(not me, sq)}
+    return {
+        sq
+        for sq, piece in board.piece_map().items()
+        if piece.color == me and piece.piece_type not in (chess.PAWN, chess.KING) and board.is_attacked_by(not me, sq)
+    }
 
 
 def recapture_pending(prev_fen: str | None, prev_uci: str | None, fen: str) -> bool:

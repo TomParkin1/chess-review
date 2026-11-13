@@ -16,10 +16,13 @@ SAMPLE = Path(__file__).parent / "data" / "sample.pgn"
 
 def make_app(tmp_path, username=None):
     base = load_config()
-    cfg = replace(base, db_path=tmp_path / "web.db",
-                  engine=replace(base.engine, time_per_position=1, max_depth=10, workers=2, threads=1),  # depth-bound: repeatable
-                  review=replace(base.review, live_time=0.1),
-                  analysis=replace(base.analysis, max_seconds=1))
+    cfg = replace(
+        base,
+        db_path=tmp_path / "web.db",
+        engine=replace(base.engine, time_per_position=1, max_depth=10, workers=2, threads=1),  # depth-bound: repeatable
+        review=replace(base.review, live_time=0.1),
+        analysis=replace(base.analysis, max_seconds=1),
+    )
     if username is not None:
         cfg = replace(cfg, player=PlayerConfig(username))
     app = create_app(cfg)
@@ -44,6 +47,7 @@ def new_user(tmp_path, stockfish):
 
 def wait_for_analysis(client):
     import time
+
     for _ in range(200):
         p = client.get("/api/progress").get_json()
         if p["state"] in ("done", "error") and p["pending"] == 0:
@@ -54,6 +58,7 @@ def wait_for_analysis(client):
 
 def wait_for_rebuild(client):
     import time
+
     for _ in range(300):
         info = client.get("/api/settings/thresholds").get_json()
         if not info["rebuild"]["running"]:
@@ -80,11 +85,13 @@ def test_upload_analyse_and_review(client):
     mistakes = c.get("/api/mistakes?judgement=inaccuracy,mistake,blunder").get_json()
     assert mistakes["items"], "the sample games contain obvious blunders"
     m = mistakes["items"][0]
-    r = c.post("/api/judge", json={"game_id": m["game_id"], "ply": m["ply"], "fen": m["fen"],
-                                   "uci": m["best_uci"], "step": 0})
+    r = c.post(
+        "/api/judge", json={"game_id": m["game_id"], "ply": m["ply"], "fen": m["fen"], "uci": m["best_uci"], "step": 0}
+    )
     assert r.get_json()["is_best"] is True
-    r = c.post("/api/judge", json={"game_id": m["game_id"], "ply": m["ply"], "fen": m["fen"],
-                                   "uci": m["move_uci"], "step": 0})
+    r = c.post(
+        "/api/judge", json={"game_id": m["game_id"], "ply": m["ply"], "fen": m["fen"], "uci": m["move_uci"], "step": 0}
+    )
     body = r.get_json()
     assert body["judgement"] == m["judgement"] and body["explanation"]  # same verdict as the game
 
@@ -92,7 +99,19 @@ def test_upload_analyse_and_review(client):
     misses = c.get("/api/mistakes?judgement=miss").get_json()["items"]
     assert all(i["mark"] == "miss" for i in misses)
 
-    for page in ("/", "/review", "/games", "/settings", "/insights", "/train", "/session", "/progress", "/convert", "/puzzles", f"/game/{m["game_id"]}"):
+    for page in (
+        "/",
+        "/review",
+        "/games",
+        "/settings",
+        "/insights",
+        "/train",
+        "/session",
+        "/progress",
+        "/convert",
+        "/puzzles",
+        f"/game/{m['game_id']}",
+    ):
         assert c.get(page).status_code == 200
 
 
@@ -162,7 +181,7 @@ def test_practice_sessions_get_keys_and_one_page_of_puzzles(client):
     wait_for_analysis(c)
     q = "/api/mistakes?judgement=inaccuracy,mistake,blunder&sort=newest"
     full = c.get(q).get_json()
-    assert len(full["items"]) == full["total"] == len(full["keys"]) >= 2   # no limit: everything, as before
+    assert len(full["items"]) == full["total"] == len(full["keys"]) >= 2  # no limit: everything, as before
     paged = c.get(q + "&limit=1").get_json()
     assert paged["keys"] == full["keys"] and paged["total"] == full["total"]
     assert [f"{i['game_id']}:{i['ply']}" for i in paged["items"]] == full["keys"][:1]
@@ -210,11 +229,11 @@ def test_time_trouble_filter_is_relative_to_the_time_control(client, tmp_path):
     with conn:
         conn.execute("UPDATE games SET clocks_ms = ?, time_control = '600' WHERE id = ?", (clocks, m["game_id"]))
     keys = c.get(q + "&low_clock=1").get_json()["keys"]
-    assert f"{m['game_id']}:{m['ply']}" in keys                  # 45 s of 10 minutes: under 10%
+    assert f"{m['game_id']}:{m['ply']}" in keys  # 45 s of 10 minutes: under 10%
     with conn:
         conn.execute("UPDATE games SET time_control = '180' WHERE id = ?", (m["game_id"],))
     keys = c.get(q + "&low_clock=1").get_json()["keys"]
-    assert f"{m['game_id']}:{m['ply']}" not in keys              # 45 s of 3 minutes is 25%: fine
+    assert f"{m['game_id']}:{m['ply']}" not in keys  # 45 s of 3 minutes is 25%: fine
     conn.close()
 
 
@@ -223,8 +242,7 @@ def test_analysis_stream(client):
     fen = "6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1"  # Ra8#
     r = c.get(f"/api/analyse/stream?fen={fen}")
     assert r.mimetype == "text/event-stream"
-    snapshots = [json.loads(line[6:]) for line in r.get_data(as_text=True).splitlines()
-                 if line.startswith("data: ")]
+    snapshots = [json.loads(line[6:]) for line in r.get_data(as_text=True).splitlines() if line.startswith("data: ")]
     assert snapshots and snapshots[-1]["done"]
     best = snapshots[-1]["lines"][0]
     assert best["uci"] == "a1a8" and best["eval"]["mate"] == 1 and best["san_line"].startswith("1. Ra8#")
@@ -266,10 +284,10 @@ def test_threshold_mode_switch_reclassifies(client):
     wait_for_analysis(c)
     info = c.get("/api/settings/thresholds").get_json()
     assert "adaptive" in info and len(info["standard_thresholds"]) == 3
-    c.get("/api/games")         # the first classification happens on the spot
+    c.get("/api/games")  # the first classification happens on the spot
     assert c.post("/api/settings/thresholds", json={"adaptive": False}).get_json()["adaptive"] is False
-    std = wait_for_rebuild(c)   # reclassified in the background
-    assert std["adaptive"] is False and std["rebuild"]["total"] == 3          # every game reclassified
+    std = wait_for_rebuild(c)  # reclassified in the background
+    assert std["adaptive"] is False and std["rebuild"]["total"] == 3  # every game reclassified
     std = std["counts"]
     c.post("/api/settings/thresholds", json={"adaptive": True})
     ada = wait_for_rebuild(c)["counts"]
@@ -282,6 +300,7 @@ def test_requests_keep_working_while_everything_is_reclassified(client, monkeypa
     import threading
 
     from chessreview import classify
+
     c, _app = client
     with open(SAMPLE, "rb") as f:
         c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
@@ -307,10 +326,10 @@ def test_self_review_list_classifies_new_games_itself(client, tmp_path):
     with open(SAMPLE, "rb") as f:
         c.post("/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data")
     wait_for_analysis(c)
-    with db.connect(tmp_path / "web.db") as conn:      # new games (not history), lost: self-reviewed
+    with db.connect(tmp_path / "web.db") as conn:  # new games (not history), lost: self-reviewed
         conn.execute("UPDATE imports SET session_done_at = NULL")
         conn.execute("UPDATE games SET my_result = 'loss'")
-    first = c.get("/api/session/self-review").get_json()["games"]     # before any other request
+    first = c.get("/api/session/self-review").get_json()["games"]  # before any other request
     c.get("/api/session")
     again = c.get("/api/session/self-review").get_json()["games"]
     assert again and [g["game_id"] for g in first] == [g["game_id"] for g in again]
@@ -332,16 +351,25 @@ def test_threat_check_and_real_game_queue(client):
         exact = c.post("/api/threat/check", json={"game_id": m["game_id"], "ply": m["ply"], "uci": t["uci"]}).get_json()
         assert exact["correct"] is t["real"] and exact["san"] == t["san"]
 
-    st = c.get("/api/session").get_json()          # new games wait for their session first
+    st = c.get("/api/session").get_json()  # new games wait for their session first
     c.post("/api/session/done", json={"batch_ids": st["batch_ids"]})
     c.post("/api/today/refresh")
     items = c.get("/api/today/real").get_json()["items"]
     assert items and all(i["mode"] == "blind" for i in items)
     first = items[0]
-    r = c.post("/api/review/result", json={"game_id": first["game_id"], "ply": first["ply"], "result": "solved",
-                                           "mode": "blind", "calm": first["calm"], "threat_result": "correct"})
+    r = c.post(
+        "/api/review/result",
+        json={
+            "game_id": first["game_id"],
+            "ply": first["ply"],
+            "result": "solved",
+            "mode": "blind",
+            "calm": first["calm"],
+            "threat_result": "correct",
+        },
+    )
     assert r.status_code == 200
-    assert c.get("/api/train/queue?blind=0").status_code == 404     # B18: Today replaced the old queue
+    assert c.get("/api/train/queue?blind=0").status_code == 404  # B18: Today replaced the old queue
 
 
 def test_today_and_progress_api(client):
@@ -355,7 +383,7 @@ def test_today_and_progress_api(client):
     plan = today["plan"]
     assert plan["total"] > 0 and all("items" not in b for b in plan["blocks"])
     for b in plan["blocks"]:
-        if b["id"] == "convert":    # played on the Convert page
+        if b["id"] == "convert":  # played on the Convert page
             continue
         items = c.get(f"/api/today/{b['id']}").get_json()["items"]
         assert len(items) == b["count"]
@@ -386,33 +414,55 @@ def test_endgame_playout_api(client):
 def test_library_api_without_a_library(client):
     c, _app = client
     s = c.get("/api/library/status").get_json()
-    assert s["count"] == 0 and s["progress"]["state"] == "idle" and s["rating"] == 1500   # no games: default
-    assert s["outdated"] is False                       # nothing to update before the first download
+    assert s["count"] == 0 and s["progress"]["state"] == "idle" and s["rating"] == 1500  # no games: default
+    assert s["outdated"] is False  # nothing to update before the first download
     assert c.get("/api/library/next").get_json()["items"] == []
     assert c.post("/api/library/result", json={"puzzle_id": "nope", "result": "solved"}).status_code == 404
 
 
 # ------------------------------------------------------------ Finish M1
 
-PAGE_APIS = ["/api/today", "/api/today/reviews", "/api/today/real", "/api/today/focus", "/api/train/stats",
-             "/api/insights?last=100", "/api/progress/report", "/api/convert", "/api/openings?color=white",
-             "/api/session", "/api/session/self-review", "/api/mistakes", "/api/games", "/api/sync",
-             "/api/library/status", "/api/account", "/api/backups", "/api/settings/thresholds",
-             "/api/insights/endgame-training", "/api/settings/tablebase", "/api/spar", "/api/calc", "/api/calc/next"]
+PAGE_APIS = [
+    "/api/today",
+    "/api/today/reviews",
+    "/api/today/real",
+    "/api/today/focus",
+    "/api/train/stats",
+    "/api/insights?last=100",
+    "/api/progress/report",
+    "/api/convert",
+    "/api/openings?color=white",
+    "/api/session",
+    "/api/session/self-review",
+    "/api/mistakes",
+    "/api/games",
+    "/api/sync",
+    "/api/library/status",
+    "/api/account",
+    "/api/backups",
+    "/api/settings/thresholds",
+    "/api/insights/endgame-training",
+    "/api/settings/tablebase",
+    "/api/spar",
+    "/api/calc",
+    "/api/calc/next",
+]
 
 
 def test_pages_work_on_an_empty_and_an_unanalysed_database(client, tmp_path):
     """B1: on a new install (and until the first game is analysed) /api/today was a 500, so Today
     stayed on "Loading your plan…" and the badge failed on every page."""
     c, _app = client
+
     def check():
         for url in PAGE_APIS:
             r = c.get(url)
             assert r.status_code in (200, 404) and (r.status_code == 200 or "/api/today/" in url), url
+
     check()
     today = c.get("/api/today").get_json()
     assert today["plan"]["total"] == 0 and today["games"] == {"total": 0, "analysed": 0}
-    conn = db.connect(tmp_path / "web.db")       # imported but not analysed (no analysis job here)
+    conn = db.connect(tmp_path / "web.db")  # imported but not analysed (no analysis job here)
     import_pgn_text(conn, SAMPLE.read_text(), load_config())
     conn.close()
     check()
@@ -424,11 +474,14 @@ def test_two_uploads_of_the_same_games_at_once(client, tmp_path):
     an empty batch behind, although the first did import the games."""
     _c, app = client
     results = []
+
     def upload():
         with open(SAMPLE, "rb") as f:
-            r = app.test_client().post("/api/upload", data={"files": (f, "sample.pgn")},
-                                       content_type="multipart/form-data")
+            r = app.test_client().post(
+                "/api/upload", data={"files": (f, "sample.pgn")}, content_type="multipart/form-data"
+            )
         results.append((r.status_code, r.get_json()))
+
     threads = [threading.Thread(target=upload) for _ in range(2)]
     for t in threads:
         t.start()
@@ -440,7 +493,7 @@ def test_two_uploads_of_the_same_games_at_once(client, tmp_path):
     wait_for_analysis(c)
     assert len(c.get("/api/games").get_json()) == 3
     batches = db.connect(tmp_path / "web.db").execute("SELECT COUNT(*) FROM imports").fetchone()[0]
-    assert batches == 1      # the empty second batch was dropped
+    assert batches == 1  # the empty second batch was dropped
 
 
 def test_api_errors_are_json_and_pages_say_what_went_wrong(client, monkeypatch):
@@ -470,8 +523,12 @@ def fake_chesscom(url, retries=4):
     if "/player/nobody/" in url:
         raise LookupError("chess.com user not found")
     if url.endswith("/archives"):
-        return {"archives": ["https://api.chess.com/pub/player/newbie/games/2025/01",
-                             "https://api.chess.com/pub/player/newbie/games/2026/10"]}
+        return {
+            "archives": [
+                "https://api.chess.com/pub/player/newbie/games/2025/01",
+                "https://api.chess.com/pub/player/newbie/games/2026/10",
+            ]
+        }
     return {"games": []}
 
 
@@ -495,7 +552,7 @@ def test_first_run_sets_the_username_in_the_app(new_user, monkeypatch):
     home = c.get("/").data
     assert b"Welcome, Newbie" in home and b"Welcome back" not in home and b"first-sync" in home
     assert c.post("/api/sync", json={"since": "1m"}).status_code == 200
-    c.delete("/api/games")                                   # Delete all keeps who I am
+    c.delete("/api/games")  # Delete all keeps who I am
     assert c.get("/api/account").get_json()["username"] == "Newbie"
 
 
@@ -521,14 +578,16 @@ def test_backups_api(client):
     assert len(c.get("/api/games").get_json()) == 3
 
     c.delete("/api/games")
-    r = c.post("/api/backups/restore", data={"file": (io.BytesIO(exported.data), "x.db")},
-               content_type="multipart/form-data")
-    assert r.status_code == 200 and r.get_json()["games"] == 3          # an exported copy, restored
-    bad = c.post("/api/backups/restore", data={"file": (io.BytesIO(b"nonsense"), "x.db")},
-                 content_type="multipart/form-data")
+    r = c.post(
+        "/api/backups/restore", data={"file": (io.BytesIO(exported.data), "x.db")}, content_type="multipart/form-data"
+    )
+    assert r.status_code == 200 and r.get_json()["games"] == 3  # an exported copy, restored
+    bad = c.post(
+        "/api/backups/restore", data={"file": (io.BytesIO(b"nonsense"), "x.db")}, content_type="multipart/form-data"
+    )
     assert bad.status_code == 400 and "database" in bad.get_json()["error"]
     assert c.post("/api/backups/restore", json={"name": "../web.db"}).status_code == 404
-    assert len(c.get("/api/games").get_json()) == 3                     # a refused file changes nothing
+    assert len(c.get("/api/games").get_json()) == 3  # a refused file changes nothing
 
 
 def test_today_refresh_api(client):
@@ -556,9 +615,11 @@ def test_today_budget_and_no_opening_lines(client):
 
 # ------------------------------------------------------------ E1 (audit of 10 Nov 2026): bad input is a 400/404
 
+
 def test_bad_input_is_a_client_error_not_a_server_error(client, tmp_path):
     """Each of these used to raise inside the route (a 500 with a stack trace in the terminal)."""
     c, _app = client
+
     def post(url, body):
         return c.post(url, data=json.dumps(body), content_type="application/json")
 
@@ -571,7 +632,7 @@ def test_bad_input_is_a_client_error_not_a_server_error(client, tmp_path):
         (post("/api/play/hint", {"key": "endgame/kq_k", "moves": [1, 2]}), 400),
         (c.get("/api/openings/node?fen=garbage"), 400),
         (c.get("/api/openings?color=purple"), 400),
-        (post("/api/review/result", {"result": "solved"}), 400),                       # no game_id/ply
+        (post("/api/review/result", {"result": "solved"}), 400),  # no game_id/ply
         (post("/api/review/result", {"result": "solved", "game_id": "x", "ply": 1}), 400),
         (post("/api/review/result", {"result": "solved", "game_id": 999, "ply": 4}), 404),  # not my position
         (post("/api/threat/check", {"game_id": [1], "ply": 2}), 400),
@@ -584,7 +645,7 @@ def test_bad_input_is_a_client_error_not_a_server_error(client, tmp_path):
     for response, status in cases:
         assert response.status_code == status, (response.request.path, response.get_json())
         assert "error" in response.get_json()
-    assert c.get("/api/library/next?n=-1").status_code == 200          # clamped, not "all but the last"
+    assert c.get("/api/library/next?n=-1").status_code == 200  # clamped, not "all but the last"
     # Nothing was recorded for the unknown position.
     conn = db.connect(tmp_path / "web.db")
     assert conn.execute("SELECT COUNT(*) FROM review_results").fetchone()[0] == 0
@@ -596,11 +657,14 @@ def test_delete_all_waits_for_imports_and_rebuilds(client, monkeypatch):
     """Delete all during a sync or a background reclassification used to leave rows behind for
     deleted games (foreign-key errors in the rebuild, a batch row gone under the sync)."""
     from chessreview import classify
+
     c, _app = client
     monkeypatch.setitem(classify.REBUILD, "running", True)
     assert c.delete("/api/games").status_code == 409
-    assert c.post("/api/backups/restore", data=json.dumps({"name": "x"}),
-                  content_type="application/json").status_code == 409
+    assert (
+        c.post("/api/backups/restore", data=json.dumps({"name": "x"}), content_type="application/json").status_code
+        == 409
+    )
     monkeypatch.setitem(classify.REBUILD, "running", False)
     assert c.delete("/api/games").status_code == 200
 
@@ -608,6 +672,7 @@ def test_delete_all_waits_for_imports_and_rebuilds(client, monkeypatch):
 def test_analysis_job_starts_once_when_asked_twice_at_once(client, monkeypatch):
     """Two requests at once each started a job; the first was orphaned (still running, unstoppable)."""
     from chessreview import web
+
     c, _app = client
     started = []
     barrier = threading.Barrier(4)
@@ -615,16 +680,21 @@ def test_analysis_job_starts_once_when_asked_twice_at_once(client, monkeypatch):
     class SlowJob:
         def __init__(self, cfg):
             self.running = False
+
         def is_running(self):
             return self.running
+
         def start(self):
             started.append(self)
             import time
-            time.sleep(0.05)        # widen the gap between "not running" and "running"
+
+            time.sleep(0.05)  # widen the gap between "not running" and "running"
             self.running = True
+
         @property
         def progress(self):
             from chessreview.engine import Progress
+
             return Progress()
 
     monkeypatch.setattr(web, "AnalysisJob", SlowJob)
@@ -632,6 +702,7 @@ def test_analysis_job_starts_once_when_asked_twice_at_once(client, monkeypatch):
     def go():
         barrier.wait()
         c.post("/api/analysis/start")
+
     threads = [threading.Thread(target=go) for _ in range(4)]
     for t in threads:
         t.start()

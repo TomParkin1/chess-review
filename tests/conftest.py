@@ -1,4 +1,5 @@
 """Shared test setup: the suite's own config, Stockfish when installed, and no Lichess tablebase requests."""
+
 import os
 from pathlib import Path
 
@@ -25,6 +26,7 @@ def stockfish() -> str:
 def no_tablebase_network(monkeypatch):
     def offline(url):
         raise OSError("network disabled in tests")
+
     monkeypatch.setattr(tablebase, "fetch", offline)
     tablebase.clear_cache()
     yield

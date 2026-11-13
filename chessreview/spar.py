@@ -2,7 +2,8 @@
 
 Start positions come from my games: per game, the first middlegame position that was equal or
 better for me (from -EQUAL_CP up to, not including, "clearly winning": those are Convert's) and
-the first endgame position that was equal or better, newest games first. The standard starting position (either colour) or any FEN works too.
+the first endgame position that was equal or better, newest games first. The standard starting
+position (either colour) or any FEN works too.
 
 Strength (`strength`): my current rating (level.current_rating) plus an offset I choose
 (OFFSETS, saved in meta `spar_offset`). Stockfish limits itself with UCI_LimitStrength /
@@ -33,26 +34,28 @@ from .classify import Eval
 
 OFFSETS = list(range(-200, 301, 50))
 OFFSET_KEY = "spar_offset"
-DEFAULT_RATING = 1200               # before any rated game
-ELO_FLOOR, ELO_MAX = 1320, 3190     # Stockfish's UCI_Elo range
-MOVE_TIME = 0.3                     # seconds per engine move
+DEFAULT_RATING = 1200  # before any rated game
+ELO_FLOOR, ELO_MAX = 1320, 3190  # Stockfish's UCI_Elo range
+MOVE_TIME = 0.3  # seconds per engine move
 # Below the floor: (share of moves swapped, measured Elo against UCI_Elo 1320).
 TOP5_CALIBRATION = [(0.0, 1320), (0.3, 1201), (0.6, 997), (1.0, 857)]
 RANDOM_CALIBRATION = [(0.25, 938), (0.32, 768), (0.40, 684)]
 MIN_ELO = RANDOM_CALIBRATION[-1][1]
 EQUAL_CP = 150
-MAX_POSITIONS = 40                  # per phase
+MAX_POSITIONS = 40  # per phase
 PHASES = ("middlegame", "endgame")
 
 
 @dataclass(frozen=True)
 class Strength:
-    elo: int                        # the target (clamped to MIN_ELO..ELO_MAX)
-    options: dict                   # UCI options for the limited engine
+    """How to make Stockfish play at a target rating (UCI options, time and move swaps)."""
+
+    elo: int  # the target (clamped to MIN_ELO..ELO_MAX)
+    options: dict  # UCI options for the limited engine
     limit: chess.engine.Limit
-    exact: bool                     # False below ELO_FLOOR: calibrated by matches, not by Stockfish
-    swap: float = 0.0               # share of moves swapped for weaker ones (below the floor)
-    swap_kind: str | None = None    # 'top5' | 'random'
+    exact: bool  # False below ELO_FLOOR: calibrated by matches, not by Stockfish
+    swap: float = 0.0  # share of moves swapped for weaker ones (below the floor)
+    swap_kind: str | None = None  # 'top5' | 'random'
 
     @property
     def label(self) -> str:
@@ -60,14 +63,17 @@ class Strength:
 
 
 def target_elo(rating: int | None, offset: int) -> int:
+    """The sparring strength for my rating and chosen offset."""
     return (rating or DEFAULT_RATING) + clamp_offset(offset)
 
 
 def clamp_offset(offset: int) -> int:
+    """An offset limited to the OFFSETS range."""
     return min(max(int(offset), OFFSETS[0]), OFFSETS[-1])
 
 
 def strength(elo: int) -> Strength:
+    """Engine settings that play at about `elo` (calibrated below Stockfish's own floor)."""
     elo = min(max(elo, MIN_ELO), ELO_MAX)
     options = {"UCI_LimitStrength": True, "UCI_Elo": max(elo, ELO_FLOOR), "Skill Level": 20}
     limit = chess.engine.Limit(time=MOVE_TIME)
@@ -98,16 +104,19 @@ def levels(conn: sqlite3.Connection) -> list[dict]:
 
 
 def saved_offset(conn: sqlite3.Connection) -> int:
+    """My chosen strength offset (0 if none)."""
     stored = db.get_meta(conn, OFFSET_KEY)
     return clamp_offset(int(stored)) if stored and stored.lstrip("-").isdigit() else 0
 
 
 def save_offset(conn: sqlite3.Connection, offset: int) -> None:
+    """Remember my chosen strength offset."""
     with conn:
         db.set_meta(conn, OFFSET_KEY, str(clamp_offset(offset)))
 
 
 # ------------------------------------------------------------ start positions
+
 
 def positions(conn: sqlite3.Connection) -> dict[str, list[dict]]:
     """Per game, the first equal-or-better middlegame position short of clearly winning (Convert
@@ -130,26 +139,44 @@ def positions(conn: sqlite3.Connection) -> dict[str, list[dict]]:
         if chess.Board(r["fen"]).turn != me:
             continue
         ev = Eval.from_row(r, me)
-        fits = (ev.mate is None and -EQUAL_CP <= (ev.cp or 0) < winning) if r["phase"] == "middlegame" \
+        fits = (
+            (ev.mate is None and -EQUAL_CP <= (ev.cp or 0) < winning)
+            if r["phase"] == "middlegame"
             else (ev.mate is None and (ev.cp or 0) >= -EQUAL_CP) or (ev.mate is not None and ev.mate > 0)
+        )
         if not fits:
             continue
         seen.add((r["game_id"], r["phase"]))
-        out[r["phase"]].append({
-            "key": f"{r['game_id']}:{r['ply']}", "game_id": r["game_id"], "ply": r["ply"], "phase": r["phase"],
-            "fen": r["fen"], "color": r["my_color"], "eval": str(ev), "result": r["my_result"],
-            "opponent": r["black"] if r["my_color"] == "white" else r["white"], "date": r["date"]})
+        out[r["phase"]].append(
+            {
+                "key": f"{r['game_id']}:{r['ply']}",
+                "game_id": r["game_id"],
+                "ply": r["ply"],
+                "phase": r["phase"],
+                "fen": r["fen"],
+                "color": r["my_color"],
+                "eval": str(ev),
+                "result": r["my_result"],
+                "opponent": r["black"] if r["my_color"] == "white" else r["white"],
+                "date": r["date"],
+            }
+        )
     return out
 
 
 # ------------------------------------------------------------ playing
 
+
 def outcome(board: chess.Board, me: chess.Color) -> tuple[str, str] | None:
     """('win' | 'draw' | 'loss', reason) once the game is over (draws by rule are taken at once)."""
     if board.is_checkmate():
         return ("win", "Checkmate!") if board.turn != me else ("loss", "Checkmated.")
-    for test, reason in ((board.is_stalemate, "Stalemate"), (board.is_insufficient_material, "No mating material"),
-                         (board.is_fifty_moves, "50-move rule"), (lambda: board.is_repetition(3), "Threefold repetition")):
+    for test, reason in (
+        (board.is_stalemate, "Stalemate"),
+        (board.is_insufficient_material, "No mating material"),
+        (board.is_fifty_moves, "50-move rule"),
+        (lambda: board.is_repetition(3), "Threefold repetition"),
+    ):
         if test():
             return "draw", reason
     return None
@@ -168,13 +195,27 @@ def replay(fen: str, moves: list[str]) -> chess.Board:
 
 # ------------------------------------------------------------ results
 
-def record(conn: sqlite3.Connection, source: str, fen: str, color: str, elo: int, offset: int,
-           moves: list[str], result: str, reason: str) -> int:
+
+def record(
+    conn: sqlite3.Connection,
+    source: str,
+    fen: str,
+    color: str,
+    elo: int,
+    offset: int,
+    moves: list[str],
+    result: str,
+    reason: str,
+) -> int:
+    """Store a finished sparring game and return its id."""
     with conn:
-        return conn.execute(
+        game_id = conn.execute(
             """INSERT INTO spar_games (source, start_fen, color, elo, elo_offset, moves, result, reason)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (source, fen, color, elo, offset, " ".join(moves), result, reason)).lastrowid
+            (source, fen, color, elo, offset, " ".join(moves), result, reason),
+        ).lastrowid
+    assert game_id is not None  # always set after an INSERT
+    return game_id
 
 
 def history(conn: sqlite3.Connection, limit: int = 20) -> dict:
@@ -184,13 +225,26 @@ def history(conn: sqlite3.Connection, limit: int = 20) -> dict:
     for r in rows:
         by_offset.setdefault(r["elo_offset"], []).append(r["result"])
     return {
-        "games": [{"id": r["id"], "elo": r["elo"], "offset": r["elo_offset"], "result": r["result"],
-                   "reason": r["reason"], "color": r["color"], "moves": len(r["moves"].split()), "at": r["at"]}
-                  for r in rows],
-        "by_offset": [{"offset": o, "won": rs.count("win"), "drawn": rs.count("draw"), "lost": rs.count("loss")}
-                      for o, rs in sorted(by_offset.items())],
+        "games": [
+            {
+                "id": r["id"],
+                "elo": r["elo"],
+                "offset": r["elo_offset"],
+                "result": r["result"],
+                "reason": r["reason"],
+                "color": r["color"],
+                "moves": len(r["moves"].split()),
+                "at": r["at"],
+            }
+            for r in rows
+        ],
+        "by_offset": [
+            {"offset": o, "won": rs.count("win"), "drawn": rs.count("draw"), "lost": rs.count("loss")}
+            for o, rs in sorted(by_offset.items())
+        ],
     }
 
 
 def game(conn: sqlite3.Connection, game_id: int) -> sqlite3.Row | None:
+    """A stored sparring game, or None."""
     return conn.execute("SELECT * FROM spar_games WHERE id = ?", (game_id,)).fetchone()

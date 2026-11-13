@@ -1,4 +1,5 @@
 """Repertoire tree, problem detection, drill lines and opening-line SRS cards."""
+
 from datetime import date
 
 import chess
@@ -6,30 +7,42 @@ import pytest
 
 from chessreview import db, repertoire, srs
 
-E4_E5 = "e2e4 e7e5 g1f3 b8c6 f1c4"      # Italian: my usual Bc4
-E4_C5 = "e2e4 c7c5 g1f3 d7d6 b1c3"      # Sicilian vs me: my usual Nc3 (judged bad below)
+E4_E5 = "e2e4 e7e5 g1f3 b8c6 f1c4"  # Italian: my usual Bc4
+E4_C5 = "e2e4 c7c5 g1f3 d7d6 b1c3"  # Sicilian vs me: my usual Nc3 (judged bad below)
 
 
 @pytest.fixture
 def conn(tmp_path):
     c = db.connect(tmp_path / "r.db")
-    games = [(E4_E5, "win"), (E4_E5, "win"), (E4_E5, "loss"), (E4_C5, "loss"), (E4_C5, "loss"),
-             ("d2d4 d7d5 c2c4", "draw")]
+    games = [
+        (E4_E5, "win"),
+        (E4_E5, "win"),
+        (E4_E5, "loss"),
+        (E4_C5, "loss"),
+        (E4_C5, "loss"),
+        ("d2d4 d7d5 c2c4", "draw"),
+    ]
     for i, (moves, result) in enumerate(games, start=1):
-        c.execute("""INSERT INTO games (id, dedupe_key, white, black, my_color, my_result, date, moves_uci,
+        c.execute(
+            """INSERT INTO games (id, dedupe_key, white, black, my_color, my_result, date, moves_uci,
                          num_plies, pgn, opening_family) VALUES (?, ?, 'me', 'o', 'white', ?, '2026-01-01', ?, ?, '',
-                         ?)""", (i, f"k{i}", result, moves, len(moves.split()),
-                                 "Sicilian Defense" if moves == E4_C5 else "Other"))
+                         ?)""",
+            (i, f"k{i}", result, moves, len(moves.split()), "Sicilian Defense" if moves == E4_C5 else "Other"),
+        )
         board = chess.Board()
         for ply, uci in enumerate(moves.split()):
             # Engine: best move is always the move played, except in the Sicilian at ply 4 (Nc3 -> d4).
             best = "d2d4" if (moves == E4_C5 and ply == 4) else uci
-            c.execute("INSERT INTO positions (game_id, ply, fen, move_uci, best_uci) VALUES (?, ?, ?, ?, ?)",
-                      (i, ply, board.fen(), uci, best))
+            c.execute(
+                "INSERT INTO positions (game_id, ply, fen, move_uci, best_uci) VALUES (?, ?, ?, ?, ?)",
+                (i, ply, board.fen(), uci, best),
+            )
             judgement = "mistake" if (moves == E4_C5 and ply == 4) else "good"
-            c.execute("""INSERT INTO mistakes (game_id, ply, judgement, win_drop, is_mine)
-                         VALUES (?, ?, ?, ?, ?)""", (i, ply, judgement, 0.2 if judgement != "good" else 0.0,
-                                                     int(ply % 2 == 0)))
+            c.execute(
+                """INSERT INTO mistakes (game_id, ply, judgement, win_drop, is_mine)
+                         VALUES (?, ?, ?, ?, ?)""",
+                (i, ply, judgement, 0.2 if judgement != "good" else 0.0, int(ply % 2 == 0)),
+            )
             board.push_uci(uci)
     c.commit()
     yield c
@@ -68,7 +81,7 @@ def test_drill_lines_follow_repertoire(conn):
         mine = [s for s in line if s["mine"]]
         assert all(s["key"].startswith("white:") for s in mine)
         if line[1]["uci"] == "c7c5":
-            assert line[-1]["uci"] == "d2d4" and line[-1]["fix"]   # the improvement, not Nc3
+            assert line[-1]["uci"] == "d2d4" and line[-1]["fix"]  # the improvement, not Nc3
 
 
 def test_line_cards_schedule(conn):
@@ -93,17 +106,19 @@ def test_due_exercise_replays_the_path(conn):
 def test_tree_is_cached_until_the_games_or_verdicts_change(conn):
     """F17: the explorer reused to rebuild the whole tree on every click."""
     tree = repertoire.build(conn, "white")
-    assert repertoire.build(conn, "white") is tree                     # nothing changed: same tree
+    assert repertoire.build(conn, "white") is tree  # nothing changed: same tree
     assert repertoire.build(conn, "white", "Sicilian Defense") is not tree
     # A reclassified game gets fresh mistakes rows (classify_game deletes and inserts).
     with conn:
         rows = conn.execute("SELECT * FROM mistakes WHERE game_id = 4").fetchall()
         conn.execute("DELETE FROM mistakes WHERE game_id = 4")
-        conn.executemany("INSERT INTO mistakes (game_id, ply, judgement, win_drop, is_mine) VALUES (?, ?, ?, ?, ?)",
-                         [(r["game_id"], r["ply"], "good", 0.0, r["is_mine"]) for r in rows])
+        conn.executemany(
+            "INSERT INTO mistakes (game_id, ply, judgement, win_drop, is_mine) VALUES (?, ?, ?, ?, ?)",
+            [(r["game_id"], r["ply"], "good", 0.0, r["is_mine"]) for r in rows],
+        )
     fresh = repertoire.build(conn, "white")
     assert fresh is not tree
-    assert not repertoire.problems(fresh)                                # Nc3 is no longer judged bad
+    assert not repertoire.problems(fresh)  # Nc3 is no longer judged bad
     # A new game, and deleting everything, change it too.
     with conn:
         conn.execute("""INSERT INTO games (id, dedupe_key, white, black, my_color, my_result, date, moves_uci,

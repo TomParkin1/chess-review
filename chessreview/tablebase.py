@@ -34,21 +34,32 @@ from . import db
 API = "https://tablebase.lichess.ovh/standard"
 USER_AGENT = "chess-review (local training app)"
 MAX_PIECES = 7
-TIMEOUT = 3.0                # seconds; then Stockfish plays
-BACKOFF = 30.0               # seconds without asking after a failure
-RATE_LIMIT_BACKOFF = 60.0    # ... after HTTP 429
+TIMEOUT = 3.0  # seconds; then Stockfish plays
+BACKOFF = 30.0  # seconds without asking after a failure
+RATE_LIMIT_BACKOFF = 60.0  # ... after HTTP 429
 MEMORY_SIZE = 4096
-SETTING_KEY = "tablebase"    # meta: 'on' (default) | 'off'
+SETTING_KEY = "tablebase"  # meta: 'on' (default) | 'off'
 
-WDL = {"win": 2, "maybe-win": 2, "syzygy-win": 2, "cursed-win": 1, "draw": 0,
-       "blessed-loss": -1, "maybe-loss": -2, "syzygy-loss": -2, "loss": -2}
+WDL = {
+    "win": 2,
+    "maybe-win": 2,
+    "syzygy-win": 2,
+    "cursed-win": 1,
+    "draw": 0,
+    "blessed-loss": -1,
+    "maybe-loss": -2,
+    "syzygy-loss": -2,
+    "loss": -2,
+}
 
 
 @dataclass(frozen=True)
 class Move:
+    """A move from the tablebase answer, with its result for the side that plays it."""
+
     uci: str
     san: str
-    wdl: int                 # for the side that plays it
+    wdl: int  # for the side that plays it
     dtm: int | None
     dtz: int | None
     checkmate: bool = False
@@ -64,8 +75,10 @@ class Move:
 
 @dataclass(frozen=True)
 class TbResult:
-    wdl: int                 # side to move: 2 win, 1 cursed win, 0 draw, -1 blessed loss, -2 loss
-    dtm: int | None          # moves to mate (signed, side to move), when the API knows it (<= 5 pieces)
+    """The tablebase's verdict on a position and its moves."""
+
+    wdl: int  # side to move: 2 win, 1 cursed win, 0 draw, -1 blessed loss, -2 loss
+    dtm: int | None  # moves to mate (signed, side to move), when the API knows it (<= 5 pieces)
     dtz: int | None
     moves: tuple[Move, ...]
 
@@ -75,10 +88,11 @@ class TbResult:
         if not self.moves:
             return None
 
-        def key(m: Move):
+        def key(m: Move) -> tuple:
             if m.wdl > 0:
-                return (m.wdl, tuple(-x for x in m.distance))     # winning: shortest
-            return (m.wdl, m.distance)                            # drawn or losing: longest
+                return (m.wdl, tuple(-x for x in m.distance))  # winning: shortest
+            return (m.wdl, m.distance)  # drawn or losing: longest
+
         return max(self.moves, key=key)
 
 
@@ -94,8 +108,14 @@ def choose(tb: TbResult, engine_move: chess.Move | None) -> Move | None:
 
 
 def verdict(wdl: int) -> str:
-    return {2: "win", 1: "win, but not within the 50-move rule", 0: "draw",
-            -1: "loss, but saved by the 50-move rule", -2: "loss"}[wdl]
+    """A WDL value in words."""
+    return {
+        2: "win",
+        1: "win, but not within the 50-move rule",
+        0: "draw",
+        -1: "loss, but saved by the 50-move rule",
+        -2: "loss",
+    }[wdl]
 
 
 # ------------------------------------------------------------ state
@@ -114,10 +134,12 @@ def clear_cache() -> None:
 
 
 def enabled(conn: sqlite3.Connection) -> bool:
+    """Whether tablebase lookups are on (Settings)."""
     return db.get_meta(conn, SETTING_KEY) != "off"
 
 
 def set_enabled(conn: sqlite3.Connection, on: bool) -> None:
+    """Turn tablebase lookups on or off."""
     with conn:
         db.set_meta(conn, SETTING_KEY, "on" if on else "off")
 
@@ -128,6 +150,7 @@ def eligible(board: chess.Board) -> bool:
 
 
 # ------------------------------------------------------------ probing
+
 
 def probe(conn: sqlite3.Connection, board: chess.Board) -> TbResult | None:
     """The tablebase's answer for this position, or None (not eligible, switched off, game over,
@@ -150,8 +173,9 @@ def probe(conn: sqlite3.Connection, board: chess.Board) -> TbResult | None:
         if result is None:
             return None
         with conn:
-            conn.execute("INSERT OR REPLACE INTO tablebase_cache (epd, data) VALUES (?, ?)",
-                         (key, json.dumps(_compact(data))))
+            conn.execute(
+                "INSERT OR REPLACE INTO tablebase_cache (epd, data) VALUES (?, ?)", (key, json.dumps(_compact(data)))
+            )
     if result is not None:
         with _lock:
             _memory[key] = result
@@ -170,7 +194,7 @@ def _ask(fen: str) -> dict | None:
         return fetch(f"{API}?{urllib.parse.urlencode({'fen': fen})}")
     except urllib.error.HTTPError as exc:
         wait = RATE_LIMIT_BACKOFF if exc.code == 429 else BACKOFF
-    except (OSError, ValueError):          # offline, timeout, not JSON
+    except OSError, ValueError:  # offline, timeout, not JSON
         wait = BACKOFF
     with _lock:
         _blocked_until = time.monotonic() + wait
@@ -186,14 +210,25 @@ def fetch(url: str) -> dict:
 
 def _compact(data: dict) -> dict:
     keep = ("category", "dtm", "dtz")
-    return {**{k: data.get(k) for k in keep},
-            "moves": [{k: m.get(k) for k in ("uci", "san", "checkmate", *keep)} for m in data.get("moves", [])]}
+    return {
+        **{k: data.get(k) for k in keep},
+        "moves": [{k: m.get(k) for k in ("uci", "san", "checkmate", *keep)} for m in data.get("moves", [])],
+    }
 
 
 def _parse(data: dict) -> TbResult | None:
     if data.get("category") not in WDL:
-        return None                        # "unknown": not in the tablebase after all
-    moves = tuple(Move(m["uci"], m.get("san") or m["uci"], -WDL[m["category"]], m.get("dtm"), m.get("dtz"),
-                       bool(m.get("checkmate")))
-                  for m in data.get("moves", []) if m.get("category") in WDL)
+        return None  # "unknown": not in the tablebase after all
+    moves = tuple(
+        Move(
+            m["uci"],
+            m.get("san") or m["uci"],
+            -WDL[m["category"]],
+            m.get("dtm"),
+            m.get("dtz"),
+            bool(m.get("checkmate")),
+        )
+        for m in data.get("moves", [])
+        if m.get("category") in WDL
+    )
     return TbResult(WDL[data["category"]], data.get("dtm"), data.get("dtz"), moves)

@@ -19,6 +19,7 @@ shared pool of the newest `other` copies of every other kind.
 This module only uses the standard library (db.py imports it for the pre-migration copy).
 """
 
+import logging
 import os
 import re
 import shutil
@@ -30,6 +31,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import BackupConfig
+
+log = logging.getLogger(__name__)
 
 KINDS = {
     "daily": "Daily",
@@ -46,11 +49,13 @@ NAME = re.compile(r"^chess-(?P<kind>[a-z-]+)-(?P<stamp>\d{8}-\d{6})\.db$")
 STAMP = "%Y%m%d-%H%M%S"
 SQLITE_HEADER = b"SQLite format 3\x00"
 
-_lock = threading.RLock()     # one copy or restore at a time
+_lock = threading.RLock()  # one copy or restore at a time
 
 
 @dataclass(frozen=True)
 class Backup:
+    """A backup file found in the backups folder."""
+
     path: Path
     kind: str
     at: datetime
@@ -60,12 +65,18 @@ class Backup:
         return KINDS.get(self.kind, self.kind)
 
     def as_dict(self) -> dict:
-        return {"name": self.path.name, "kind": self.kind, "label": self.label,
-                "at": self.at.isoformat(timespec="seconds"), "size": self.path.stat().st_size,
-                "games": _games_in(self.path)}
+        return {
+            "name": self.path.name,
+            "kind": self.kind,
+            "label": self.label,
+            "at": self.at.isoformat(timespec="seconds"),
+            "size": self.path.stat().st_size,
+            "games": _games_in(self.path),
+        }
 
 
 def folder_for(db_path: Path | str) -> Path:
+    """The backups folder that belongs to the database at `db_path`."""
     return Path(db_path).parent / "backups"
 
 
@@ -88,13 +99,12 @@ def _copy(conn: sqlite3.Connection, path: Path) -> None:
     dst = sqlite3.connect(path)
     try:
         conn.backup(dst)
-        dst.execute("PRAGMA journal_mode = DELETE")    # no -wal file beside the copy
+        dst.execute("PRAGMA journal_mode = DELETE")  # no -wal file beside the copy
     finally:
         dst.close()
 
 
-def make(conn: sqlite3.Connection, kind: str, folder: Path | None = None,
-         now: datetime | None = None) -> Path | None:
+def make(conn: sqlite3.Connection, kind: str, folder: Path | None = None, now: datetime | None = None) -> Path | None:
     """Back up the database `conn` is using. Returns the new file (None for an in-memory DB)."""
     folder = folder or folder_of(conn)
     if folder is None:
@@ -103,7 +113,7 @@ def make(conn: sqlite3.Connection, kind: str, folder: Path | None = None,
         path = _new_path(folder, kind, now)
         tmp = path.with_name(path.name + ".tmp")
         _copy(conn, tmp)
-        os.replace(tmp, path)               # a half-written copy never looks like a backup
+        os.replace(tmp, path)  # a half-written copy never looks like a backup
     return path
 
 
@@ -121,7 +131,7 @@ def _new_path(folder: Path, kind: str, now: datetime | None) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     now = now or datetime.now()
     path = folder / f"chess-{kind}-{now:{STAMP}}.db"
-    while path.exists():                     # two copies of a kind in the same second
+    while path.exists():  # two copies of a kind in the same second
         now += timedelta(seconds=1)
         path = folder / f"chess-{kind}-{now:{STAMP}}.db"
     return path
@@ -135,11 +145,10 @@ def files(folder: Path) -> list[Backup]:
             m = NAME.match(path.name)
             if m:
                 out.append(Backup(path, m["kind"], datetime.strptime(m["stamp"], STAMP)))
-    return sorted(out, key=lambda b: (b.at, b.kind != "weekly"), reverse=True)   # a daily before its weekly twin
+    return sorted(out, key=lambda b: (b.at, b.kind != "weekly"), reverse=True)  # a daily before its weekly twin
 
 
-def daily(db_path: Path | str, keep: BackupConfig = BackupConfig(),
-          now: datetime | None = None) -> Path | None:
+def daily(db_path: Path | str, keep: BackupConfig = BackupConfig(), now: datetime | None = None) -> Path | None:
     """Today's automatic copy (and this week's weekly copy), then rotation. Returns the new
     daily copy, or None if today's already exists or there is no database yet."""
     if not Path(db_path).exists():
@@ -155,8 +164,8 @@ def daily(db_path: Path | str, keep: BackupConfig = BackupConfig(),
     finally:
         conn.close()
     week = now.isocalendar()[:2]
-    if not any(b.kind == "weekly" and b.at.isocalendar()[:2] == week for b in existing):
-        shutil.copy2(path, folder / f"chess-weekly-{now:{STAMP}}.db")   # a finished single file
+    if path is not None and not any(b.kind == "weekly" and b.at.isocalendar()[:2] == week for b in existing):
+        shutil.copy2(path, folder / f"chess-weekly-{now:{STAMP}}.db")  # a finished single file
     rotate(folder, keep)
     return path
 
@@ -164,9 +173,11 @@ def daily(db_path: Path | str, keep: BackupConfig = BackupConfig(),
 def rotate(folder: Path, keep: BackupConfig = BackupConfig()) -> list[Path]:
     """Delete copies beyond the newest keep.daily daily, keep.weekly weekly and keep.other others."""
     backups = files(folder)
-    old = ([b for b in backups if b.kind == "daily"][keep.daily:]
-           + [b for b in backups if b.kind == "weekly"][keep.weekly:]
-           + [b for b in backups if b.kind not in ("daily", "weekly")][keep.other:])
+    old = (
+        [b for b in backups if b.kind == "daily"][keep.daily :]
+        + [b for b in backups if b.kind == "weekly"][keep.weekly :]
+        + [b for b in backups if b.kind not in ("daily", "weekly")][keep.other :]
+    )
     with _lock:
         for b in old:
             b.path.unlink(missing_ok=True)
@@ -200,10 +211,11 @@ def restore(conn: sqlite3.Connection, source: Path, max_version: int) -> Path | 
     with _lock:
         try:
             before = make(conn, "before-restore")
-        except sqlite3.DatabaseError:       # the current database is unreadable: keep the raw file
+        except sqlite3.DatabaseError:  # the current database is unreadable: keep the raw file
             current = file_of(conn)
-            before = _new_path(folder_for(current), "before-restore", None) if current else None
-            if before:
+            before = None
+            if current is not None:
+                before = _new_path(folder_for(current), "before-restore", None)
                 shutil.copy2(current, before)
         src = sqlite3.connect(source)
         try:
@@ -249,8 +261,8 @@ class DailyBackups:
         while not self._stop.is_set():
             try:
                 daily(self.db_path, self.keep)
-            except (OSError, sqlite3.Error) as exc:     # e.g. disk full: try again next hour
-                print(f"Daily backup failed: {exc}")
+            except (OSError, sqlite3.Error) as exc:  # e.g. disk full: try again next hour
+                log.warning("Daily backup failed: %s", exc)
             self._stop.wait(self.interval)
 
     def stop(self) -> None:

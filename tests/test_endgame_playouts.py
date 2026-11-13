@@ -11,6 +11,7 @@ tablebase result too).
 
 Slow (minutes), so opt-in: CHESSREVIEW_PLAYOUTS=1 .venv/bin/pytest tests/test_endgame_playouts.py
 """
+
 import os
 import time
 import urllib.error
@@ -24,12 +25,11 @@ from chessreview import convert, tablebase
 from chessreview.config import load_config
 from chessreview.web import create_app
 
-pytestmark = pytest.mark.skipif(not os.environ.get("CHESSREVIEW_PLAYOUTS"),
-                                reason="slow: set CHESSREVIEW_PLAYOUTS=1")
+pytestmark = pytest.mark.skipif(not os.environ.get("CHESSREVIEW_PLAYOUTS"), reason="slow: set CHESSREVIEW_PLAYOUTS=1")
 KEYS = [t.key for t in convert.endgames()]
 SAFE_MOVES = 3
 SAFE_DEPTH = 14
-REAL_FETCH = tablebase.fetch          # conftest.py takes the network away from every test
+REAL_FETCH = tablebase.fetch  # conftest.py takes the network away from every test
 
 
 @pytest.fixture(scope="module", params=["stockfish", "tablebase"])
@@ -87,7 +87,7 @@ def strong_playout(client, key: str, mode: str) -> dict:
     board = chess.Board(task["fen"])
     for _ in range(task["max_plies"] // 2 + 2):
         hint = client.post("/api/play/hint", json={"key": key, "moves": moves}).get_json()
-        if mode == "tablebase":     # every move of a <= 7-piece position comes from the tablebase
+        if mode == "tablebase":  # every move of a <= 7-piece position comes from the tablebase
             assert hint["source"] == "tablebase", f"{key}: hint {hint} at {board.fen()}"
         r = play(client, key, moves, hint["uci"], streak)
         if mode == "tablebase" and r.get("reply_uci"):
@@ -137,7 +137,7 @@ def safe_move(engine: chess.engine.SimpleEngine, board: chess.Board, goal: str, 
             return score.mate() > 0 if goal == "win" else False
         return score.score() >= max(150, min(best, 2000) // 2) if goal == "win" else score.score() >= -100
 
-    if mode == "tablebase" and tablebase.eligible(board):    # and keeps the tablebase result
+    if mode == "tablebase" and tablebase.eligible(board):  # and keeps the tablebase result
         tb = tablebase._parse(ask_tablebase(board.fen()))
         keeps = {m.uci for m in tb.moves if m.wdl >= tb.wdl} if tb else None
         if keeps is not None:
@@ -173,5 +173,6 @@ def test_strong_moves_win_or_hold(client, key, mode):
 @pytest.mark.parametrize("key", KEYS)
 def test_three_safe_moves_never_finish(client, picker, key, mode):
     results = safe_playout(client, picker, key, mode)
-    assert [r["status"] for r in results] == ["playing"] * SAFE_MOVES, \
+    assert [r["status"] for r in results] == ["playing"] * SAFE_MOVES, (
         f"{key}: {[(r['san'], r['status'], r['reason']) for r in results]}"
+    )

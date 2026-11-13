@@ -1,17 +1,17 @@
 """Command line interface.
 
-    python -m chessreview sync [--since all|3m|1m]
-    python -m chessreview import FILE_OR_DIR [...] [--as NAME]
-    python -m chessreview summary
-    python -m chessreview analyse [--limit N]
-    python -m chessreview reclassify
-    python -m chessreview mistakes [--limit N]
-    python -m chessreview serve [--port 8000]
-    python -m chessreview puzzles
-    python -m chessreview reset [--yes]
-    python -m chessreview backup [--list]
-    python -m chessreview restore NAME_OR_FILE
-    python -m chessreview simulate [--days 90] [--budget 10|20|30] [--skip 0.15] [--seed 1]
+python -m chessreview sync [--since all|3m|1m]
+python -m chessreview import FILE_OR_DIR [...] [--as NAME]
+python -m chessreview summary
+python -m chessreview analyse [--limit N]
+python -m chessreview reclassify
+python -m chessreview mistakes [--limit N]
+python -m chessreview serve [--port 8000]
+python -m chessreview puzzles
+python -m chessreview reset [--yes]
+python -m chessreview backup [--list]
+python -m chessreview restore NAME_OR_FILE
+python -m chessreview simulate [--days 90] [--budget 10|20|30] [--skip 0.15] [--seed 1]
 """
 
 import argparse
@@ -24,21 +24,21 @@ from pathlib import Path
 
 from . import backup, db
 from .classify import ensure_classified, refresh
-from .config import ConfigError, effective_workers, load_config
+from .config import Config, ConfigError, effective_workers, load_config
 from .engine import AnalysisJob, StockfishNotFound, count_pending, find_stockfish
 from .pgn_import import import_paths
 
 
-def cmd_sync(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_sync(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Fetch new games from chess.com as one import batch."""
     from . import chesscom
+
     user = db.username(conn, cfg)
     if not user:
         sys.exit("Set your chess.com username first (in the web app, or [player] username in config.toml).")
     last = db.get_meta(conn, chesscom.LAST_MONTH_KEY)
-    print(f"Syncing chess.com games of {user} "
-          f"({'since ' + last if last else 'first sync: ' + args.since})...")
-    result = chesscom.sync(conn, cfg, since=args.since,
-                           progress=lambda i, n, month: print(f"  {month} ({i + 1}/{n})"))
+    print(f"Syncing chess.com games of {user} ({'since ' + last if last else 'first sync: ' + args.since})...")
+    result = chesscom.sync(conn, cfg, since=args.since, progress=lambda i, n, month: print(f"  {month} ({i + 1}/{n})"))
     s = result.stats
     print(f"Games seen: {s.games_seen}, new: {s.imported}, duplicates: {s.duplicates}")
     for reason, n in sorted(s.skipped.items()):
@@ -55,7 +55,8 @@ def _set_player(conn: sqlite3.Connection, name: str) -> None:
             conn.execute("DELETE FROM meta WHERE key = ?", (db.USERNAME_KEY,))
 
 
-def cmd_import(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_import(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Import PGN files or folders; --as names the player while no games are stored yet."""
     before = db.username(conn, cfg)
     switching = bool(args.player) and args.player.lower() != before.lower()
     if switching:
@@ -63,11 +64,13 @@ def cmd_import(conn: sqlite3.Connection, cfg, args) -> None:
             sys.exit(f"The player is already {before!r}; change it in Settings to import {args.player!r}'s games.")
         _set_player(conn, args.player)
     elif not before:
-        sys.exit("Whose games are these? Pass --as YOUR_NAME (as it appears in the PGN), "
-                 "or set your chess.com username in the web app.")
+        sys.exit(
+            "Whose games are these? Pass --as YOUR_NAME (as it appears in the PGN), "
+            "or set your chess.com username in the web app."
+        )
     stats = import_paths(conn, [Path(p) for p in args.paths], cfg)
     if switching and not (stats.imported or stats.duplicates):
-        _set_player(conn, before)      # none of their games here (a typo?): keep the player as it was
+        _set_player(conn, before)  # none of their games here (a typo?): keep the player as it was
         print(f"No games of {args.player!r} found, so the player is unchanged.")
     print(f"Files read:   {stats.files}")
     print(f"Games seen:   {stats.games_seen}")
@@ -77,7 +80,7 @@ def cmd_import(conn: sqlite3.Connection, cfg, args) -> None:
         print(f"Skipped:      {n} ({reason})")
 
 
-def _wdl_table(rows, label: str) -> None:
+def _wdl_table(rows: list[sqlite3.Row], label: str) -> None:
     print(f"\n{label:<28} {'games':>6} {'win':>5} {'draw':>5} {'loss':>5} {'score':>6}")
     for r in rows:
         n = r["n"]
@@ -85,7 +88,7 @@ def _wdl_table(rows, label: str) -> None:
         print(f"{str(r['k'])[:28]:<28} {n:>6} {r['w']:>5} {r['d']:>5} {r['l']:>5} {score:>5.0f}%")
 
 
-def _wdl_query(conn: sqlite3.Connection, group_by: str, limit: int | None = None):
+def _wdl_query(conn: sqlite3.Connection, group_by: str, limit: int | None = None) -> list[sqlite3.Row]:
     sql = f"""
         SELECT {group_by} AS k, COUNT(*) AS n,
                SUM(my_result = 'win') AS w, SUM(my_result = 'draw') AS d,
@@ -97,7 +100,8 @@ def _wdl_query(conn: sqlite3.Connection, group_by: str, limit: int | None = None
     return conn.execute(sql).fetchall()
 
 
-def cmd_summary(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_summary(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Print results overall, by colour, time class and opening, then a mistake summary."""
     total = conn.execute("SELECT COUNT(*), MIN(date), MAX(date) FROM games").fetchone()
     if not total[0]:
         print("No games imported yet. Run: python -m chessreview import <files>")
@@ -111,7 +115,7 @@ def cmd_summary(conn: sqlite3.Connection, cfg, args) -> None:
     _mistake_summary(conn, cfg)
 
 
-def _mistake_summary(conn: sqlite3.Connection, cfg) -> None:
+def _mistake_summary(conn: sqlite3.Connection, cfg: Config) -> None:
     ensure_classified(conn, cfg)
     analysed = conn.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NOT NULL").fetchone()[0]
     if not analysed:
@@ -145,19 +149,24 @@ def _mistake_summary(conn: sqlite3.Connection, cfg) -> None:
 
 
 def _print_mistakes(conn: sqlite3.Connection, limit: int) -> None:
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT m.*, p.move_san, g.white, g.black, g.date, g.my_color, g.opening_family
         FROM mistakes m
         JOIN positions p ON p.game_id = m.game_id AND p.ply = m.ply
         JOIN games g ON g.id = m.game_id
         WHERE m.is_mine = 1 AND m.judgement != 'good'
-        ORDER BY m.win_drop DESC LIMIT ?""", (limit,)).fetchall()
+        ORDER BY m.win_drop DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
     for r in rows:
         opponent = r["black"] if r["my_color"] == "white" else r["white"]
         move_no = r["ply"] // 2 + 1
         dots = "." if r["ply"] % 2 == 0 else "..."
-        print(f"\n  {r['judgement'].upper():<10} {move_no}{dots}{r['move_san']}  "
-              f"vs {opponent}, {r['date']} ({r['opening_family']}, {r['phase']}, game {r['game_id']})")
+        print(
+            f"\n  {r['judgement'].upper():<10} {move_no}{dots}{r['move_san']}  "
+            f"vs {opponent}, {r['date']} ({r['opening_family']}, {r['phase']}, game {r['game_id']})"
+        )
         print(f"             {r['explanation']}")
 
 
@@ -169,7 +178,8 @@ def _format_eta(seconds: float | None) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
-def cmd_analyse(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_analyse(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Analyse new games with Stockfish, showing progress; Ctrl+C keeps finished games."""
     pending = count_pending(conn)
     total = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     print(f"{total - pending} games analysed and up to date (cached), {pending} to analyse.")
@@ -177,8 +187,10 @@ def cmd_analyse(conn: sqlite3.Connection, cfg, args) -> None:
         ensure_classified(conn, cfg)
         return
     e = cfg.engine
-    print(f"Engine: {e.path}, up to {e.time_per_position}s or depth {e.max_depth or '∞'} per position, "
-          f"{effective_workers(e)} workers x {e.threads} thread(s). Ctrl+C stops (finished games are kept).")
+    print(
+        f"Engine: {e.path}, up to {e.time_per_position}s or depth {e.max_depth or '∞'} per position, "
+        f"{effective_workers(e)} workers x {e.threads} thread(s). Ctrl+C stops (finished games are kept)."
+    )
 
     job = AnalysisJob(cfg, limit=args.limit)
     job.start()
@@ -199,12 +211,14 @@ def cmd_analyse(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"Classified moves in {n} games. Run 'summary' or 'mistakes' to see results.")
 
 
-def cmd_reclassify(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_reclassify(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Re-judge every stored move with the current thresholds (no engine needed)."""
     n = ensure_classified(conn, cfg, force=True)
     print(f"Re-classified {n} games with the current thresholds.")
 
 
-def cmd_mistakes(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_mistakes(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """List my worst moves with their explanations."""
     ensure_classified(conn, cfg)
     _print_mistakes(conn, args.limit)
 
@@ -214,17 +228,21 @@ def _print_progress(job: AnalysisJob) -> None:
     width = 30
     filled = int(width * p.fraction)
     bar = "#" * filled + "-" * (width - filled)
-    sys.stdout.write(f"\r[{bar}] {p.fraction * 100:5.1f}%  games {p.games_done}/{p.games_total}  "
-                     f"positions {p.positions_done}/{p.positions_total}  ETA {_format_eta(p.eta_seconds)} ")
+    sys.stdout.write(
+        f"\r[{bar}] {p.fraction * 100:5.1f}%  games {p.games_done}/{p.games_total}  "
+        f"positions {p.positions_done}/{p.positions_total}  ETA {_format_eta(p.eta_seconds)} "
+    )
     sys.stdout.flush()
 
 
-def cmd_serve(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_serve(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Run the web app on 127.0.0.1 until Ctrl+C, keeping a daily backup (checked hourly)."""
     from .web import create_app  # Flask is only needed for the web app
-    refresh(conn, cfg)    # new games now; a full rebuild (new thresholds or version) in the background
+
+    refresh(conn, cfg)  # new games now; a full rebuild (new thresholds or version) in the background
     print(f"Open http://127.0.0.1:{args.port} in your browser (Ctrl+C to stop).")
     app = create_app(cfg)
-    daily = backup.DailyBackups(cfg.db_path, cfg.backup).start()   # today's copy, then hourly checks
+    daily = backup.DailyBackups(cfg.db_path, cfg.backup).start()  # today's copy, then hourly checks
     try:
         app.run(host="127.0.0.1", port=args.port, threaded=True)
     finally:
@@ -232,7 +250,8 @@ def cmd_serve(conn: sqlite3.Connection, cfg, args) -> None:
         app.extensions["live"].close()  # stop Stockfish so Python can exit
 
 
-def cmd_reset(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_reset(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Delete all games and their analysis after confirmation."""
     n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     if not args.yes:
         answer = input(f"Delete all {n} games and their analysis? PGN files are not touched. [y/N] ")
@@ -242,7 +261,8 @@ def cmd_reset(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"Deleted {db.delete_all_games(conn)} games.")
 
 
-def cmd_backup(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_backup(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Back up the database (unless --list), then list the copies."""
     folder = backup.folder_for(cfg.db_path)
     if not args.list:
         print(f"Backed up to {backup.make(conn, 'manual', folder)}")
@@ -252,7 +272,7 @@ def cmd_backup(conn: sqlite3.Connection, cfg, args) -> None:
         print(f"  {b.path.name:<44} {b.label:<34} {info['games'] or 0:>5} games  {info['size'] / 1e6:5.1f} MB")
 
 
-def cmd_restore(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_restore(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     """Restore a copy from the backups folder (by name) or any file. The current data is backed up first."""
     source = Path(args.source)
     if not source.is_file():
@@ -272,9 +292,10 @@ def cmd_restore(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"Restored {source.name} ({games} games). Your previous data is in {before}.")
 
 
-def cmd_puzzles(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_puzzles(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     """Download (or refresh) the puzzle library from the Lichess puzzle database."""
     from . import library
+
     progress = library.FetchProgress()
     job = threading.Thread(target=library.fetch, args=(conn, progress), daemon=True)
     print(f"Downloading {library.URL} (about 300 MB, streamed; only a sample is kept)...")
@@ -287,32 +308,48 @@ def cmd_puzzles(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"\nKept {library.count(conn):,} puzzles. Your puzzle rating: {library.rating(conn)}.")
 
 
-def cmd_simulate(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_simulate(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
+    """Simulate days of Today on a copy of the database and print the load."""
     from . import simulate
-    print(f"Simulating {args.days} days of Today at {args.budget} minutes on a copy of the database "
-          "(your data is not changed)...")
+
+    print(
+        f"Simulating {args.days} days of Today at {args.budget} minutes on a copy of the database "
+        "(your data is not changed)..."
+    )
     result = simulate.simulate_copy(conn, cfg, days=args.days, budget=args.budget, skip=args.skip, seed=args.seed)
     print(simulate.table(result))
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="chessreview", description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", default=None,
-                        help="config file (default: $CHESSREVIEW_CONFIG, else ./config.toml if present)")
-    parser.add_argument("--stockfish", default=None, metavar="PATH",
-                        help="Stockfish executable (default: $STOCKFISH_PATH, [engine] path, PATH, usual folders)")
+    """Parse the command line, load the config and run the chosen command."""
+    parser = argparse.ArgumentParser(
+        prog="chessreview", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--config", default=None, help="config file (default: $CHESSREVIEW_CONFIG, else ./config.toml if present)"
+    )
+    parser.add_argument(
+        "--stockfish",
+        default=None,
+        metavar="PATH",
+        help="Stockfish executable (default: $STOCKFISH_PATH, [engine] path, PATH, usual folders)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("sync", help="fetch new games from chess.com")
-    p.add_argument("--since", choices=["all", "3m", "1m"], default="all",
-                   help="how far back the first sync goes (later syncs continue from the last one)")
+    p.add_argument(
+        "--since",
+        choices=["all", "3m", "1m"],
+        default="all",
+        help="how far back the first sync goes (later syncs continue from the last one)",
+    )
     p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("import", help="import PGN files or directories of PGN files")
     p.add_argument("paths", nargs="+")
-    p.add_argument("--as", dest="player", metavar="NAME",
-                   help="your name in these games (sets the player when none is set yet)")
+    p.add_argument(
+        "--as", dest="player", metavar="NAME", help="your name in these games (sets the player when none is set yet)"
+    )
     p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("summary", help="print a summary of imported games")
@@ -364,12 +401,12 @@ def main() -> None:
         sys.exit(str(exc))
     if args.stockfish:
         cfg = replace(cfg, engine=replace(cfg.engine, path=args.stockfish))
-    if args.func in (cmd_analyse, cmd_serve):      # both need the engine: say so now, not mid-analysis
+    if args.func in (cmd_analyse, cmd_serve):  # both need the engine: say so now, not mid-analysis
         try:
             cfg = replace(cfg, engine=replace(cfg.engine, path=find_stockfish(cfg.engine.path)))
         except StockfishNotFound as exc:
             sys.exit(str(exc))
-    if args.func is cmd_restore:    # no schema work first: the database may be what is broken
+    if args.func is cmd_restore:  # no schema work first: the database may be what is broken
         Path(cfg.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(cfg.db_path, timeout=30)
         conn.row_factory = sqlite3.Row

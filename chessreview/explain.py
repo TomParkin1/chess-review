@@ -31,35 +31,39 @@ if TYPE_CHECKING:
     from .classify import Eval
 
 VERSION = 7
-LINE_PLIES = 8        # how far along an engine line to count material
-MIN_LOSS = 2          # material swing (in pawns) that counts as a tactic, not positional (default for min_loss)
-SLACK = 150           # centipawns an eval may fall short of a line's material before the line isn't trusted
-UNDERSTATED = 300     # ...and may exceed it before the line undersells what the move wins
-SHOW_PLIES = 4        # plies of a line to show, unless the material it describes comes later
+LINE_PLIES = 8  # how far along an engine line to count material
+MIN_LOSS = 2  # material swing (in pawns) that counts as a tactic, not positional (default for min_loss)
+SLACK = 150  # centipawns an eval may fall short of a line's material before the line isn't trusted
+UNDERSTATED = 300  # ...and may exceed it before the line undersells what the move wins
+SHOW_PLIES = 4  # plies of a line to show, unless the material it describes comes later
 MAX_SHOW_PLIES = 12
-STILL_WINNING_CP = 700   # after a missed mate, this much ahead (Lichess' mate rule) still wins
+STILL_WINNING_CP = 700  # after a missed mate, this much ahead (Lichess' mate rule) still wins
 
 
 @dataclass
 class LineResult:
-    net: int                          # material gained by `color` (negative = lost)
-    lost: list[chess.PieceType]       # my pieces captured along the line
-    won: list[chess.PieceType]        # opponent pieces I captured along the line
-    end: int = 0                      # material balance of `color` at the end of the line
-    plies: int = 0                    # plies of the line that reach `net` (through its last capture)
+    """Material won and lost along a line of moves."""
+
+    net: int  # material gained by `color` (negative = lost)
+    lost: list[chess.PieceType]  # my pieces captured along the line
+    won: list[chess.PieceType]  # opponent pieces I captured along the line
+    end: int = 0  # material balance of `color` at the end of the line
+    plies: int = 0  # plies of the line that reach `net` (through its last capture)
 
 
 @dataclass
 class MoveContext:
-    board: chess.Board                 # position before my move (me to move)
-    move: chess.Move                   # the move I played
-    best: chess.Move | None            # engine's best move in that position
-    best_line: list[chess.Move]        # engine line starting with `best`
-    reply_line: list[chess.Move]       # engine line for the opponent after my move
-    before: Eval                       # eval before my move, my point of view
-    after: Eval                        # eval after my move, my point of view
-    prev_capture: chess.Square | None = None   # where the opponent's last move captured (None: it didn't)
-    min_loss: int = MIN_LOSS           # material (pawns) that counts as a tactic at the mover's level
+    """Everything the rules need to explain one move: the position, my move and the engine's lines."""
+
+    board: chess.Board  # position before my move (me to move)
+    move: chess.Move  # the move I played
+    best: chess.Move | None  # engine's best move in that position
+    best_line: list[chess.Move]  # engine line starting with `best`
+    reply_line: list[chess.Move]  # engine line for the opponent after my move
+    before: Eval  # eval before my move, my point of view
+    after: Eval  # eval after my move, my point of view
+    prev_capture: chess.Square | None = None  # where the opponent's last move captured (None: it didn't)
+    min_loss: int = MIN_LOSS  # material (pawns) that counts as a tactic at the mover's level
 
     @property
     def me(self) -> chess.Color:
@@ -103,7 +107,7 @@ class MoveContext:
 
     def loss_line(self) -> str:
         """The opponent's line after my move, as far as the material I lose."""
-        own = 0 if self.recapture else 1    # the loss line starts with my own move unless it took back
+        own = 0 if self.recapture else 1  # the loss line starts with my own move unless it took back
         return san_line(self.board_after(), self.reply_line, _shown(self.loss.plies - own))
 
     def gain_line(self) -> str:
@@ -117,10 +121,22 @@ class MoveContext:
         return san_line(self.board, self.best_line, plies)
 
 
+# A rule's answer: (kind of mistake, explanation), or None when the rule doesn't apply.
+RuleResult = tuple[str, str] | None
+
 # ---------------------------------------------------------------- helpers
 
+
 def value(piece_type: chess.PieceType | None) -> int:
-    return PIECE_VALUES.get(piece_type, 0)
+    """Material value of a piece type in pawns (0 for none or a king)."""
+    return PIECE_VALUES.get(piece_type, 0) if piece_type else 0
+
+
+def _name_at(board: chess.Board, square: chess.Square) -> str:
+    """Name of the piece on `square`, which must hold one ("knight")."""
+    piece_type = board.piece_type_at(square)
+    assert piece_type is not None, chess.square_name(square)
+    return chess.piece_name(piece_type)
 
 
 def balance(board: chess.Board, color: chess.Color) -> int:
@@ -142,8 +158,9 @@ def _taken_value(board: chess.Board, move: chess.Move) -> int:
     return value(_taken(board, move))
 
 
-def play_line(board: chess.Board, line: list[chess.Move], color: chess.Color,
-              max_plies: int = LINE_PLIES) -> LineResult:
+def play_line(
+    board: chess.Board, line: list[chess.Move], color: chess.Color, max_plies: int = LINE_PLIES
+) -> LineResult:
     """Play an engine line on a copy of `board` and count material for `color`.
 
     Stops after max_plies, but keeps going while captures continue so that an exchange is
@@ -153,7 +170,9 @@ def play_line(board: chess.Board, line: list[chess.Move], color: chess.Color,
     """
     b = board.copy(stack=False)
     start = balance(b, color)
-    lost, won, path = [], [], []
+    lost: list[chess.PieceType] = []
+    won: list[chess.PieceType] = []
+    path: list[int] = []
     last_taken = None
     for i, move in enumerate(line):
         if i >= max_plies and not b.is_capture(move):
@@ -176,8 +195,9 @@ def play_line(board: chess.Board, line: list[chess.Move], color: chess.Color,
     return LineResult(net, lost, won, balance(b, color), _plies_to(path, net))
 
 
-def _push(board: chess.Board, move: chess.Move, color: chess.Color,
-          won: list[chess.PieceType], lost: list[chess.PieceType]) -> None:
+def _push(
+    board: chess.Board, move: chess.Move, color: chess.Color, won: list[chess.PieceType], lost: list[chess.PieceType]
+) -> None:
     """Play `move`, noting the piece it captures."""
     captured = _taken(board, move)
     if captured:
@@ -190,8 +210,9 @@ def exchange(board: chess.Board, square: chess.Square) -> tuple[int, list[chess.
 
     The least valuable attacker captures first, and either side stops when going on would lose.
     """
-    captures = [m for m in board.legal_moves
-                if m.to_square == square and board.is_capture(m) and not board.is_en_passant(m)]
+    captures = [
+        m for m in board.legal_moves if m.to_square == square and board.is_capture(m) and not board.is_en_passant(m)
+    ]
     if not captures:
         return 0, []
     move = min(captures, key=lambda m: value(board.piece_type_at(m.from_square)) or 100)  # the king last
@@ -230,6 +251,7 @@ def _shown(plies: int) -> int:
 
 
 def material_change(board: chess.Board, line: list[chess.Move], color: chess.Color) -> int:
+    """Material `color` gains along `line` (negative: loses)."""
     return play_line(board, line, color).net
 
 
@@ -276,6 +298,7 @@ def san_line(board: chess.Board, line: list[chess.Move], plies: int = 4) -> str:
 
 
 def describe_material(points: int) -> str:
+    """A number of pawns in words: 'a pawn', 'two pawns', 'a piece', ..."""
     if points <= 1:
         return "a pawn"
     if points == 2:
@@ -290,6 +313,7 @@ def describe_material(points: int) -> str:
 
 
 def piece_on(board: chess.Board, square: chess.Square) -> str:
+    """'knight on f3': the piece on a square, for explanations."""
     piece = board.piece_at(square)
     name = chess.piece_name(piece.piece_type) if piece else "piece"
     return f"{name} on {chess.square_name(square)}"
@@ -300,6 +324,7 @@ def _san(board: chess.Board, move: chess.Move | None) -> str:
 
 
 # ---------------------------------------------------------------- is the line's material real?
+
 
 def _gain_ok(ctx: MoveContext) -> bool:
     """The eval with the best move agrees with the material its line ends with. A short search's
@@ -350,8 +375,13 @@ def _lost(ctx: MoveContext, at_least: int) -> bool:
 
 def _missed_ok(ctx: MoveContext) -> bool:
     """The best move wins at least min_loss of material that my move doesn't, and the eval agrees."""
-    return (ctx.best is not None and bool(ctx.best_line) and ctx.missed >= ctx.min_loss
-            and ctx.missed + ctx.lost >= ctx.min_loss and _gain_ok(ctx))
+    return (
+        ctx.best is not None
+        and bool(ctx.best_line)
+        and ctx.missed >= ctx.min_loss
+        and ctx.missed + ctx.lost >= ctx.min_loss
+        and _gain_ok(ctx)
+    )
 
 
 def _beyond(ctx: MoveContext) -> LineResult:
@@ -371,14 +401,16 @@ def _beyond(ctx: MoveContext) -> LineResult:
 def _in_danger(board: chess.Board, square: chess.Square, victim: chess.Color) -> list[chess.Square]:
     """Pieces of `victim` that the piece on `square` attacks and that are really in danger: the
     king, or a piece (not a pawn) worth more than the attacker or undefended."""
-    attacker = board.piece_at(square)
+    attacker_value = value(board.piece_type_at(square))
     targets = []
     for sq in board.attacks(square):
         target = board.piece_at(sq)
         if not target or target.color != victim:
             continue
-        if target.piece_type == chess.KING or (value(target.piece_type) >= 3 and (
-                value(target.piece_type) > value(attacker.piece_type) or not board.is_attacked_by(victim, sq))):
+        if target.piece_type == chess.KING or (
+            value(target.piece_type) >= 3
+            and (value(target.piece_type) > attacker_value or not board.is_attacked_by(victim, sq))
+        ):
             targets.append(sq)
     return targets
 
@@ -390,14 +422,15 @@ def _takes_piece(board: chess.Board, move: chess.Move) -> bool:
 
 # ---------------------------------------------------------------- rules
 
-def missed_mate(ctx: MoveContext):
+
+def missed_mate(ctx: MoveContext) -> RuleResult:
+    """I had a forced mate and my move lost it."""
     if ctx.before.mate and ctx.before.mate > 0 and not (ctx.after.mate and ctx.after.mate > 0):
         best = _san(ctx.board, ctx.best)
         if ctx.before.mate == 1:
             text = f"You missed checkmate in one: {best}."
         elif ctx.before.mate > 3:
-            text = (f"You had a forced checkmate in {ctx.before.mate}, starting "
-                    f"{san_line(ctx.board, ctx.best_line, 3)}.")
+            text = f"You had a forced checkmate in {ctx.before.mate}, starting {san_line(ctx.board, ctx.best_line, 3)}."
         else:
             line = san_line(ctx.board, ctx.best_line, 2 * ctx.before.mate - 1)
             text = f"You had a forced checkmate in {ctx.before.mate}, starting with {best}: {line}."
@@ -407,7 +440,8 @@ def missed_mate(ctx: MoveContext):
     return None
 
 
-def allowed_mate(ctx: MoveContext):
+def allowed_mate(ctx: MoveContext) -> RuleResult:
+    """My move lets the opponent force mate."""
     if ctx.after.mate and ctx.after.mate < 0 and not (ctx.before.mate and ctx.before.mate < 0):
         after = ctx.board_after()
         n = -ctx.after.mate
@@ -415,13 +449,14 @@ def allowed_mate(ctx: MoveContext):
         if n == 1:
             return "allowed_mate", f"This allows checkmate in one: {line}."
         if n > 3:
-            return "allowed_mate", (f"This walks into a forced checkmate in {n}, starting "
-                                    f"{san_line(after, ctx.reply_line, 3)}.")
+            return "allowed_mate", (
+                f"This walks into a forced checkmate in {n}, starting {san_line(after, ctx.reply_line, 3)}."
+            )
         return "allowed_mate", f"This walks into a forced checkmate in {n}: {line}."
     return None
 
 
-def bigger_miss(ctx: MoveContext):
+def bigger_miss(ctx: MoveContext) -> RuleResult:
     """The best move wins more than my move loses: the miss is the lesson, and a loss of my
     own that is a tactic too is added."""
     if not _missed_ok(ctx) or ctx.lost > ctx.missed:
@@ -432,7 +467,8 @@ def bigger_miss(ctx: MoveContext):
     return kind, text
 
 
-def walked_into_fork(ctx: MoveContext):
+def walked_into_fork(ctx: MoveContext) -> RuleResult:
+    """My move allows a reply that attacks two of my pieces at once."""
     if not ctx.reply_line:
         return None
     after = ctx.board_after()
@@ -447,12 +483,12 @@ def walked_into_fork(ctx: MoveContext):
     targets = _in_danger(after, reply.to_square, ctx.me)
     if len(targets) < 2:
         return None
-    names = [chess.piece_name(after.piece_at(sq).piece_type) for sq in targets]
+    names = [_name_at(after, sq) for sq in targets]
     attacked = " and ".join(f"your {n}" for n in names)
     return "fork", f"This walks into a fork: {reply_san} attacks {attacked}. {_you_lose(ctx)}"
 
 
-def discovered_attack(ctx: MoveContext):
+def discovered_attack(ctx: MoveContext) -> RuleResult:
     """The opponent's reply moves a piece out of the way of one of their long-range
     pieces, which then attacks something valuable of mine. A reply that simply takes a
     piece is a capture, not a discovered attack (hanging_piece explains it)."""
@@ -466,8 +502,9 @@ def discovered_attack(ctx: MoveContext):
         return None
 
     them = not ctx.me
-    sliders = [sq for pt in (chess.BISHOP, chess.ROOK, chess.QUEEN)
-               for sq in after.pieces(pt, them) if sq != reply.from_square]
+    sliders = [
+        sq for pt in (chess.BISHOP, chess.ROOK, chess.QUEEN) for sq in after.pieces(pt, them) if sq != reply.from_square
+    ]
     attacked_before = {sq: after.attacks(sq) for sq in sliders}
     reply_san = after.san(reply)
     after.push(reply)
@@ -478,10 +515,13 @@ def discovered_attack(ctx: MoveContext):
             continue
         for target_sq in after.attacks(sq) & ~attacked_before[sq]:
             target = after.piece_at(target_sq)
-            if (target and target.color == ctx.me and target.piece_type != chess.KING
-                    and value(target.piece_type) >= 3
-                    and (value(target.piece_type) > value(slider.piece_type)
-                         or not after.is_attacked_by(ctx.me, target_sq))):
+            if (
+                target
+                and target.color == ctx.me
+                and target.piece_type != chess.KING
+                and value(target.piece_type) >= 3
+                and (value(target.piece_type) > value(slider.piece_type) or not after.is_attacked_by(ctx.me, target_sq))
+            ):
                 candidates.append((value(target.piece_type), sq, target_sq))
     if not candidates:
         return None
@@ -489,10 +529,12 @@ def discovered_attack(ctx: MoveContext):
     return "discovered_attack", (
         f"This allows a discovered attack: {reply_san} uncovers the "
         f"{piece_on(after, sq)}, which now attacks your "
-        f"{piece_on(after, target_sq)}. {_you_lose(ctx)}")
+        f"{piece_on(after, target_sq)}. {_you_lose(ctx)}"
+    )
 
 
-def hanging_piece(ctx: MoveContext):
+def hanging_piece(ctx: MoveContext) -> RuleResult:
+    """My move leaves a piece that the opponent can simply take."""
     if not ctx.reply_line:
         return None
     after = ctx.board_after()
@@ -513,24 +555,35 @@ def hanging_piece(ctx: MoveContext):
     you_lose = _you_lose(ctx)
     if target_sq == ctx.move.to_square:
         if defended:
-            return "hanging_piece", (f"Your {piece_on(after, target_sq)} isn't safe there: {reply_san} wins "
-                                     f"material even though it is defended. {you_lose}")
-        return "hanging_piece", (f"You moved your {name} to {chess.square_name(target_sq)}, "
-                                 f"where it can simply be taken ({reply_san}). {you_lose}")
+            return "hanging_piece", (
+                f"Your {piece_on(after, target_sq)} isn't safe there: {reply_san} wins "
+                f"material even though it is defended. {you_lose}"
+            )
+        return "hanging_piece", (
+            f"You moved your {name} to {chess.square_name(target_sq)}, "
+            f"where it can simply be taken ({reply_san}). {you_lose}"
+        )
     if defended:
-        return "loses_material", (f"This lets your opponent win material with {reply_san} "
-                                  f"({ctx.loss_line()}). {you_lose}")
+        return "loses_material", (
+            f"This lets your opponent win material with {reply_san} ({ctx.loss_line()}). {you_lose}"
+        )
     why = _why_loose(ctx, target_sq)
     if why:
         return "hanging_piece", f"{why}: after {ctx.board.san(ctx.move)}, {reply_san} takes it. {you_lose}"
     if ctx.recapture:
-        moved = chess.piece_name(ctx.board.piece_type_at(ctx.move.from_square))
-        taking = ("Taking back" if ctx.prev_capture == ctx.move.to_square
-                  else f"Taking on {chess.square_name(ctx.move.to_square)}")
-        return "hanging_piece", (f"{taking} with the {moved} leaves your {piece_on(after, target_sq)} "
-                                 f"undefended, and {reply_san} takes it. {you_lose}")
-    return "hanging_piece", (f"This leaves your {piece_on(after, target_sq)} undefended, and {reply_san} "
-                             f"takes it. {you_lose}")
+        moved = _name_at(ctx.board, ctx.move.from_square)
+        taking = (
+            "Taking back"
+            if ctx.prev_capture == ctx.move.to_square
+            else f"Taking on {chess.square_name(ctx.move.to_square)}"
+        )
+        return "hanging_piece", (
+            f"{taking} with the {moved} leaves your {piece_on(after, target_sq)} "
+            f"undefended, and {reply_san} takes it. {you_lose}"
+        )
+    return "hanging_piece", (
+        f"This leaves your {piece_on(after, target_sq)} undefended, and {reply_san} takes it. {you_lose}"
+    )
 
 
 def _why_loose(ctx: MoveContext, target_sq: chess.Square) -> str | None:
@@ -538,24 +591,29 @@ def _why_loose(ctx: MoveContext, target_sq: chess.Square) -> str | None:
     from the capturing piece's line, or was the piece guarding it."""
     reply = ctx.reply_line[0]
     frm = ctx.move.from_square
-    moved = f"{chess.piece_name(ctx.board.piece_type_at(frm))} on {chess.square_name(frm)}"
+    moved = f"{_name_at(ctx.board, frm)} on {chess.square_name(frm)}"
     target = piece_on(ctx.board, target_sq)
     capturer = ctx.board.piece_at(reply.from_square)
-    if (capturer and capturer.piece_type in (chess.BISHOP, chess.ROOK, chess.QUEEN)
-            and frm in chess.SquareSet(chess.between(reply.from_square, target_sq))):
+    if (
+        capturer
+        and capturer.piece_type in (chess.BISHOP, chess.ROOK, chess.QUEEN)
+        and frm in chess.SquareSet(chess.between(reply.from_square, target_sq))
+    ):
         return f"Your {moved} was shielding your {target} from the {chess.piece_name(capturer.piece_type)}"
     if target_sq in ctx.board.attacks(frm):
         return f"Your {moved} was guarding your {target}"
     return None
 
 
-def loses_material(ctx: MoveContext):
+def loses_material(ctx: MoveContext) -> RuleResult:
+    """My move loses material by force, without a simpler reason."""
     if not _lost(ctx, ctx.min_loss):
         return None
     return "loses_material", f"This loses {describe_trade(ctx.loss)} by force: {ctx.loss_line()}.{_and_drop(ctx)}"
 
 
-def missed_win(ctx: MoveContext):
+def missed_win(ctx: MoveContext) -> RuleResult:
+    """The engine's move would have won material and mine didn't."""
     if not _missed_ok(ctx):
         return None
     return _missed(ctx)
@@ -572,6 +630,7 @@ def _missed(ctx: MoveContext) -> tuple[str, str]:
 
 def _missed_material(ctx: MoveContext) -> tuple[str, str]:
     board, best = ctx.board, ctx.best
+    assert best is not None  # only asked when the best move wins material
     best_san = _san(board, best)
     won = describe_trade(_beyond(ctx), losing=False)
     line = ctx.gain_line()
@@ -581,15 +640,18 @@ def _missed_material(ctx: MoveContext) -> tuple[str, str]:
     after_best.push(best)
     if board.is_capture(ctx.move) and ctx.move.to_square == best.to_square:
         # Same capture, other piece: what matters is what the best one does next.
-        mine = chess.piece_name(board.piece_type_at(ctx.move.from_square))
+        mine = _name_at(board, ctx.move.from_square)
         threats = _new_threats(after_best, best, ctx.me)
         how = f"it also attacks {threats} and" if threats else "it"
-        return "missed_capture", (f"You took on {chess.square_name(best.to_square)} with the {mine}, but "
-                                  f"{best_san} was stronger: {how} wins {won}: {line}.")
+        return "missed_capture", (
+            f"You took on {chess.square_name(best.to_square)} with the {mine}, but "
+            f"{best_san} was stronger: {how} wins {won}: {line}."
+        )
     free = not board.is_attacked_by(not ctx.me, best.to_square)
     if free and _taken_value(board, best) >= ctx.missed:
-        return "missed_capture", (f"You missed {best_san}: the {piece_on(board, best.to_square)} "
-                                  f"was undefended, so you could win {won}.")
+        return "missed_capture", (
+            f"You missed {best_san}: the {piece_on(board, best.to_square)} was undefended, so you could win {won}."
+        )
     return "missed_capture", f"You missed {best_san}, which wins {won}: {line}."
 
 
@@ -597,11 +659,13 @@ def _also_missed(ctx: MoveContext) -> str:
     """The other half of a move that lost material: the best move would also have won some."""
     if not _missed_ok(ctx):
         return ""
-    return (f" You also missed {_san(ctx.board, ctx.best)}, which wins "
-            f"{describe_trade(_beyond(ctx), losing=False)}: {ctx.gain_line()}.")
+    return (
+        f" You also missed {_san(ctx.board, ctx.best)}, which wins "
+        f"{describe_trade(_beyond(ctx), losing=False)}: {ctx.gain_line()}."
+    )
 
 
-def missed_fork(ctx: MoveContext):
+def missed_fork(ctx: MoveContext) -> RuleResult:
     """One of my first moves in the best line forks the king and a piece, or two pieces, and the
     eval says material is at stake even when the short line doesn't show it being won."""
     if not ctx.best_line or ctx.before.mate is not None:
@@ -610,7 +674,7 @@ def missed_fork(ctx: MoveContext):
     if (ctx.before.cp or 0) < 100 * (balance(ctx.board, ctx.me) + ctx.min_loss) - SLACK:
         return None
     b = ctx.board.copy(stack=False)
-    for i, move in enumerate(ctx.best_line[:3]):     # my first two moves: later forks are speculation
+    for i, move in enumerate(ctx.best_line[:3]):  # my first two moves: later forks are speculation
         if move not in b.legal_moves:
             return None
         b.push(move)
@@ -618,8 +682,9 @@ def missed_fork(ctx: MoveContext):
             continue
         targets = _in_danger(b, move.to_square, them)
         if len(targets) >= 2 and _fork_holds(b, move.to_square):
-            return "missed_tactic", (f"You missed a fork: {san_line(ctx.board, ctx.best_line, i + 1)} "
-                                     f"attacks {_their(b, targets)}.")
+            return "missed_tactic", (
+                f"You missed a fork: {san_line(ctx.board, ctx.best_line, i + 1)} attacks {_their(b, targets)}."
+            )
     return None
 
 
@@ -638,12 +703,11 @@ def _fork_holds(board: chess.Board, square: chess.Square) -> bool:
 def _their(board: chess.Board, squares: list[chess.Square]) -> str:
     """'the king and the rook on a1'."""
     ordered = sorted(squares, key=lambda sq: value(board.piece_type_at(sq)) or 100, reverse=True)
-    names = ["the king" if board.piece_type_at(sq) == chess.KING else f"the {piece_on(board, sq)}"
-             for sq in ordered]
+    names = ["the king" if board.piece_type_at(sq) == chess.KING else f"the {piece_on(board, sq)}" for sq in ordered]
     return " and ".join(names)
 
 
-def exposed_king(ctx: MoveContext):
+def exposed_king(ctx: MoveContext) -> RuleResult:
     """The opponent's best reply is a check that hurts (but no forced mate or material loss):
     my king has to move, or the checks go on. A check I simply block or take back (a trade
     with check, a queen trade offered with check) does nothing to my king."""
@@ -653,8 +717,10 @@ def exposed_king(ctx: MoveContext):
     reply = ctx.reply_line[0]
     if reply not in after.legal_moves or not after.gives_check(reply) or not _king_hunted(after, ctx.reply_line):
         return None
-    return "king_safety", (f"This exposes your king: {san_line(after, ctx.reply_line)} "
-                           f"and the evaluation drops from {ctx.before} to {ctx.after}.")
+    return "king_safety", (
+        f"This exposes your king: {san_line(after, ctx.reply_line)} "
+        f"and the evaluation drops from {ctx.before} to {ctx.after}."
+    )
 
 
 def _king_hunted(board: chess.Board, line: list[chess.Move], plies: int = SHOW_PLIES) -> bool:
@@ -673,29 +739,43 @@ def _king_hunted(board: chess.Board, line: list[chess.Move], plies: int = SHOW_P
     return checks >= 2
 
 
-def missed_opportunity(ctx: MoveContext):
+def missed_opportunity(ctx: MoveContext) -> RuleResult:
     """I was clearly better and let most of the advantage slip without losing material."""
     if ctx.before.win_chance() < 0.3 or ctx.after.win_chance() < -0.2 or not ctx.best:
         return None
     line = ctx.best_line_text()
-    return "missed_opportunity", (f"You were clearly better ({ctx.before}) but this lets the advantage "
-                                  f"slip ({ctx.after}). Stronger was {line}.")
+    return "missed_opportunity", (
+        f"You were clearly better ({ctx.before}) but this lets the advantage slip ({ctx.after}). Stronger was {line}."
+    )
 
 
-def positional(ctx: MoveContext):
+def positional(ctx: MoveContext) -> RuleResult:
+    """The fallback: no tactic found, so describe how much worse the position got."""
     after = ctx.board_after()
     reply = san_line(after, ctx.reply_line)
     if ctx.before.win_chance() >= 0.3 and ctx.after.win_chance() <= -0.3:
         start = f"; the trouble starts with {reply}" if reply else ""
-        return "positional", (f"This turns a winning position ({ctx.before}) into a losing one "
-                              f"({ctx.after}){start}.")
+        return "positional", (f"This turns a winning position ({ctx.before}) into a losing one ({ctx.after}){start}.")
     threat = f" after {reply}" if reply else ""
-    return "positional", (f"No simple tactic found, but your position gets worse{threat} "
-                          f"({ctx.before} to {ctx.after}).")
+    return "positional", (
+        f"No simple tactic found, but your position gets worse{threat} ({ctx.before} to {ctx.after})."
+    )
 
 
-RULES = [missed_mate, allowed_mate, bigger_miss, walked_into_fork, discovered_attack, hanging_piece,
-         loses_material, missed_win, missed_fork, exposed_king, missed_opportunity, positional]
+RULES = [
+    missed_mate,
+    allowed_mate,
+    bigger_miss,
+    walked_into_fork,
+    discovered_attack,
+    hanging_piece,
+    loses_material,
+    missed_win,
+    missed_fork,
+    exposed_king,
+    missed_opportunity,
+    positional,
+]
 
 
 # Wording for "missed_*" kinds that does not give the answer away (review puzzles).
@@ -728,8 +808,11 @@ def explain(ctx: MoveContext, reveal_best: bool = True) -> tuple[str, str]:
     if kind in MATERIAL_KINDS:
         text += _also_missed(ctx)
     best_san = _san(ctx.board, ctx.best)
-    if ctx.best and kind not in ("missed_mate", "missed_capture", "missed_tactic",
-                                 "missed_opportunity") and f"missed {best_san}" not in text:
+    if (
+        ctx.best
+        and kind not in ("missed_mate", "missed_capture", "missed_tactic", "missed_opportunity")
+        and f"missed {best_san}" not in text
+    ):
         text += f" Best was {best_san}."
     return kind, text
 
@@ -746,7 +829,9 @@ HINTS = {
     "hanging_piece": "Make sure none of your pieces is left undefended.",
     "loses_material": "Your move lost material. Check every capture your opponent has.",
     "king_safety": "Keep your king safe: which checks does your opponent have?",
-    "missed_opportunity": "You're clearly better here. Find the move that keeps the advantage, often the most forcing one.",
+    "missed_opportunity": (
+        "You're clearly better here. Find the move that keeps the advantage, often the most forcing one."
+    ),
     "positional": "Before moving, ask what your opponent wants to do next.",
 }
 
@@ -755,6 +840,7 @@ ATTACKING_KINDS = {"missed_mate", "missed_capture", "missed_tactic"}
 
 
 def hint(kind: str | None) -> str:
+    """The spoiler-free hint for a kind of mistake."""
     return HINTS.get(kind or "", "Think about your opponent's best reply before you move.")
 
 
@@ -779,7 +865,7 @@ def explain_best(ctx: MoveContext, kind: str | None) -> str:
 
     if ctx.before.mate and ctx.before.mate > 0:
         if kind == "missed_mate":
-            return ""   # the explanation of my move already shows the mate
+            return ""  # the explanation of my move already shows the mate
         return f"{best_san} starts a forced checkmate in {ctx.before.mate}: {line}."
 
     # The explanation of my move already names the best move and what it wins (missed_*),
@@ -792,11 +878,11 @@ def explain_best(ctx: MoveContext, kind: str | None) -> str:
     elif gain.net >= 1 and not said_gain and _gain_ok(ctx) and not _understated(ctx):
         # (an amount the eval doesn't back, or one far below it, would teach the wrong size of the win)
         target = board.piece_at(ctx.best.to_square) if board.is_capture(ctx.best) else None
-        free = target and not board.is_attacked_by(not ctx.me, ctx.best.to_square)
-        if free and value(target.piece_type) >= gain.net:
+        free = target is not None and not board.is_attacked_by(not ctx.me, ctx.best.to_square)
+        if target is not None and free and value(target.piece_type) >= gain.net:
             sentences.append(f"{best_san} simply takes the undefended {chess.piece_name(target.piece_type)}.")
         else:
-            shown = "." if kind == "missed_opportunity" else f": {ctx.gain_line()}."   # that text shows the line
+            shown = "." if kind == "missed_opportunity" else f": {ctx.gain_line()}."  # that text shows the line
             sentences.append(f"{best_san} wins {describe_trade(gain, losing=False)}{shown}")
     sentences = [s for s in sentences if s]
     threats = _new_threats(after_best, ctx.best, ctx.me)
@@ -810,8 +896,8 @@ def explain_best(ctx: MoveContext, kind: str | None) -> str:
 def _what_best_prevents(ctx: MoveContext, best_san: str, after_best: chess.Board) -> str:
     """Describe how the best move deals with the reply my move allowed."""
     after_mine = ctx.board_after()
-    threat = ctx.reply_line[0]
-    if threat not in after_mine.legal_moves:
+    threat, best = ctx.reply_line[0], ctx.best
+    if best is None or threat not in after_mine.legal_moves:
         return ""
     threat_san = after_mine.san(threat)
     if ctx.after.mate and ctx.after.mate < 0:
@@ -820,20 +906,22 @@ def _what_best_prevents(ctx: MoveContext, best_san: str, after_best: chess.Board
     target = after_mine.piece_at(target_sq)
     if target and target.color == ctx.me and target.piece_type != chess.KING:
         name = chess.piece_name(target.piece_type)
-        moved_from = ctx.best.from_square
+        moved_from = best.from_square
         if moved_from == target_sq or (ctx.move.to_square == target_sq and moved_from == ctx.move.from_square):
             return f"{best_san} keeps your {name} safe instead of leaving it to {threat_san}."
         if after_best.piece_at(target_sq) != target or after_mine.is_attacked_by(ctx.me, target_sq):
-            return ""   # the piece isn't there after the best move, or my move didn't leave it loose
+            return ""  # the piece isn't there after the best move, or my move didn't leave it loose
         guards = after_best.attackers(ctx.me, target_sq)
         if len(ctx.best_line) > 1 and ctx.best_line[1].to_square in guards:
-            return ""   # the guard is taken straight away: guarding isn't what the best move is about
-        if ctx.best.to_square in guards:
+            return ""  # the guard is taken straight away: guarding isn't what the best move is about
+        if best.to_square in guards:
             return f"{best_san} defends your {name}, so {threat_san} no longer wins it."
-        if ctx.move.from_square in guards:   # the piece my move took away still guards it
-            return (f"{best_san} keeps your {piece_on(after_best, ctx.move.from_square)} where it guards "
-                    f"your {piece_on(after_best, target_sq)}, so {threat_san} doesn't work.")
-    return ""    # nothing to add to the explanation of my move, which shows the line it allowed
+        if ctx.move.from_square in guards:  # the piece my move took away still guards it
+            return (
+                f"{best_san} keeps your {piece_on(after_best, ctx.move.from_square)} where it guards "
+                f"your {piece_on(after_best, target_sq)}, so {threat_san} doesn't work."
+            )
+    return ""  # nothing to add to the explanation of my move, which shows the line it allowed
 
 
 def _new_threats(after_best: chess.Board, best: chess.Move, me: chess.Color) -> str:

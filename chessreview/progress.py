@@ -24,11 +24,13 @@ from .config import Config
 from .insights import KIND_LABELS, my_accuracy, my_elo
 from .threats import training_threat
 
-MIN_GAMES = 10   # a window needs at least this many games to be shown
+MIN_GAMES = 10  # a window needs at least this many games to be shown
 
 
 @dataclass
 class GameStats:
+    """The numbers Progress needs from one analysed game."""
+
     date: str
     result: str
     blunders: int = 0
@@ -57,8 +59,15 @@ def game_stats(conn: sqlite3.Connection, cfg: Config) -> list[GameStats]:
     winning = level.winning_chance(level.current_rating(conn))
     games = conn.execute("""SELECT * FROM games WHERE analysed_at IS NOT NULL
                             ORDER BY end_time, id""").fetchall()
-    stats = {g["id"]: GameStats(date=(g["end_time"] or g["date"] or "")[:10], result=g["my_result"],
-                                accuracy=my_accuracy(g), rating=my_elo(g)) for g in games}
+    stats = {
+        g["id"]: GameStats(
+            date=(g["end_time"] or g["date"] or "")[:10],
+            result=g["my_result"],
+            accuracy=my_accuracy(g),
+            rating=my_elo(g),
+        )
+        for g in games
+    }
     rows = conn.execute("""
         SELECT m.game_id, m.ply, m.judgement, m.kind, m.win_before, g.my_color, p.fen, p.score_cp, p.score_mate,
                p.threat_cp, p.threat_mate, p.threat_uci, p.threat_pv, p0.fen AS prev_fen,
@@ -89,6 +98,7 @@ def game_stats(conn: sqlite3.Connection, cfg: Config) -> list[GameStats]:
 
 
 def window_metrics(games: list[GameStats]) -> dict:
+    """Averages over a window of games (blunders, accuracy, conversion, ...)."""
     n = len(games)
     blunders = sum(g.blunders for g in games)
     reached = [g for g in games if g.reached_win]
@@ -107,10 +117,11 @@ def window_metrics(games: list[GameStats]) -> dict:
 
 
 def report(conn: sqlite3.Connection, cfg: Config) -> dict:
+    """The Progress page: my last games against the ones before, rolling series and weekly training."""
     window = max(MIN_GAMES, cfg.coach.progress_window)
     games = game_stats(conn, cfg)
     current = games[-window:]
-    baseline = games[-2 * window:-window] if len(games) > window else []
+    baseline = games[-2 * window : -window] if len(games) > window else []
     cur, base = window_metrics(current), window_metrics(baseline) if len(baseline) >= MIN_GAMES else None
 
     headline = []
@@ -119,22 +130,37 @@ def report(conn: sqlite3.Connection, cfg: Config) -> dict:
         better = None
         if c is not None and b is not None and abs(c - b) > 1e-9:
             better = (c > b) == higher_better
-        headline.append({"key": key, "label": label, "current": c, "baseline": b, "better": better,
-                         "format": fmt, "higher_better": higher_better})
+        headline.append(
+            {
+                "key": key,
+                "label": label,
+                "current": c,
+                "baseline": b,
+                "better": better,
+                "format": fmt,
+                "higher_better": higher_better,
+            }
+        )
 
     # Rolling series for the charts: each point is the window of games ending there.
-    series = {key: [] for key, *_ in METRICS}
+    series: dict[str, list] = {key: [] for key, *_ in METRICS}
     labels = []
     for i in range(MIN_GAMES - 1, len(games)):
-        m = window_metrics(games[max(0, i - window + 1): i + 1])
+        m = window_metrics(games[max(0, i - window + 1) : i + 1])
         labels.append(games[i].date)
         for key in series:
             series[key].append(m[key])
 
     kinds = _kind_changes(current, baseline if base else [])
     return {
-        "window": window, "games": len(games), "current": cur, "baseline": base,
-        "headline": headline, "labels": labels, "series": series, "kinds": kinds,
+        "window": window,
+        "games": len(games),
+        "current": cur,
+        "baseline": base,
+        "headline": headline,
+        "labels": labels,
+        "series": series,
+        "kinds": kinds,
         "rating_now": level.current_rating(conn),
         "winning_cp": level.winning_cp(level.current_rating(conn)),
         "training": training_weeks(conn),
@@ -145,19 +171,28 @@ def report(conn: sqlite3.Connection, cfg: Config) -> dict:
 
 def _kind_changes(current: list[GameStats], baseline: list[GameStats]) -> list[dict]:
     """Mistakes+blunders per game by kind, current window vs baseline (biggest change first)."""
+
     def rates(games: list[GameStats]) -> dict:
-        total = Counter()
+        total: Counter[str] = Counter()
         for g in games:
             total.update(g.kinds)
         return {k: v / len(games) for k, v in total.items()} if games else {}
+
     cur, base = rates(current), rates(baseline)
     out = []
     for kind in set(cur) | set(base):
         if kind is None:
             continue
         c, b = cur.get(kind, 0.0), base.get(kind, 0.0) if baseline else None
-        out.append({"kind": kind, "label": KIND_LABELS.get(kind, kind.replace("_", " ").capitalize()),
-                    "current": c, "baseline": b, "change": None if b is None else c - b})
+        out.append(
+            {
+                "kind": kind,
+                "label": KIND_LABELS.get(kind, kind.replace("_", " ").capitalize()),
+                "current": c,
+                "baseline": b,
+                "change": None if b is None else c - b,
+            }
+        )
     out.sort(key=lambda k: -(k["current"] + (k["baseline"] or 0)))
     return out
 
@@ -167,10 +202,13 @@ def summary_line(window: int, total: int, cur: dict, base: dict | None, kinds: l
     if not cur["games"]:
         return "Analyse some games to see your progress."
     if base is None:
-        return (f"{cur['blunders']:.1f} blunders per game over your last {cur['games']} games. "
-                f"Play {window + MIN_GAMES - total} more to see a trend.")
-    text = (f"Last {window} games vs the {window} before: blunders per game "
-            f"{base['blunders']:.1f} → {cur['blunders']:.1f}.")
+        return (
+            f"{cur['blunders']:.1f} blunders per game over your last {cur['games']} games. "
+            f"Play {window + MIN_GAMES - total} more to see a trend."
+        )
+    text = (
+        f"Last {window} games vs the {window} before: blunders per game {base['blunders']:.1f} → {cur['blunders']:.1f}."
+    )
     changes = [k for k in kinds if k["change"] is not None and (k["baseline"] or 0) * window >= 3]
     if changes:
         best = min(changes, key=lambda k: k["change"])
@@ -190,15 +228,16 @@ def training_weeks(conn: sqlite3.Connection, weeks: int = 12) -> list[dict]:
     # ISO weeks (Monday to Sunday), so the week around New Year isn't split in two.
     stats: dict[str, dict] = {}
     for r in conn.execute(f"""
-            SELECT {srs.day_sql('at')} AS day, COUNT(*) AS attempts,
+            SELECT {srs.day_sql("at")} AS day, COUNT(*) AS attempts,
                    SUM(result IN ('solved', 'solved_with_help')) AS solved,
                    SUM(threat_result = 'correct') AS threat_ok,
                    SUM(threat_result IN ('correct', 'wrong')) AS threat_tries
             FROM review_results GROUP BY day"""):
-        week = stats.setdefault(_iso_week(date.fromisoformat(r["day"])),
-                                {"attempts": 0, "solved": 0, "threat_ok": 0, "threat_tries": 0})
-        for k in week:
-            week[k] += r[k] or 0
+        totals = stats.setdefault(
+            _iso_week(date.fromisoformat(r["day"])), {"attempts": 0, "solved": 0, "threat_ok": 0, "threat_tries": 0}
+        )
+        for k in totals:
+            totals[k] += r[k] or 0
     days: dict[str, list] = {}
     for day in srs.training_days(conn):
         days.setdefault(_iso_week(day), []).append(day)
@@ -206,8 +245,14 @@ def training_weeks(conn: sqlite3.Connection, weeks: int = 12) -> list[dict]:
     for week in sorted(days)[-weeks:]:
         r = stats.get(week)
         attempts = r["attempts"] if r else 0
-        out.append({"week": week, "from": min(days[week]).isoformat(), "attempts": attempts,
-                    "days": len(days[week]),
-                    "solve_rate": 100 * r["solved"] / attempts if attempts else None,
-                    "threat_rate": 100 * r["threat_ok"] / r["threat_tries"] if r and r["threat_tries"] else None})
+        out.append(
+            {
+                "week": week,
+                "from": min(days[week]).isoformat(),
+                "attempts": attempts,
+                "days": len(days[week]),
+                "solve_rate": 100 * r["solved"] / attempts if r and attempts else None,
+                "threat_rate": 100 * r["threat_ok"] / r["threat_tries"] if r and r["threat_tries"] else None,
+            }
+        )
     return out
