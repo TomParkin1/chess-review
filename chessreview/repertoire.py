@@ -21,6 +21,7 @@ import sqlite3
 import threading
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
+from typing import Any
 
 import chess
 
@@ -208,12 +209,12 @@ def node_json(tree: dict[str, Node], epd: str) -> dict | None:
 
 def problems(tree: dict[str, Node], limit: int = 12) -> list[dict]:
     """Positions where my usual move is usually judged bad, most-played first."""
-    out = []
+    out: list[dict[str, Any]] = []
     for node in tree.values():
         if not node.my_turn:
             continue
         usual, learn, problem = node.repertoire()
-        if not problem:
+        if not problem or usual is None or learn is None:
             continue
         board = chess.Board(node.fen)
         drops = usual.drops
@@ -244,7 +245,8 @@ def drill_lines(tree: dict[str, Node], color: str, count: int = 6, seed: int | N
     """Random lines through my repertoire: opponent moves weighted by how often they were
     played against me (only moves seen in >= MIN_GAMES games), my moves = repertoire moves."""
     rng = random.Random(seed)
-    lines, seen = [], set()
+    lines: list[list[dict]] = []
+    seen: set = set()
     for _ in range(count * 4):
         if len(lines) >= count:
             break

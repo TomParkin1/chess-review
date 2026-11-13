@@ -18,9 +18,10 @@ import json
 import math
 import sqlite3
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from itertools import pairwise
+from typing import Any
 
 import chess
 
@@ -46,7 +47,7 @@ class Eval:
     mate: int | None  # >0: this side mates in N; <0: this side gets mated
 
     @classmethod
-    def from_row(cls, row: sqlite3.Row, color: chess.Color) -> Eval:
+    def from_row(cls, row: sqlite3.Row | Mapping[str, Any], color: chess.Color) -> Eval:
         """Convert a stored (White point of view) eval to `color`'s point of view."""
         sign = 1 if color == chess.WHITE else -1
         cp = row["score_cp"]
@@ -75,7 +76,7 @@ def _mate_judgement(before: Eval, after: Eval) -> str | None:
     has_mate = after.mate is not None and after.mate > 0
     if had_mate and not has_mate and not (after.mate is not None and after.mate < 0):
         cp = after.as_cp()  # lost a forced mate but still have this much
-        if cp > 999 or (cp > 700 and before.mate > LONG_MATE):
+        if cp > 999 or (cp > 700 and (before.mate or 0) > LONG_MATE):
             return "inaccuracy"
         return "mistake" if cp > 700 else "blunder"
     allowed_mate = after.mate is not None and after.mate < 0
@@ -162,6 +163,8 @@ def judge(before: Eval, after: Eval, cfg: Config, th: Thresholds | None = None) 
     mate_verdict = _mate_judgement(before, after)
     if mate_verdict:
         return mate_verdict, drop, cp_loss
+    value: float
+    limits: tuple[float, float, float]
     if c.mode == "cp":
         f = th.cp_factor
         value, limits = cp_loss, (c.cp_blunder * f, c.cp_mistake * f, c.cp_inaccuracy * f)
@@ -336,7 +339,7 @@ def settings_fingerprint(cfg: Config, adaptive: bool = False) -> str:
 
 _lock = threading.Lock()  # one classification run at a time
 _start_lock = threading.Lock()
-REBUILD = {"running": False, "done": 0, "total": 0, "error": None}  # the background rebuild's progress
+REBUILD: dict[str, Any] = {"running": False, "done": 0, "total": 0, "error": None}  # the background rebuild's progress
 
 
 def ensure_classified(conn: sqlite3.Connection, cfg: Config, force: bool = False) -> int:

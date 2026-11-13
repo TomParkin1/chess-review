@@ -184,6 +184,7 @@ def import_game(
 
     start_fen = h.get("FEN") if h.get("SetUp") == "1" else None
     known = openings.identify(mainline, start_fen)
+    eco: str | None
     if known:
         eco, opening, family = known
     else:

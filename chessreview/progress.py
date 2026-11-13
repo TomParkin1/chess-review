@@ -139,7 +139,7 @@ def report(conn: sqlite3.Connection, cfg: Config) -> dict:
         )
 
     # Rolling series for the charts: each point is the window of games ending there.
-    series = {key: [] for key, *_ in METRICS}
+    series: dict[str, list] = {key: [] for key, *_ in METRICS}
     labels = []
     for i in range(MIN_GAMES - 1, len(games)):
         m = window_metrics(games[max(0, i - window + 1) : i + 1])
@@ -169,7 +169,7 @@ def _kind_changes(current: list[GameStats], baseline: list[GameStats]) -> list[d
     """Mistakes+blunders per game by kind, current window vs baseline (biggest change first)."""
 
     def rates(games: list[GameStats]) -> dict:
-        total = Counter()
+        total: Counter[str] = Counter()
         for g in games:
             total.update(g.kinds)
         return {k: v / len(games) for k, v in total.items()} if games else {}
@@ -229,11 +229,11 @@ def training_weeks(conn: sqlite3.Connection, weeks: int = 12) -> list[dict]:
                    SUM(threat_result = 'correct') AS threat_ok,
                    SUM(threat_result IN ('correct', 'wrong')) AS threat_tries
             FROM review_results GROUP BY day"""):
-        week = stats.setdefault(
+        totals = stats.setdefault(
             _iso_week(date.fromisoformat(r["day"])), {"attempts": 0, "solved": 0, "threat_ok": 0, "threat_tries": 0}
         )
-        for k in week:
-            week[k] += r[k] or 0
+        for k in totals:
+            totals[k] += r[k] or 0
     days: dict[str, list] = {}
     for day in srs.training_days(conn):
         days.setdefault(_iso_week(day), []).append(day)
@@ -247,7 +247,7 @@ def training_weeks(conn: sqlite3.Connection, weeks: int = 12) -> list[dict]:
                 "from": min(days[week]).isoformat(),
                 "attempts": attempts,
                 "days": len(days[week]),
-                "solve_rate": 100 * r["solved"] / attempts if attempts else None,
+                "solve_rate": 100 * r["solved"] / attempts if r and attempts else None,
                 "threat_rate": 100 * r["threat_ok"] / r["threat_tries"] if r and r["threat_tries"] else None,
             }
         )

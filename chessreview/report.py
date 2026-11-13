@@ -73,7 +73,7 @@ def is_sacrifice(board: chess.Board, move: chess.Move) -> bool:
     attackers = after.attackers(not piece.color, move.to_square)
     if not attackers:
         return False
-    cheapest = min(PIECE_VALUES.get(after.piece_at(sq).piece_type, 100) for sq in attackers)
+    cheapest = min(PIECE_VALUES.get(after.piece_type_at(sq) or 0, 100) for sq in attackers)
     defended = after.is_attacked_by(piece.color, move.to_square)
     gives_up = value if not defended else value - cheapest
     return gives_up - captured_value >= 2
@@ -150,7 +150,7 @@ def game_accuracy(
     ]
     weights = [max(0.5, min(12.0, _stdev(w))) for w in padded][:n]
 
-    out = []
+    out: list[float | None] = []
     for side in (0, 1):  # 0: the side that moved first
         idx = [i for i in range(n) if i % 2 == side]
         if not idx:
@@ -190,7 +190,7 @@ def time_spent(clocks_ms: str | None, time_control: str | None) -> list[int | No
         return []
     clocks = [None if c == "-" else int(c) for c in clocks_ms.split()]
     base, inc = parse_time_control(time_control)
-    spent = []
+    spent: list[int | None] = []
     for i, clock in enumerate(clocks):
         previous = clocks[i - 2] if i >= 2 else base  # the same side's clock one move earlier
         if clock is None or previous is None:

@@ -73,6 +73,8 @@ def _threatened(board: chess.Board, sq: chess.Square, me: chess.Color) -> bool:
     """My newly attacked piece on `sq` is really in danger: undefended, or worth more than its
     cheapest attacker (this also covers discovered attacks). A king can't take a defended piece."""
     piece = board.piece_at(sq)
+    if piece is None:
+        return False
     if not board.is_attacked_by(me, sq):
         return True
     attackers = [board.piece_at(a) for a in board.attackers(not me, sq)]

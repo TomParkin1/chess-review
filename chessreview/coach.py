@@ -44,9 +44,11 @@ endgame items against the endgame share too), so no progress is lost.
 
 import json
 import sqlite3
+from collections.abc import Set as AbstractSet
 from datetime import date, datetime
 from itertools import pairwise
 from statistics import mean
+from typing import Any
 
 from . import convert, db, insights, library, session, srs
 from .config import Config
@@ -212,7 +214,7 @@ def build_plan(
     # No endgame to play before the first games are analysed (the first-run screens expect an empty plan).
     key = None if "convert" in skip or not analysed_games(conn) else convert.next_endgame(conn, on)
     task = convert.task_for(conn, key) if key else None
-    if task and drill_seconds(key) <= endgame_s:
+    if task and key and drill_seconds(key) <= endgame_s:
         seconds -= drill_seconds(key)
         endgame_s -= drill_seconds(key)
     else:
@@ -247,7 +249,7 @@ def build_plan(
     real = srs.spread([[g, p, "new"] for g, p in new], [[g, p, "calm"] for g, p in calm])
     waiting = len(due) - len(reviews)
 
-    blocks = [
+    blocks: list[dict[str, Any]] = [
         {
             "id": "reviews",
             "title": "Review",
@@ -276,7 +278,7 @@ def build_plan(
             "items": focus,
             "subtitle": weakness["detail"] if weakness else "",
             "train": weakness["train"] if weakness else None,
-            "calc": bool(weakness) and (weakness["train"] or {}).get("kind") in CALC_KINDS,
+            "calc": weakness is not None and (weakness["train"] or {}).get("kind") in CALC_KINDS,
         },
     ]
     servable = _servable(conn, [i for b in blocks for i in b["items"]])
@@ -473,7 +475,7 @@ def _focus_items(
     taken: set[tuple],
     on: date,
     new_left: int,
-    lib_taken: set[str] = frozenset(),
+    lib_taken: AbstractSet[str] = frozenset(),
 ) -> tuple[dict | None, list[list]]:
     """My #1 weakness that has puzzles, and up to `size` of them: my own mistakes of that kind
     (unsolved first, best lessons first; at most `new_left` never studied, as they become new

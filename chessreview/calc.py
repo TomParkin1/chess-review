@@ -29,6 +29,7 @@ import json
 import random
 import re
 import sqlite3
+from collections.abc import Set as AbstractSet
 from dataclasses import asdict, dataclass
 
 import chess
@@ -231,7 +232,8 @@ def _capture(start, line, final, nxt, subject, rng):
 
 def _where(start, line, final, nxt, subject, rng):
     # Follow each piece from its square in the start position.
-    at = {sq: sq for sq in chess.SquareSet(start.occupied)}  # start square -> where it is now (None: taken)
+    # start square -> where it is now (None: taken)
+    at: dict[chess.Square, chess.Square | None] = {sq: sq for sq in chess.SquareSet(start.occupied)}
     moved: dict[chess.Square, int] = {}
     board = start.copy()
     for u in line:
@@ -271,12 +273,13 @@ def _where(start, line, final, nxt, subject, rng):
         return None
     else:
         o = rng.choice(options)
-    p = start.piece_at(o)
+    p, now = start.piece_at(o), at[o]
+    assert p is not None and now is not None  # tracked(): a piece of the start position, still on the board
     name = f"{'white' if p.color == chess.WHITE else 'black'} {PIECE_NAMES[p.piece_type]}"
     return (
         chess.square_name(o),
         f"After these moves, where is the {name} that starts on {chess.square_name(o)}?",
-        chess.square_name(at[o]),
+        chess.square_name(now),
     )
 
 
@@ -330,7 +333,7 @@ def _game_sources(conn: sqlite3.Connection, rng: random.Random) -> list[str]:
     return [f"game:{r['game_id']}:{r['ply']}" for r in rows if (r["game_id"], r["ply"]) not in planned]
 
 
-def due_question(conn: sqlite3.Connection, exclude: set[str] = frozenset(), on=None) -> Question | None:
+def due_question(conn: sqlite3.Connection, exclude: AbstractSet[str] = frozenset(), on=None) -> Question | None:
     """The most overdue calc card whose question can still be built (its puzzle may be gone)."""
     on = on or srs.today()
     for r in conn.execute(
@@ -358,7 +361,7 @@ def from_key(conn: sqlite3.Connection, key: str) -> Question | None:
 
 
 def new_question(
-    conn: sqlite3.Connection, exclude: set[str] = frozenset(), rng: random.Random | None = None
+    conn: sqlite3.Connection, exclude: AbstractSet[str] = frozenset(), rng: random.Random | None = None
 ) -> Question | None:
     """A question never asked, at my current depth. Kinds take turns (by how many I've answered);
     a kind that can't be made from what's here gives way to the next."""
@@ -382,7 +385,7 @@ def new_question(
     return None
 
 
-def next_question(conn: sqlite3.Connection, exclude: set[str] = frozenset()) -> tuple[Question | None, bool]:
+def next_question(conn: sqlite3.Connection, exclude: AbstractSet[str] = frozenset()) -> tuple[Question | None, bool]:
     """(question, due): a due card first, else a new one."""
     q = due_question(conn, exclude)
     if q is not None:

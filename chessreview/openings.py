@@ -17,14 +17,20 @@ OPENINGS_TSV = Path(__file__).parent / "data" / "openings.tsv"
 MAX_PLIES = 40  # no named line in the database is longer than this
 
 
+def _line(pgn: str) -> chess.pgn.Game:
+    """One line of the openings file (always a valid PGN)."""
+    game = chess.pgn.read_game(io.StringIO(pgn))
+    assert game is not None, pgn
+    return game
+
+
 @lru_cache(maxsize=1)
 def _positions() -> dict[str, tuple[str, str]]:
     """Map EPD -> (eco, name) for the final position of every named line."""
     index = {}
     with open(OPENINGS_TSV, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f, delimiter="\t"):
-            game = chess.pgn.read_game(io.StringIO(row["pgn"]))
-            board = game.end().board()
+            board = _line(row["pgn"]).end().board()
             index[board.epd()] = (row["eco"], row["name"])
     return index
 
@@ -36,7 +42,7 @@ def book_positions() -> frozenset[str]:
     with open(OPENINGS_TSV, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f, delimiter="\t"):
             board = chess.Board()
-            for move in chess.pgn.read_game(io.StringIO(row["pgn"])).mainline_moves():
+            for move in _line(row["pgn"]).mainline_moves():
                 board.push(move)
                 seen.add(board.epd())
     return frozenset(seen)

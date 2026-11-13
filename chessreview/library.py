@@ -356,7 +356,7 @@ def pick_endgames(conn: sqlite3.Connection, n: int, on, exclude: set[str] | None
     another along ENDGAME_ROTATION (where the day starts in it moves daily); a type with nothing
     unseen falls back to any endgame type."""
     exclude = set(exclude or ())
-    out: list[tuple[str, str]] = []
+    out: list[str] = []
     start = on.toordinal() % len(ENDGAME_ROTATION)
     for i in range(n):
         theme = ENDGAME_ROTATION[(start + i) % len(ENDGAME_ROTATION)]

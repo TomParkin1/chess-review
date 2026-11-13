@@ -422,6 +422,19 @@ class AnalysisJob:
         with self._lock:
             self.progress.positions_done += 1
 
+    def _analyse_one(self, engine: chess.engine.SimpleEngine, conn: sqlite3.Connection, task: str, game) -> bool:
+        """Analyse and save one game ("full") or only its threats; False if the job was stopped first."""
+        on_position, stop = self._count_position, self._stop
+        if task == "full":
+            results = analyse_game(engine, game, self.cfg, on_position=on_position, stop=stop)
+            if results is not None:
+                save_game_analysis(conn, game["id"], results)
+            return results is not None
+        threats = analyse_game_threats(engine, game, self.cfg, on_position=on_position, stop=stop)
+        if threats is not None:
+            save_threats(conn, game["id"], threats)
+        return threats is not None
+
     def _worker(self, work: queue.Queue) -> None:
         conn = db.connect(self.cfg.db_path)
         engine = None
@@ -432,21 +445,16 @@ class AnalysisJob:
                     task, game = work.get_nowait()
                 except queue.Empty:
                     break
-                analyse = analyse_game if task == "full" else analyse_game_threats
                 try:
-                    results = analyse(engine, game, self.cfg, on_position=self._count_position, stop=self._stop)
+                    finished = self._analyse_one(engine, conn, task, game)
                 except chess.engine.EngineError as exc:
                     # Engine crashed or misbehaved: note it, restart and carry on.
                     self.progress.errors.append(f"game {game['id']}: {exc}")
                     _quit_quietly(engine)
                     engine = open_engine(self.cfg)
                     continue
-                if results is None:
+                if not finished:  # stopped part-way: nothing saved
                     break
-                if task == "full":
-                    save_game_analysis(conn, game["id"], results)
-                else:
-                    save_threats(conn, game["id"], results)
                 with self._lock:
                     self.progress.games_done += 1
         except Exception as exc:

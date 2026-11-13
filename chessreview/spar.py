@@ -201,11 +201,13 @@ def record(
     reason: str,
 ) -> int:
     with conn:
-        return conn.execute(
+        game_id = conn.execute(
             """INSERT INTO spar_games (source, start_fen, color, elo, elo_offset, moves, result, reason)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (source, fen, color, elo, offset, " ".join(moves), result, reason),
         ).lastrowid
+    assert game_id is not None  # always set after an INSERT
+    return game_id
 
 
 def history(conn: sqlite3.Connection, limit: int = 20) -> dict:

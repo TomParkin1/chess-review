@@ -365,7 +365,9 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
 
 def create_batch(conn: sqlite3.Connection, source: str, label: str) -> int:
     with conn:
-        return conn.execute("INSERT INTO imports (source, label) VALUES (?, ?)", (source, label)).lastrowid
+        batch_id = conn.execute("INSERT INTO imports (source, label) VALUES (?, ?)", (source, label)).lastrowid
+    assert batch_id is not None  # always set after an INSERT
+    return batch_id
 
 
 def finish_batch(conn: sqlite3.Connection, batch_id: int) -> int:

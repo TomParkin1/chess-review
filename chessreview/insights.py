@@ -77,7 +77,8 @@ def fast_move(clocks_ms: str | None, tc: str | None, ply: int) -> bool:
         return False
     spent = report.time_spent(clocks_ms, tc)
     used = spent[ply] if ply < len(spent) else None
-    return used is not None and used < report.fast_move_ms(tc)
+    limit = report.fast_move_ms(tc)
+    return used is not None and limit is not None and used < limit
 
 
 def _ratio(bad: int, moves: int, base_bad: int, base_moves: int) -> float:
@@ -152,9 +153,10 @@ def compute(conn: sqlite3.Connection, time_class: str | None = None, last: int |
 
     # ---- clock: blunders per 100 moves by the share of my time left, and very fast moves (all
     # relative to each game's time control, see report.CLOCK_BUCKETS)
-    bucket_moves, bucket_blunders = Counter(), Counter()
+    bucket_moves: Counter[str] = Counter()
+    bucket_blunders: Counter[str] = Counter()
     fast_moves = fast_blunders = slow_moves = slow_blunders = 0
-    controls = Counter()
+    controls: Counter[str] = Counter()
     for g in games:
         tc = g["time_control"]
         if not g["clocks_ms"] or report.game_budget_ms(tc) is None:
@@ -206,7 +208,7 @@ def compute(conn: sqlite3.Connection, time_class: str | None = None, last: int |
             "label": report.tc_label(usual),
             "low_ms": report.low_clock_ms(usual),
             "fast_ms": report.fast_move_ms(usual),
-            "bucket_ms": [round(share * report.game_budget_ms(usual)) for share, _ in report.CLOCK_BUCKETS[:-1]],
+            "bucket_ms": [round(share * (report.game_budget_ms(usual) or 0)) for share, _ in report.CLOCK_BUCKETS[:-1]],
         },
     }
 
@@ -216,7 +218,7 @@ def compute(conn: sqlite3.Connection, time_class: str | None = None, last: int |
         groups[(g["opening_family"] or "Unknown", g["my_color"])].append(g)
     openings = []
     for (family, color), gs in groups.items():
-        g_accs = [my_accuracy(g) for g in gs if my_accuracy(g) is not None]
+        g_accs = [a for g in gs if (a := my_accuracy(g)) is not None]
         opening_moves = [m for g in gs for m in by_game[g["id"]] if m["phase"] == "opening"]
         openings.append(
             {
@@ -239,7 +241,7 @@ def compute(conn: sqlite3.Connection, time_class: str | None = None, last: int |
     colors = []
     for color in ("white", "black"):
         gs = [g for g in games if g["my_color"] == color]
-        g_accs = [my_accuracy(g) for g in gs if my_accuracy(g) is not None]
+        g_accs = [a for g in gs if (a := my_accuracy(g)) is not None]
         colors.append(
             {
                 "color": color,
@@ -325,7 +327,7 @@ def endgames(conn: sqlite3.Connection, games: list[sqlite3.Row], by_game: dict) 
         moves = [m for m in by_game[g["id"]] if m["phase"] == "endgame"]
         if moves:
             first[g["id"]] = min(moves, key=lambda m: m["ply"])
-    fens = {}
+    fens: dict[int, str] = {}  # game -> its first endgame position
     keys = [(gid, m["ply"]) for gid, m in first.items()]
     for chunk in range(0, len(keys), 400):
         part = keys[chunk : chunk + 400]

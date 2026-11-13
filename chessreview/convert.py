@@ -123,11 +123,13 @@ def endgame_overview(conn: sqlite3.Connection) -> list[dict]:
     tasks = endgames()
     solved: dict[int, list[bool]] = {}
     for t in tasks:
-        solved.setdefault(t.level, []).append(_status(cards.get(t.card_key)) in ("solved", "mastered"))
+        solved.setdefault(t.level or 0, []).append(_status(cards.get(t.card_key)) in ("solved", "mastered"))
     unlocked = 1
     while all(solved.get(unlocked, [False])) and unlocked + 1 in solved:
         unlocked += 1
-    return [{**t.as_dict(), "unlocked": t.level <= unlocked, "status": _status(cards.get(t.card_key))} for t in tasks]
+    return [
+        {**t.as_dict(), "unlocked": (t.level or 0) <= unlocked, "status": _status(cards.get(t.card_key))} for t in tasks
+    ]
 
 
 def _status(card: sqlite3.Row | None) -> str:

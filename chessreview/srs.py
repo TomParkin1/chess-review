@@ -253,7 +253,8 @@ def calm_positions(
         ORDER BY m.game_id, m.ply""",
         (cfg.coach.recent_games,),
     ).fetchall()
-    threatened, quiet = [], []
+    threatened: list[tuple[int, int]] = []  # (game, ply)
+    quiet: list[tuple[int, int]] = []
     for r in rows:
         if (r["game_id"], r["ply"]) in exclude:
             continue

@@ -264,7 +264,7 @@ class LiveEngine:
         reaches the judging or streaming engines. Options are set on every move (games at different
         levels share the process). Below Stockfish's floor a `swap` share of moves is replaced:
         'top5' = a random one of its five best, 'random' = any legal move."""
-        rng = rng or random
+        rng = rng or random.Random()
         with self._spar_lock:
             if self._spar_engine is None:
                 self._spar_engine = open_engine(self.cfg, threads=1)
@@ -277,7 +277,10 @@ class LiveEngine:
                     candidates = [i["pv"][0] for i in infos if i.get("pv")]
                     if candidates:
                         return rng.choice(candidates)
-                return self._spar_engine.play(board, limit).move
+                move = self._spar_engine.play(board, limit).move
+                if move is None:
+                    raise chess.engine.EngineError("Stockfish returned no move")
+                return move
             except chess.engine.EngineError:
                 _quit(self._spar_engine)
                 self._spar_engine = None
@@ -298,7 +301,7 @@ def _quit(engine: chess.engine.SimpleEngine | None) -> None:
             engine.quit()
 
 
-def _line_json(board: chess.Board, info: dict) -> dict:
+def _line_json(board: chess.Board, info: chess.engine.InfoDict) -> dict:
     score = info["score"].white()
     pv = info["pv"][:12]
     return {

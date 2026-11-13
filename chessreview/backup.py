@@ -158,7 +158,7 @@ def daily(db_path: Path | str, keep: BackupConfig = BackupConfig(), now: datetim
     finally:
         conn.close()
     week = now.isocalendar()[:2]
-    if not any(b.kind == "weekly" and b.at.isocalendar()[:2] == week for b in existing):
+    if path is not None and not any(b.kind == "weekly" and b.at.isocalendar()[:2] == week for b in existing):
         shutil.copy2(path, folder / f"chess-weekly-{now:{STAMP}}.db")  # a finished single file
     rotate(folder, keep)
     return path
@@ -207,8 +207,9 @@ def restore(conn: sqlite3.Connection, source: Path, max_version: int) -> Path | 
             before = make(conn, "before-restore")
         except sqlite3.DatabaseError:  # the current database is unreadable: keep the raw file
             current = file_of(conn)
-            before = _new_path(folder_for(current), "before-restore", None) if current else None
-            if before:
+            before = None
+            if current is not None:
+                before = _new_path(folder_for(current), "before-restore", None)
                 shutil.copy2(current, before)
         src = sqlite3.connect(source)
         try:
