@@ -99,6 +99,11 @@ def test_each_rating_band_starts_exactly_at_its_lower_bound(below, inaccuracy, m
     assert inside.band.endswith(f"–{below - 1}")
 
 
+def test_the_top_band_has_no_upper_bound():
+    top = thresholds_for(10_000, load_config(), adaptive=True)
+    assert (top.inaccuracy, top.mistake, top.blunder) == ADAPTIVE_BANDS[-1][1:]
+
+
 @pytest.mark.parametrize(
     "drop, expected",
     [(0.099, "good"), (0.10, "inaccuracy"), (0.199, "inaccuracy"), (0.20, "mistake"), (0.30, "blunder")],
