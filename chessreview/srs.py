@@ -65,7 +65,7 @@ def ensure_cards(conn: sqlite3.Connection, cfg: Config) -> int:
         cur = conn.execute(f"""
             INSERT OR IGNORE INTO cards (kind, game_id, ply)
             SELECT 'mistake', m.game_id, m.ply FROM mistakes m
-            WHERE m.is_mine = 1 AND m.judgement IN ({_judgements(cfg)})
+            WHERE m.is_mine = 1 AND m.judgement IN ({judgements_sql(cfg)})
         """)
     return cur.rowcount
 
@@ -140,7 +140,8 @@ def queue(conn: sqlite3.Connection, cfg: Config, on: date | None = None, new_lim
     return {"due": due_cards(conn, cfg, on), "new": new_cards(conn, cfg, new_limit)}
 
 
-def _judgements(cfg: Config) -> str:
+def judgements_sql(cfg: Config) -> str:
+    """The judgements that become training cards, as an SQL list: "'mistake', 'blunder'"."""
     return "'mistake', 'blunder'" + (", 'inaccuracy'" if cfg.training.include_inaccuracies else "")
 
 
@@ -156,7 +157,7 @@ def due_cards(conn: sqlite3.Connection, cfg: Config, on: date) -> list[tuple]:
         SELECT c.id, c.game_id, c.ply, c.box, c.due_on, {PUZZLE_VALUE} AS value
         FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
         WHERE c.mastered_on IS NULL AND c.due_on IS NOT NULL AND c.due_on <= ?
-          AND ((c.kind = 'mistake' AND m.judgement IN ({_judgements(cfg)})) OR c.kind = 'position')""",
+          AND ((c.kind = 'mistake' AND m.judgement IN ({judgements_sql(cfg)})) OR c.kind = 'position')""",
         (day,),
     ).fetchall()
     library = conn.execute(
@@ -178,7 +179,7 @@ def new_cards(conn: sqlite3.Connection, cfg: Config, limit: int, exclude: set | 
         f"""
         SELECT c.game_id, c.ply FROM cards c JOIN mistakes m ON m.game_id = c.game_id AND m.ply = c.ply
         WHERE c.kind = 'mistake' AND c.due_on IS NULL AND c.mastered_on IS NULL
-          AND m.judgement IN ({_judgements(cfg)}) AND m.decided = 0
+          AND m.judgement IN ({judgements_sql(cfg)}) AND m.decided = 0
           AND c.game_id NOT IN ({OPEN_SESSION_GAMES})
         ORDER BY {PUZZLE_VALUE} DESC LIMIT ?""",
         (limit + len(exclude),),

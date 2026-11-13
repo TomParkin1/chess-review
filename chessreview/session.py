@@ -18,7 +18,7 @@ import sqlite3
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import db, insights, report
+from . import db, insights, report, srs
 from .config import Config
 
 SELF_REVIEW_TOLERANCE = 2  # plies: my move right before or after the turning point also counts
@@ -76,7 +76,7 @@ def status(conn: sqlite3.Connection, cfg: Config) -> dict:
     puzzles = conn.execute(
         f"""
         SELECT COUNT(*) FROM mistakes m JOIN games g ON g.id = m.game_id
-        WHERE g.batch_id IN ({marks}) AND m.is_mine = 1 AND m.judgement IN ({_judgements(cfg)})""",
+        WHERE g.batch_id IN ({marks}) AND m.is_mine = 1 AND m.judgement IN ({srs.judgements_sql(cfg)})""",
         ids,
     ).fetchone()[0]
     return {"open": True, "batch_ids": ids, "games": games["n"], "analysed": games["analysed"] or 0, "puzzles": puzzles}
@@ -85,7 +85,7 @@ def status(conn: sqlite3.Connection, cfg: Config) -> dict:
 def puzzle_where(cfg: Config, batch_ids: list[int]) -> tuple[str, list]:
     """WHERE clause (for the mistakes query in web.py) selecting this session's puzzles."""
     marks = ",".join("?" * len(batch_ids))
-    return (f"g.batch_id IN ({marks}) AND m.judgement IN ({_judgements(cfg)})", list(batch_ids))
+    return (f"g.batch_id IN ({marks}) AND m.judgement IN ({srs.judgements_sql(cfg)})", list(batch_ids))
 
 
 def turning_point(conn: sqlite3.Connection, game_id: int) -> sqlite3.Row | None:
@@ -247,7 +247,3 @@ def summary(conn: sqlite3.Connection, cfg: Config, batch_ids: list[int]) -> dict
         "worst_game": worst,
         "self_review": self_review_rate(conn, [g["id"] for g in games]),
     }
-
-
-def _judgements(cfg: Config) -> str:
-    return "'mistake', 'blunder'" + (", 'inaccuracy'" if cfg.training.include_inaccuracies else "")
