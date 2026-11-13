@@ -1,7 +1,7 @@
 """Command line interface.
 
     python -m chessreview sync [--since all|3m|1m]
-    python -m chessreview import FILE_OR_DIR [...]
+    python -m chessreview import FILE_OR_DIR [...] [--as NAME]
     python -m chessreview summary
     python -m chessreview analyse [--limit N]
     python -m chessreview reclassify
@@ -48,6 +48,16 @@ def cmd_sync(conn: sqlite3.Connection, cfg, args) -> None:
 
 
 def cmd_import(conn: sqlite3.Connection, cfg, args) -> None:
+    if args.player:
+        current = db.username(conn, cfg)
+        if not current:
+            db.set_meta(conn, db.USERNAME_KEY, args.player)
+            conn.commit()
+        elif current.lower() != args.player.lower():
+            sys.exit(f"The player is already {current!r}; change it in Settings to import {args.player!r}'s games.")
+    elif not db.username(conn, cfg):
+        sys.exit("Whose games are these? Pass --as YOUR_NAME (as it appears in the PGN), "
+                 "or set your chess.com username in the web app.")
     stats = import_paths(conn, [Path(p) for p in args.paths], cfg)
     print(f"Files read:   {stats.files}")
     print(f"Games seen:   {stats.games_seen}")
@@ -291,6 +301,8 @@ def main() -> None:
 
     p = sub.add_parser("import", help="import PGN files or directories of PGN files")
     p.add_argument("paths", nargs="+")
+    p.add_argument("--as", dest="player", metavar="NAME",
+                   help="your name in these games (sets the player when none is set yet)")
     p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("summary", help="print a summary of imported games")
