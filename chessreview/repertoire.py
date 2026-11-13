@@ -94,7 +94,7 @@ def _stamp(conn: sqlite3.Connection) -> tuple:
     classify_game always inserts fresh mistakes rows, so their max rowid grows."""
     return tuple(
         conn.execute("""SELECT (SELECT COUNT(*) FROM games), (SELECT MAX(id) FROM games),
-                                        (SELECT MAX(analysed_at) FROM games), (SELECT MAX(rowid) FROM mistakes)""").fetchone()
+                               (SELECT MAX(analysed_at) FROM games), (SELECT MAX(rowid) FROM mistakes)""").fetchone()
     )
 
 

@@ -2,7 +2,8 @@
 
 Start positions come from my games: per game, the first middlegame position that was equal or
 better for me (from -EQUAL_CP up to, not including, "clearly winning": those are Convert's) and
-the first endgame position that was equal or better, newest games first. The standard starting position (either colour) or any FEN works too.
+the first endgame position that was equal or better, newest games first. The standard starting
+position (either colour) or any FEN works too.
 
 Strength (`strength`): my current rating (level.current_rating) plus an offset I choose
 (OFFSETS, saved in meta `spar_offset`). Stockfish limits itself with UCI_LimitStrength /

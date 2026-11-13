@@ -50,7 +50,8 @@ def conn(tmp_path):
     c = db.connect(tmp_path / "s.db")
     c.execute("""INSERT INTO games (id, dedupe_key, white, black, my_color, my_result, date, moves_uci, num_plies, pgn,
                                     analysed_at, end_time)
-                 VALUES (1, 'k1', 'me', 'opp', 'white', 'loss', '2026-10-01', '', 60, '', '2026-10-01', '2026-10-01')""")
+                 VALUES (1, 'k1', 'me', 'opp', 'white', 'loss', '2026-10-01', '', 60, '', '2026-10-01',
+                         '2026-10-01')""")
     rows = [  # ply, phase, my eval (White = me), FEN (White to move)
         (18, "middlegame", -300, START),
         (20, "middlegame", 900, START),

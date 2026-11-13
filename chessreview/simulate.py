@@ -3,8 +3,9 @@
 `run()` plays day after day on a database (always a copy: `simulate_copy`): it builds Today's
 plan with the real planner (coach.today_plan) and answers every item at my own rates from my
 training history (`rates`), the way the app would record them: review results, library attempts,
-the endgame played on the Convert page (an essential endgame or a won position), plus the "Again" retry of a failed puzzle at the end of its
-block. Some days are skipped, as in real life. Each day reports what was due, what the plan
+the endgame played on the Convert page (an essential endgame or a won position), plus the "Again"
+retry of a failed puzzle at the end of its block. Some days are skipped, as in real life. Each day
+reports what was due, what the plan
 held, how long it took at my pace and how many due reviews had to wait (the backlog).
 
     python -m chessreview simulate --days 90 --budget 20

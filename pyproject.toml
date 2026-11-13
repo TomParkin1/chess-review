@@ -52,8 +52,6 @@ skip-magic-trailing-comma = true
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
-# Temporary while the code is reformatted to 120 columns (removed in the lint-and-types change).
-ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 split-on-trailing-comma = false

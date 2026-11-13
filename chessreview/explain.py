@@ -801,7 +801,9 @@ HINTS = {
     "hanging_piece": "Make sure none of your pieces is left undefended.",
     "loses_material": "Your move lost material. Check every capture your opponent has.",
     "king_safety": "Keep your king safe: which checks does your opponent have?",
-    "missed_opportunity": "You're clearly better here. Find the move that keeps the advantage, often the most forcing one.",
+    "missed_opportunity": (
+        "You're clearly better here. Find the move that keeps the advantage, often the most forcing one."
+    ),
     "positional": "Before moving, ask what your opponent wants to do next.",
 }
 
