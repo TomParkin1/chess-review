@@ -1109,7 +1109,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         """Settings -> Back up now."""
         path = backup.make(conn(), "manual", _backups_folder())
         backup.rotate(_backups_folder(), cfg.backup)
-        return jsonify(backup=path.name if path else None)  # None: an in-memory database
+        return jsonify(backup=path.name if path else None)  # make() returns None only without a folder
 
     @app.post("/api/backups/restore")
     def backups_restore():

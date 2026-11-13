@@ -63,7 +63,7 @@ def open_batches(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def status(conn: sqlite3.Connection, cfg: Config) -> dict:
-    """The current new-games session: its games, what is left to do and the summary when done."""
+    """The open new-games session: its batches, games, how many are analysed and its puzzles."""
     expire(conn, cfg)
     batches = open_batches(conn)
     ids = [b["id"] for b in batches]

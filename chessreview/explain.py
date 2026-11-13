@@ -298,7 +298,7 @@ def san_line(board: chess.Board, line: list[chess.Move], plies: int = 4) -> str:
 
 
 def describe_material(points: int) -> str:
-    """A number of pawns in words: 'a pawn', 'a piece', 'a rook', ..."""
+    """A number of pawns in words: 'a pawn', 'two pawns', 'a piece', ..."""
     if points <= 1:
         return "a pawn"
     if points == 2:

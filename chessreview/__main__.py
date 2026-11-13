@@ -56,7 +56,7 @@ def _set_player(conn: sqlite3.Connection, name: str) -> None:
 
 
 def cmd_import(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
-    """Import PGN files or folders, naming the player with --as when none is set."""
+    """Import PGN files or folders; --as names the player while no games are stored yet."""
     before = db.username(conn, cfg)
     switching = bool(args.player) and args.player.lower() != before.lower()
     if switching:
@@ -236,7 +236,7 @@ def _print_progress(job: AnalysisJob) -> None:
 
 
 def cmd_serve(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
-    """Run the web app on 127.0.0.1 with hourly backups until Ctrl+C."""
+    """Run the web app on 127.0.0.1 until Ctrl+C, keeping a daily backup (checked hourly)."""
     from .web import create_app  # Flask is only needed for the web app
 
     refresh(conn, cfg)  # new games now; a full rebuild (new thresholds or version) in the background

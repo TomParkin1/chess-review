@@ -84,7 +84,7 @@ class Question:
 
 
 def level(conn: sqlite3.Connection) -> int:
-    """My current line length in plies (one of LEVELS)."""
+    """My current level (a key of LEVELS, which maps it to the line length in plies)."""
     stored = db.get_meta(conn, LEVEL_KEY)
     return int(stored) if stored and stored.isdigit() and int(stored) in LEVELS else 1
 
