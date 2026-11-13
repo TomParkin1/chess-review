@@ -117,3 +117,11 @@ def test_a_bad_config_stops_the_cli_with_its_message(no_config, monkeypatch):
     (no_config / "config.toml").write_text("not = [valid")
     with pytest.raises(SystemExit, match="isn't valid TOML"):
         run(monkeypatch, "summary")
+
+
+def test_import_as_a_name_with_no_games_leaves_the_player_unset(no_config, monkeypatch, capsys):
+    """A typo in --as used to stick, and then refused the right name."""
+    run(monkeypatch, "import", str(SAMPLES), "--as", "Sample Playr")
+    assert "player is unchanged" in capsys.readouterr().out
+    run(monkeypatch, "import", str(SAMPLES), "--as", "sample player")         # names match in any case
+    assert "Imported:     5" in capsys.readouterr().out

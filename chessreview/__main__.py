@@ -47,18 +47,28 @@ def cmd_sync(conn: sqlite3.Connection, cfg, args) -> None:
         print("Run 'analyse' (or open the web app) to analyse them.")
 
 
+def _set_player(conn: sqlite3.Connection, name: str) -> None:
+    with conn:
+        if name:
+            db.set_meta(conn, db.USERNAME_KEY, name)
+        else:
+            conn.execute("DELETE FROM meta WHERE key = ?", (db.USERNAME_KEY,))
+
+
 def cmd_import(conn: sqlite3.Connection, cfg, args) -> None:
-    if args.player:
-        current = db.username(conn, cfg)
-        if not current:
-            db.set_meta(conn, db.USERNAME_KEY, args.player)
-            conn.commit()
-        elif current.lower() != args.player.lower():
-            sys.exit(f"The player is already {current!r}; change it in Settings to import {args.player!r}'s games.")
-    elif not db.username(conn, cfg):
+    before = db.username(conn, cfg)
+    switching = bool(args.player) and args.player.lower() != before.lower()
+    if switching:
+        if before and conn.execute("SELECT 1 FROM games LIMIT 1").fetchone():
+            sys.exit(f"The player is already {before!r}; change it in Settings to import {args.player!r}'s games.")
+        _set_player(conn, args.player)
+    elif not before:
         sys.exit("Whose games are these? Pass --as YOUR_NAME (as it appears in the PGN), "
                  "or set your chess.com username in the web app.")
     stats = import_paths(conn, [Path(p) for p in args.paths], cfg)
+    if switching and not (stats.imported or stats.duplicates):
+        _set_player(conn, before)      # none of their games here (a typo?): keep the player as it was
+        print(f"No games of {args.player!r} found, so the player is unchanged.")
     print(f"Files read:   {stats.files}")
     print(f"Games seen:   {stats.games_seen}")
     print(f"Imported:     {stats.imported}")
