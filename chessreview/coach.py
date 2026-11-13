@@ -56,7 +56,6 @@ from .config import Config
 PLAN_KEY = "today_plan"
 BUDGET_KEY = "today_budget"
 BUDGETS = (10, 20, 30)  # minutes offered on the Today page
-FOCUS_JUDGEMENTS = ("mistake", "blunder")
 
 PLAN_VERSION = 3  # 2: no opening block, endgame blocks (E2); 3: focus `calc` link (E6)
 ENDGAME_SHARE = 0.30  # endgames take this share of the budget

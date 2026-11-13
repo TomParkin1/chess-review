@@ -36,8 +36,6 @@ CLASSIFY_VERSION = 6  # bump when judge() logic changes so stored judgements are
 # after the move often can't see the slower mate (it is usually still there), and +7 still wins.
 LONG_MATE = 5
 
-JUDGEMENTS = ("good", "inaccuracy", "mistake", "blunder")
-
 
 @dataclass(frozen=True)
 class Eval:
