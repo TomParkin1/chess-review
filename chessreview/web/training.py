@@ -166,7 +166,7 @@ def today_block(block_id: str) -> ResponseReturnValue:
     attempted = coach.attempted_today(c, srs.today())
     blind = request.args.get("blind", "1" if cfg.training.blind else "0") == "1"
     mode = {"reviews": "blind" if blind else None, "real": "blind"}.get(block_id)
-    items = items_for(c, coach.block_items(plan, block_id))
+    items = items_for(c, cfg, coach.block_items(plan, block_id))
     for item in items:
         if item.get("mode") == "library":
             item["done_today"] = ("lib", item["puzzle_id"]) in attempted

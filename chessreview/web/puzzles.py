@@ -10,7 +10,6 @@ from ..config import Config
 from ..explain import ATTACKING_KINDS, MoveContext, explain_best, hint, san_line
 from ..live import PositionAnalysis
 from ..threats import Threat, training_threat
-from .common import config
 
 # Latest review result for a mistake row `m` (NULL if never attempted).
 
@@ -139,10 +138,9 @@ def calm_hint(threat: Threat | None) -> str:
     return "No tricks here: look for a solid, useful move that keeps everything protected."
 
 
-def items_for(c: sqlite3.Connection, keyed: list[tuple[tuple, str]]) -> list[dict]:
+def items_for(c: sqlite3.Connection, cfg: Config, keyed: list[tuple[tuple, str]]) -> list[dict]:
     """Puzzle items for ((game_id, ply) | ("lib", puzzle_id), tag) pairs, in the given order,
     tagged due/new/calm/focus."""
-    cfg = config()
     mine = [k for k, _ in keyed if k[0] != "lib"]
     by_key: dict = {}
     if mine:

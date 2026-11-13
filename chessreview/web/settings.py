@@ -120,7 +120,9 @@ def library_next() -> ResponseReturnValue:
     n = min(max(request.args.get("n", 10, type=int) or 10, 1), 50)
     ids = library.pick(c, n, themes)
     return jsonify(
-        items=items_for(c, [(("lib", i), "library") for i in ids]), rating=library.rating(c), count=library.count(c)
+        items=items_for(c, config(), [(("lib", i), "library") for i in ids]),
+        rating=library.rating(c),
+        count=library.count(c),
     )
 
 

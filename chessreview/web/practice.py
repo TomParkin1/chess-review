@@ -120,7 +120,9 @@ def mistakes() -> ResponseReturnValue:
         }
         items = [by_key[(r["game_id"], r["ply"])] for r in hits]
     else:
-        items = items_for(c, [((r["game_id"], r["ply"]), "practice") for r in hits[: min(max(0, limit), MAX_LIMIT)]])
+        items = items_for(
+            c, cfg, [((r["game_id"], r["ply"]), "practice") for r in hits[: min(max(0, limit), MAX_LIMIT)]]
+        )
     return jsonify(
         total=len(hits),
         keys=[f"{r['game_id']}:{r['ply']}" for r in hits],
@@ -142,7 +144,7 @@ def mistake_items() -> ResponseReturnValue:
             keyed.append(((int(game_id), int(ply)), "practice"))
     c = conn()
     refresh(c, cfg)
-    return jsonify(items=items_for(c, keyed))
+    return jsonify(items=items_for(c, cfg, keyed))
 
 
 @bp.post("/api/judge")
