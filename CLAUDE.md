@@ -4,9 +4,9 @@ Local Flask + CLI app: imports chess.com games (API or PGN), analyses them with 
 mistakes and trains on them. How it fits together: [docs/architecture.md](docs/architecture.md).
 
 ## Commands
-- Install: `python -m venv .venv && .venv/bin/pip install -e ".[dev]"` (Python 3.14+, Stockfish on PATH or `STOCKFISH_PATH`)
+- Install: `python3.14 -m venv .venv && .venv/bin/pip install -e ".[dev]"` (Python 3.14+, Stockfish on PATH or `STOCKFISH_PATH`)
 - Run: `.venv/bin/chessreview serve` (port 8000), CLI `.venv/bin/chessreview --help`
-- Try it: `chessreview import samples --as "Sample Player" && chessreview analyse`
+- Try it: `.venv/bin/chessreview import samples --as "Sample Player" && .venv/bin/chessreview analyse`
 - Test: `.venv/bin/pytest` (about 45 s with Stockfish); `CHESSREVIEW_FAKE_ENGINE=1 .venv/bin/pytest` (about 13 s)
 - Opt-in, real Stockfish, minutes: `CHESSREVIEW_PLAYOUTS=1 .venv/bin/pytest tests/test_endgame_playouts.py`,
   `CHESSREVIEW_CALIBRATION=1 .venv/bin/pytest tests/test_spar_calibration.py`

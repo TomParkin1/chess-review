@@ -1,15 +1,15 @@
 # Chess Review
 
 **Turn your chess.com games into training: every move checked by Stockfish, every mistake explained in plain
-English, and a daily workout built from your own games. Runs entirely on your machine.**
+English, and a daily workout built from your own games. Runs locally; your games stay on your machine.**
 
 [![CI](https://github.com/TomParkin1/chess-review/actions/workflows/ci.yml/badge.svg)](https://github.com/TomParkin1/chess-review/actions/workflows/ci.yml)
 [![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue)](LICENSE)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue)](pyproject.toml)
 
-<!-- Screenshot placeholder: add docs/screenshot.png (the Game Report or Practice page) and uncomment:
-![Practice: a mistake from one of your games, as a puzzle](docs/screenshot.png)
--->
+*Screenshot to come: the Practice page, with a mistake from one of your games as a puzzle.*
+<!-- Add docs/screenshot.png and replace the line above with:
+![Practice: a mistake from one of your games, as a puzzle](docs/screenshot.png) -->
 
 Lichess can analyse one game at a time. Chess Review imports all of your games at once (from chess.com's public
 API or PGN files), analyses them in parallel, and then works on them with you.
@@ -36,7 +36,7 @@ API or PGN files), analyses them in parallel, and then works on them with you.
   - spar against Stockfish at about your rating, from your own positions
   - a calculation trainer
   - an opening repertoire explorer
-  - about 19k Lichess puzzles with your own puzzle rating
+  - a sample of about 20–25k Lichess puzzles, with your own puzzle rating
 - **Insights and Progress:** trends, accuracy by phase, clock use, openings and endgames; your top weaknesses,
   each with "Train this"; your recent games compared with the ones before.
 - **Yours:** a SQLite file on your machine, automatic daily backups, and the web server only listens on
@@ -62,8 +62,9 @@ python3 -m venv .venv           # needs python3 --version >= 3.14; otherwise nam
 On Windows, use `py -3.14 -m venv .venv` and run the commands from `.venv\Scripts\` (for example
 `.venv\Scripts\chessreview serve`).
 
-`--as` tells the app whose games these are. With your own games you don't need it: on first run, the web app
-asks for your chess.com username and how much history to sync.
+`--as` tells the app whose games these are. When you're ready for your own games, delete the `data` folder
+(it only holds the samples at this point) and run `chessreview serve` again: on first run, the web app asks for
+your chess.com username and how much history to sync.
 
 ## Installing Stockfish
 
@@ -75,7 +76,7 @@ asks for your chess.com username and how much history to sync.
 | Arch | `sudo pacman -S stockfish` |
 | Windows | Download it from [stockfishchess.org/download](https://stockfishchess.org/download/), unzip it, and set `STOCKFISH_PATH` to the `.exe` |
 
-The app looks for Stockfish in this order, and the first match wins:
+The app looks for Stockfish in this order (a path you set must exist; it doesn't fall through to the next):
 1. `--stockfish PATH`
 2. the `STOCKFISH_PATH` environment variable
 3. `[engine] path` in `config.toml`
@@ -117,14 +118,14 @@ Global options: `--config FILE` and `--stockfish PATH`.
 ## Configuration
 
 Settings are read from `--config FILE`, else `$CHESSREVIEW_CONFIG`, else `config.toml` in the current folder.
-Every setting has a default, so the file is optional. The repository's [`config.toml`](config.toml) lists them
-all with comments.
+The repository's [`config.toml`](config.toml) lists every setting with comments; the defaults below are its
+values. Without a config file the built-in defaults apply, which are the same except that `max_depth` is 0.
 
 | Setting | Default | What it does |
 |---|---|---|
 | `[engine] path` | (found automatically) | Stockfish executable |
-| `[engine] time_per_position` / `max_depth` | 0.3 s / no cap | how long Stockfish looks at each position |
-| `[engine] workers` | about ⅔ of your CPU cores | Stockfish processes run in parallel |
+| `[engine] time_per_position` / `max_depth` | 0.3 s / 20 (0 = no cap) | how long Stockfish looks at each position |
+| `[engine] workers` | about ⅔ of your CPU cores, at most 10 | Stockfish processes run in parallel |
 | `[classification] adaptive` | `true` | thresholds follow the mover's rating; Settings can switch to fixed ones |
 | `[training] new_per_day` | 10 | new mistakes introduced into training each day |
 | `[coach] budget_minutes` | 20 | default length of the daily plan |
@@ -149,7 +150,7 @@ PGN / chess.com ─► import ─► Stockfish analysis ─► classification �
 | `chessreview/convert.py`, `tablebase.py`, `spar.py`, `calc.py`, `library.py`, `repertoire.py` | the training modes |
 | `chessreview/insights.py`, `progress.py` | statistics and weaknesses |
 | `chessreview/db.py`, `backup.py` | SQLite schema, migrations and backups |
-| `chessreview/web/` | Flask app factory and one blueprint per area of the JSON API |
+| `chessreview/web/` | Flask app factory, one blueprint per area of the JSON API, and shared helpers |
 | `chessreview/static/`, `templates/` | the front end: plain ES modules, no build step |
 
 [docs/architecture.md](docs/architecture.md) covers each part in more depth.
@@ -163,7 +164,7 @@ on measurements or intentions that aren't visible in the code itself. -->
   - Stockfish's evaluations are stored per position, from White's point of view.
   - Judgements, explanations, marks and accuracy are computed from them and can be rebuilt at any time. A
     fingerprint of the settings triggers this when thresholds or explanation rules change.
-  - Analysis is the slow part (seconds per game); classification takes milliseconds.
+  - Analysis is the slow part (tens of seconds of engine time per game); classification is near instant.
 - **Judge by win chance, not centipawns.**
   - Losing 300 centipawns matters when the game is level and barely matters when you are a queen up.
   - Moves are judged by the drop in win chance, using Lichess's curve and mate rules.
@@ -171,15 +172,15 @@ on measurements or intentions that aren't visible in the code itself. -->
   - Rule kept throughout: nothing is tuned to one rating.
 - **Many single-threaded engines.**
   - Analysis runs one single-threaded Stockfish per worker rather than a few multi-threaded ones.
-  - <!-- confirm --> On the author's machine this analysed about twice as many positions per second at the same
-    depth.
+  - <!-- confirm --> Measured during development on a 12-core Mac: about twice as many positions per second as
+    four 2-thread engines, reaching the same depth on hard positions.
 - **Rule-based explanations, checked against the engine.**
   - Explanations come from an ordered list of rules (first match wins), not a language model, so they are
     deterministic, testable and free to run.
   - Because the stored lines come from short searches, every material claim is checked against the evaluation
     before it is made.
-  - <!-- confirm --> An audit against deeper analysis cut wrong explanations in the sample checked from 13/40
-    to 0.
+  - <!-- confirm --> Checked during development against a deeper Stockfish search: wrong reasons in a sample of
+    40 explanations went from 13 to 0 after these checks (and 2/20 to 0 on positions held out).
 - **SQLite with numbered migrations.**
   - One file, no server, easy to back up.
   - Migrations are append-only functions tracked by `PRAGMA user_version`.
@@ -208,8 +209,9 @@ CHESSREVIEW_FAKE_ENGINE=1 .venv/bin/pytest        # ~13 s, with a tiny fake engi
 - **Opt-in suites with real Stockfish:**
   - `CHESSREVIEW_PLAYOUTS=1`: every endgame won or held by strong play
   - `CHESSREVIEW_CALIBRATION=1`: sparring strength measured in engine matches
-- **CI:** runs lint, types and tests on Linux, macOS and Windows with Python 3.14 and 3.15. It also follows the
-  quickstart above with real Stockfish.
+- **CI:** lint, formatting and types on Linux; the tests on Linux, macOS and Windows with Python 3.14 and 3.15;
+  a check that the built wheel installs; and the sample-game import, analysis and `mistakes` from the quickstart
+  with real Stockfish.
 
 Contributions are welcome: open an issue first for anything large. Use Conventional Commits, and make sure the
 commands above pass before opening a pull request.
@@ -231,13 +233,13 @@ commands above pass before opening a pull request.
   quick analysis that is wrong doesn't become a lesson.
 - Serve the front-end libraries locally so the app works fully offline.
 - Sync from the Lichess API as well as chess.com.
-- A screenshot or short GIF in this README.
 
 ## Credits
 
 - [Stockfish](https://stockfishchess.org/) for analysis.
 - [python-chess](https://python-chess.readthedocs.io/), [chessground](https://github.com/lichess-org/chessground)
   and [chess.js](https://github.com/jhlywa/chess.js).
+- **Pieces:** the cburnett set by Colin M.L. Burnett (via chessground's stylesheet; GPLv2+ / CC BY-SA).
 - **Opening names:** [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings) (CC0).
 - **Puzzles:** the [Lichess puzzle database](https://database.lichess.org/#puzzles) (CC0).
 - **Endgame verdicts:** the [Lichess tablebase API](https://github.com/lichess-org/lila-tablebase) (Syzygy).

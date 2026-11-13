@@ -6,7 +6,7 @@ How Chess Review is put together, for anyone changing it. The README covers inst
 
 ```
 PGN files / chess.com API
-        │  pgn_import.py, chesscom.py      (dedupe, my colour and result, clocks)
+        │  pgn_import.py, chesscom.py      (dedupe, the player's colour and result, clocks)
         ▼
      games ──► engine.py ──► positions       (Stockfish evals, MultiPV 2, null-move "threats")
                                  │
@@ -51,7 +51,7 @@ threshold or an explanation rule never re-runs Stockfish.
 
 SQLite in WAL mode, by default `data/chess.db` next to the config file. Main tables:
 
-- `games`: one row per imported game (PGN, moves, my colour and result, clocks, accuracies).
+- `games`: one row per imported game (PGN, moves, the player's colour and result, clocks, accuracies).
 - `positions`: one row per position of an analysed game, with Stockfish's evaluation (White's point of view),
   best move, principal variation, second-best move and the null-move threat.
 - `mistakes`: one row per move, both sides (`is_mine`), with judgement, win-chance drop, kind, explanation,
@@ -94,8 +94,8 @@ without migrating, so it can recover from a broken one.
   4. `stockfish` on PATH
   5. the usual Homebrew, `/usr/local` and Debian/Ubuntu locations
 - `AnalysisJob` runs a pool of single-threaded Stockfish processes (about two thirds of the CPU cores by
-  default), each taking whole games from a queue. Many single-threaded engines were measured to analyse about
-  twice as many positions per second as fewer multi-threaded ones, reaching the same depth on hard positions.
+  default, at most 10), each taking whole games from a queue. Measured during development on a 12-core Mac,
+  this analysed about twice as many positions per second as four 2-thread engines, reaching the same depth.
   A depth cap (`engine.max_depth`) stops easy positions early.
 - Each position gets MultiPV 2 (the gap to the second-best move measures how sharp the position was).
 - On the player's moves there is also a null-move search: the position with the turn passed, to see what the
@@ -112,7 +112,8 @@ without migrating, so it can recover from a broken one.
   that game (`classify.ADAPTIVE_BANDS`). A 900-rated player isn't held to a master's standard; Settings can
   switch to fixed thresholds.
 - **Always good:** forced moves and the engine's own best move.
-- **Rebuilds:** a fingerprint of the thresholds and `explain.VERSION` is stored in `meta`. When it changes,
+- **Rebuilds:** a fingerprint of the thresholds, phase rules, `CLASSIFY_VERSION` and `explain.VERSION` is stored
+  in `meta`. When it changes,
   everything is re-classified from the stored evaluations. The web app does this in a background thread
   (progress in Settings) while requests keep reading the existing rows; each game is replaced in one
   transaction.
@@ -149,8 +150,8 @@ without migrating, so it can recover from a broken one.
   - `simulate` runs this planner over months to check the daily load stays within budget.
 - **Real-game mode:** a threat check first, and calm positions (good moves) mixed in, so the player can't
   assume every position hides a mistake.
-- **New-games session:** after an import, the player first guesses where each lost game turned (the move with
-  the biggest win-chance drop), then reviews the mistakes.
+- **New-games session:** after an import, the player first guesses where each game that went wrong turned (lost,
+  drawn, or with a blunder of theirs; the move with the biggest win-chance drop), then reviews the mistakes.
 - **Convert and essential endgames:**
   - won positions from the player's games and 15 checked endgames are played out against full-strength
     Stockfish
@@ -165,8 +166,8 @@ without migrating, so it can recover from a broken one.
 - **Calculate:** read a line without seeing it played, then answer about the final position. The line gets
   longer with correct answers.
 - **Puzzle library:**
-  - a sample of the Lichess puzzle database, streamed and sampled per rating bucket and theme, about 19k
-    puzzles
+  - a sample of the Lichess puzzle database, streamed and sampled per rating bucket and theme (about 20–25k
+    puzzles); library puzzles are served by the `settings` blueprint, next to the download
   - the player's puzzle rating is an Elo with a large K-factor at first
 - **Design rule:** nothing is tuned to one rating. Values come from the engine, the current rating's band, or
   the player's own data.
@@ -223,7 +224,7 @@ without migrating, so it can recover from a broken one.
   one-move-lookahead UCI engine that is enough for the app's plumbing. Tests that need real strength use
   `real_stockfish`. `CHESSREVIEW_FAKE_ENGINE=1` forces the fake.
 - **No network:** every test runs with outside connections and lookups refused (loopback is allowed). The
-  tablebase and chess.com fetches are stubbed per test.
+  tablebase is stubbed for every test; chess.com fetches are patched in the tests that need them.
 - **Opt-in suites with real Stockfish:**
   - `CHESSREVIEW_PLAYOUTS=1`: every endgame won or held by strong play
   - `CHESSREVIEW_CALIBRATION=1`: sparring strength measured in engine matches
