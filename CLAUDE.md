@@ -140,7 +140,9 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   (moved piece was shielding/guarding). `MoveContext.min_loss` = `classify.Thresholds.min_loss` (1 pawn at 2000+, else 2).
   Regression tests per audit position: `tests/test_explain_report.py` (stored rows embedded).
 - `chessreview/phases.py`: opening/middlegame/endgame.
-- `chessreview/web.py`: Flask app factory `create_app(cfg)`; pages (`/`, `/game/<id>`, `/review`) are thin shells,
+- `chessreview/web/`: Flask app factory `create_app(cfg)` (`__init__.py`) and blueprints `pages`, `games`,
+  `practice`, `training`, `play`, `settings`; shared state `common.AppState` (`app_state()`, `config()`, `conn()`),
+  puzzle items in `puzzles.py`; pages (`/`, `/game/<id>`, `/review`) are thin shells,
   data comes from the JSON API (`/api/upload`, `/api/progress`, `/api/analysis/start|stop`, `/api/games`,
   `/api/game/<id>`, `/api/mistakes?filters` incl. `status` & `last`, `/api/judge`, `/api/review/result`,
   `/api/analyse/stream` (SSE), `/api/account`, `/api/backups` (+ `/restore`, `/export`), `/api/today/refresh`).
@@ -291,9 +293,10 @@ and lets me review them across all games. chess.com username: `sampleplayer`
   closes its EventSource on `done` so it doesn't auto-reconnect) are shared by game view and review.
 - `chessreview/templates/` + `chessreview/static/`: plain ES modules, no build step. chessground 9.2.1 and
   chess.js 1.4.0 via an import map from jsdelivr (see `base.html`). `common.js` has shared helpers.
-- Error and empty states (Finish M1, B11/F6): `/api/*` errors are always JSON `{error}` (web.py error handlers,
-  500s logged). Bad input is a 400/404, never a 500 (E1): request bodies through `web._body()` (a JSON object or 400),
-  numbers through `_int(data, key, default)`, colours `_color()`, FENs `_board()`, move lists `_moves()`;
+- Error and empty states (Finish M1, B11/F6): `/api/*` errors are always JSON `{error}` (web/__init__.py error handlers,
+  500s logged). Bad input is a 400/404, never a 500 (E1): request bodies through `web.common.json_body()` (a JSON object or 400),
+  numbers through `int_field(data, key, default)`, colours `color_field()`, FENs `board_from_fen()`, move lists
+  `moves_field()`;
   `convert.task_for` returns None for a malformed key or a position where it isn't my move; `/api/review/result`
   404s unless the position is my analysed move. `chesscom.Unavailable` (an OSError) = a non-JSON reply (502). `common.js`: `api()` throws `ApiError` (`status`, 0 = server unreachable), `errorState()`,
   `emptyState()`, `guard(where, load, what)` (shows why + Try again), `need(where, url, what)` (data a page can't
