@@ -217,9 +217,11 @@ def cmd_analyse(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace)
     p = job.progress
     print(f"\nAnalysed {p.games_done} of {p.games_total} games.")
     for err in p.errors:
-        print(f"Error: {err}")
+        print(f"Error: {err}", file=sys.stderr)
     n = ensure_classified(conn, cfg)
     print(f"Classified moves in {n} games. Run 'summary' or 'mistakes' to see results.")
+    if p.state == "error":
+        sys.exit(1)
 
 
 def cmd_reclassify(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
