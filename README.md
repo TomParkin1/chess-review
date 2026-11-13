@@ -58,13 +58,14 @@ Stockfish is found on your PATH or in the usual install folders. If yours is els
 ## Try it with the sample games
 
 ```sh
-.venv/bin/chessreview import samples --as SamplePlayer   # five anonymised rapid games
+.venv/bin/chessreview import samples --as "Sample Player"  # five anonymised rapid games
 .venv/bin/chessreview analyse                             # about a minute
 .venv/bin/chessreview mistakes --limit 5
 .venv/bin/chessreview serve                               # then open http://localhost:8000
 ```
 
-`--as` tells the app whose games these are, so no chess.com account is needed.
+`--as` tells the app whose games these are, so no chess.com account is needed. (On Windows the commands are
+in `.venv\Scripts\` instead of `.venv/bin/`.)
 
 ## Running
 

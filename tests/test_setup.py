@@ -88,12 +88,12 @@ def run(monkeypatch, *argv: str) -> None:
 
 
 def test_the_samples_import_as_sample_player(no_config, monkeypatch, capsys):
-    run(monkeypatch, "import", str(SAMPLES), "--as", "SamplePlayer")
+    run(monkeypatch, "import", str(SAMPLES), "--as", "Sample Player")
     assert "Imported:     5" in capsys.readouterr().out
     conn = db.connect(no_config / "data" / "chess.db")
     colours = conn.execute("SELECT my_color, COUNT(*) FROM games GROUP BY my_color ORDER BY my_color").fetchall()
     assert [tuple(r) for r in colours] == [("black", 2), ("white", 3)]
-    assert db.username(conn, load_config()) == "SamplePlayer"
+    assert db.username(conn, load_config()) == "Sample Player"
     conn.close()
 
 
@@ -103,8 +103,8 @@ def test_import_without_a_player_says_how_to_name_one(no_config, monkeypatch):
 
 
 def test_import_as_someone_else_does_not_change_the_player(no_config, monkeypatch):
-    run(monkeypatch, "import", str(SAMPLES), "--as", "SamplePlayer")
-    with pytest.raises(SystemExit, match="already 'SamplePlayer'"):
+    run(monkeypatch, "import", str(SAMPLES), "--as", "Sample Player")
+    with pytest.raises(SystemExit, match="already 'Sample Player'"):
         run(monkeypatch, "import", str(SAMPLES), "--as", "Opponent")
 
 
