@@ -8,6 +8,7 @@ severity scores and attaches a "Train this" filter for the Practice page.
 
 import sqlite3
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 
 import chess
 
@@ -541,6 +542,6 @@ def _endgame_weakness(d: dict) -> dict | None:
     }
 
 
-def _mean(values) -> float | None:
-    values = [v for v in values if v is not None]
-    return sum(values) / len(values) if values else None
+def _mean(values: Iterable[float | None]) -> float | None:
+    known = [v for v in values if v is not None]
+    return sum(known) / len(known) if known else None

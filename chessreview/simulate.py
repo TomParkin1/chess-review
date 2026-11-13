@@ -14,9 +14,11 @@ held, how long it took at my pace and how many due reviews had to wait (the back
 import random
 import sqlite3
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
+from typing import Any
 
 from . import coach, db, srs
 from .config import Config
@@ -112,7 +114,7 @@ def run(
     seed: int = 1,
     start: date | None = None,
     my_rates: dict | None = None,
-    progress=None,
+    progress: Callable[[Day], None] | None = None,
 ) -> Result:
     """Simulate `days` days of Today on `conn` (it is changed: pass a copy). Returns every day."""
     rng = random.Random(seed)
@@ -156,7 +158,7 @@ def run(
     return result
 
 
-def simulate_copy(conn: sqlite3.Connection, cfg: Config, **kwargs) -> Result:
+def simulate_copy(conn: sqlite3.Connection, cfg: Config, **kwargs: Any) -> Result:
     """`run` on a temporary copy of the database (made with SQLite's backup API); `conn` is
     only read."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -190,7 +192,7 @@ def _answer(rng: random.Random, rate: tuple[float, float]) -> str:
 
 
 def _attempt(
-    conn: sqlite3.Connection, rng: random.Random, my_rates: dict, g, p, tag: str, on: date, clock: _Clock
+    conn: sqlite3.Connection, rng: random.Random, my_rates: dict, g: Any, p: Any, tag: str, on: date, clock: _Clock
 ) -> str:
     """One attempt at a plan item, stored as the app stores it."""
     if g == "lib":

@@ -24,6 +24,7 @@ Tasks are keyed "convert/<game_id>:<ply>" or "endgame/<id>"; SRS cards use kind 
 import sqlite3
 import tomllib
 from dataclasses import asdict, dataclass
+from datetime import date
 from itertools import pairwise
 from pathlib import Path
 
@@ -189,12 +190,12 @@ def convert_overview(conn: sqlite3.Connection) -> list[dict]:
     return [{**e, "status": _status(cards.get(e["key"].split("/", 1)[1]))} for e in convert_positions(conn)]
 
 
-def next_convert(conn: sqlite3.Connection, on=None) -> str | None:
+def next_convert(conn: sqlite3.Connection, on: date | None = None) -> str | None:
     """A due convert card, else the first won position never tried."""
     return _due(conn, "convert", on) or _untried_convert(conn)
 
 
-def next_endgame(conn: sqlite3.Connection, on=None) -> str | None:
+def next_endgame(conn: sqlite3.Connection, on: date | None = None) -> str | None:
     """Today's endgame to play (E2): a due essential endgame, else a due Convert position, else the
     next essential endgame never played (in unlock order), else a won position never tried."""
     return (
@@ -205,7 +206,7 @@ def next_endgame(conn: sqlite3.Connection, on=None) -> str | None:
     )
 
 
-def _due(conn: sqlite3.Connection, kind: str, on=None) -> str | None:
+def _due(conn: sqlite3.Connection, kind: str, on: date | None = None) -> str | None:
     """The most overdue card of a kind ('convert' | 'endgame') whose task still exists."""
     on = on or srs.today()
     for r in conn.execute(

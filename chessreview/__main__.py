@@ -24,12 +24,12 @@ from pathlib import Path
 
 from . import backup, db
 from .classify import ensure_classified, refresh
-from .config import ConfigError, effective_workers, load_config
+from .config import Config, ConfigError, effective_workers, load_config
 from .engine import AnalysisJob, StockfishNotFound, count_pending, find_stockfish
 from .pgn_import import import_paths
 
 
-def cmd_sync(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_sync(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     from . import chesscom
 
     user = db.username(conn, cfg)
@@ -54,7 +54,7 @@ def _set_player(conn: sqlite3.Connection, name: str) -> None:
             conn.execute("DELETE FROM meta WHERE key = ?", (db.USERNAME_KEY,))
 
 
-def cmd_import(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_import(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     before = db.username(conn, cfg)
     switching = bool(args.player) and args.player.lower() != before.lower()
     if switching:
@@ -78,7 +78,7 @@ def cmd_import(conn: sqlite3.Connection, cfg, args) -> None:
         print(f"Skipped:      {n} ({reason})")
 
 
-def _wdl_table(rows, label: str) -> None:
+def _wdl_table(rows: list[sqlite3.Row], label: str) -> None:
     print(f"\n{label:<28} {'games':>6} {'win':>5} {'draw':>5} {'loss':>5} {'score':>6}")
     for r in rows:
         n = r["n"]
@@ -86,7 +86,7 @@ def _wdl_table(rows, label: str) -> None:
         print(f"{str(r['k'])[:28]:<28} {n:>6} {r['w']:>5} {r['d']:>5} {r['l']:>5} {score:>5.0f}%")
 
 
-def _wdl_query(conn: sqlite3.Connection, group_by: str, limit: int | None = None):
+def _wdl_query(conn: sqlite3.Connection, group_by: str, limit: int | None = None) -> list[sqlite3.Row]:
     sql = f"""
         SELECT {group_by} AS k, COUNT(*) AS n,
                SUM(my_result = 'win') AS w, SUM(my_result = 'draw') AS d,
@@ -98,7 +98,7 @@ def _wdl_query(conn: sqlite3.Connection, group_by: str, limit: int | None = None
     return conn.execute(sql).fetchall()
 
 
-def cmd_summary(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_summary(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     total = conn.execute("SELECT COUNT(*), MIN(date), MAX(date) FROM games").fetchone()
     if not total[0]:
         print("No games imported yet. Run: python -m chessreview import <files>")
@@ -112,7 +112,7 @@ def cmd_summary(conn: sqlite3.Connection, cfg, args) -> None:
     _mistake_summary(conn, cfg)
 
 
-def _mistake_summary(conn: sqlite3.Connection, cfg) -> None:
+def _mistake_summary(conn: sqlite3.Connection, cfg: Config) -> None:
     ensure_classified(conn, cfg)
     analysed = conn.execute("SELECT COUNT(*) FROM games WHERE analysed_at IS NOT NULL").fetchone()[0]
     if not analysed:
@@ -175,7 +175,7 @@ def _format_eta(seconds: float | None) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
-def cmd_analyse(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_analyse(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     pending = count_pending(conn)
     total = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     print(f"{total - pending} games analysed and up to date (cached), {pending} to analyse.")
@@ -207,12 +207,12 @@ def cmd_analyse(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"Classified moves in {n} games. Run 'summary' or 'mistakes' to see results.")
 
 
-def cmd_reclassify(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_reclassify(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     n = ensure_classified(conn, cfg, force=True)
     print(f"Re-classified {n} games with the current thresholds.")
 
 
-def cmd_mistakes(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_mistakes(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     ensure_classified(conn, cfg)
     _print_mistakes(conn, args.limit)
 
@@ -229,7 +229,7 @@ def _print_progress(job: AnalysisJob) -> None:
     sys.stdout.flush()
 
 
-def cmd_serve(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_serve(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     from .web import create_app  # Flask is only needed for the web app
 
     refresh(conn, cfg)  # new games now; a full rebuild (new thresholds or version) in the background
@@ -243,7 +243,7 @@ def cmd_serve(conn: sqlite3.Connection, cfg, args) -> None:
         app.extensions["live"].close()  # stop Stockfish so Python can exit
 
 
-def cmd_reset(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_reset(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     n = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     if not args.yes:
         answer = input(f"Delete all {n} games and their analysis? PGN files are not touched. [y/N] ")
@@ -253,7 +253,7 @@ def cmd_reset(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"Deleted {db.delete_all_games(conn)} games.")
 
 
-def cmd_backup(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_backup(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     folder = backup.folder_for(cfg.db_path)
     if not args.list:
         print(f"Backed up to {backup.make(conn, 'manual', folder)}")
@@ -263,7 +263,7 @@ def cmd_backup(conn: sqlite3.Connection, cfg, args) -> None:
         print(f"  {b.path.name:<44} {b.label:<34} {info['games'] or 0:>5} games  {info['size'] / 1e6:5.1f} MB")
 
 
-def cmd_restore(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_restore(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     """Restore a copy from the backups folder (by name) or any file. The current data is backed up first."""
     source = Path(args.source)
     if not source.is_file():
@@ -283,7 +283,7 @@ def cmd_restore(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"Restored {source.name} ({games} games). Your previous data is in {before}.")
 
 
-def cmd_puzzles(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_puzzles(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     """Download (or refresh) the puzzle library from the Lichess puzzle database."""
     from . import library
 
@@ -299,7 +299,7 @@ def cmd_puzzles(conn: sqlite3.Connection, cfg, args) -> None:
     print(f"\nKept {library.count(conn):,} puzzles. Your puzzle rating: {library.rating(conn)}.")
 
 
-def cmd_simulate(conn: sqlite3.Connection, cfg, args) -> None:
+def cmd_simulate(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> None:
     from . import simulate
 
     print(

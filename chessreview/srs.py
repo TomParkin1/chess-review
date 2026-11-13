@@ -191,7 +191,7 @@ def _review_order(rows: list[sqlite3.Row], on: date) -> list[sqlite3.Row]:
     day late before a box-5 card three days late, and nothing waits for ever), then the
     bigger lesson, then the oldest."""
 
-    def key(r):
+    def key(r: sqlite3.Row) -> tuple:
         late = (on - date.fromisoformat(r["due_on"])).days + 1
         return -late / INTERVALS[max(r["box"], 1) - 1], -(r["value"] or 0), r["due_on"], r["id"]
 

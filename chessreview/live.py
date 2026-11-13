@@ -13,6 +13,7 @@ import random
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import chess
@@ -186,7 +187,7 @@ class LiveEngine:
 
     # ------------------------------------------------------------ live analysis
 
-    def stream(self, fen: str):
+    def stream(self, fen: str) -> Iterator[dict]:
         """Yield analysis snapshots for `fen` as the search deepens.
 
         Each snapshot: {"depth", "lines": [{"eval": {cp, mate} (White POV), "uci", "pv_uci",

@@ -19,6 +19,7 @@ import shutil
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import chess
@@ -168,7 +169,7 @@ def analyse_game(
     engine: chess.engine.SimpleEngine,
     game: sqlite3.Row,
     cfg: Config,
-    on_position=None,
+    on_position: Callable[[], None] | None = None,
     stop: threading.Event | None = None,
 ) -> list[PositionResult] | None:
     """Analyse every position of a game (plus threats on my moves). None if stopped part-way."""
@@ -209,7 +210,7 @@ def analyse_game_threats(
     engine: chess.engine.SimpleEngine,
     game: sqlite3.Row,
     cfg: Config,
-    on_position=None,
+    on_position: Callable[[], None] | None = None,
     stop: threading.Event | None = None,
 ) -> list[tuple[int, Threat]] | None:
     """Threat search only (for games analysed before threats existed): [(ply, threat)]."""
@@ -422,7 +423,9 @@ class AnalysisJob:
         with self._lock:
             self.progress.positions_done += 1
 
-    def _analyse_one(self, engine: chess.engine.SimpleEngine, conn: sqlite3.Connection, task: str, game) -> bool:
+    def _analyse_one(
+        self, engine: chess.engine.SimpleEngine, conn: sqlite3.Connection, task: str, game: sqlite3.Row
+    ) -> bool:
         """Analyse and save one game ("full") or only its threats; False if the job was stopped first."""
         on_position, stop = self._count_position, self._stop
         if task == "full":

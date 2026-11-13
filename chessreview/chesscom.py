@@ -14,8 +14,10 @@ import sqlite3
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Any
 
 import chess.pgn
 
@@ -91,13 +93,17 @@ def months_to_fetch(
     return [u for u in archives if month_of(u) >= f"{y:04d}/{m:02d}"]
 
 
-def archives_of(user: str, fetch=fetch_json) -> list[str]:
+def archives_of(user: str, fetch: Callable[[str], Any] = fetch_json) -> list[str]:
     """URLs of a player's monthly archives, oldest first. LookupError if chess.com has no such player."""
     return fetch(API.format(user=user.strip().lower()))["archives"]
 
 
 def sync(
-    conn: sqlite3.Connection, cfg: Config, since: str | None = None, fetch=fetch_json, progress=None
+    conn: sqlite3.Connection,
+    cfg: Config,
+    since: str | None = None,
+    fetch: Callable[[str], Any] = fetch_json,
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> SyncResult:
     """Import new games from chess.com as one batch. `fetch` is injectable for tests."""
     user = db.username(conn, cfg)

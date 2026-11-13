@@ -84,7 +84,7 @@ class TbResult:
         if not self.moves:
             return None
 
-        def key(m: Move):
+        def key(m: Move) -> tuple:
             if m.wdl > 0:
                 return (m.wdl, tuple(-x for x in m.distance))  # winning: shortest
             return (m.wdl, m.distance)  # drawn or losing: longest

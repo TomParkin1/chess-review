@@ -117,6 +117,9 @@ class MoveContext:
         return san_line(self.board, self.best_line, plies)
 
 
+# A rule's answer: (kind of mistake, explanation), or None when the rule doesn't apply.
+RuleResult = tuple[str, str] | None
+
 # ---------------------------------------------------------------- helpers
 
 
@@ -412,7 +415,7 @@ def _takes_piece(board: chess.Board, move: chess.Move) -> bool:
 # ---------------------------------------------------------------- rules
 
 
-def missed_mate(ctx: MoveContext):
+def missed_mate(ctx: MoveContext) -> RuleResult:
     if ctx.before.mate and ctx.before.mate > 0 and not (ctx.after.mate and ctx.after.mate > 0):
         best = _san(ctx.board, ctx.best)
         if ctx.before.mate == 1:
@@ -428,7 +431,7 @@ def missed_mate(ctx: MoveContext):
     return None
 
 
-def allowed_mate(ctx: MoveContext):
+def allowed_mate(ctx: MoveContext) -> RuleResult:
     if ctx.after.mate and ctx.after.mate < 0 and not (ctx.before.mate and ctx.before.mate < 0):
         after = ctx.board_after()
         n = -ctx.after.mate
@@ -443,7 +446,7 @@ def allowed_mate(ctx: MoveContext):
     return None
 
 
-def bigger_miss(ctx: MoveContext):
+def bigger_miss(ctx: MoveContext) -> RuleResult:
     """The best move wins more than my move loses: the miss is the lesson, and a loss of my
     own that is a tactic too is added."""
     if not _missed_ok(ctx) or ctx.lost > ctx.missed:
@@ -454,7 +457,7 @@ def bigger_miss(ctx: MoveContext):
     return kind, text
 
 
-def walked_into_fork(ctx: MoveContext):
+def walked_into_fork(ctx: MoveContext) -> RuleResult:
     if not ctx.reply_line:
         return None
     after = ctx.board_after()
@@ -474,7 +477,7 @@ def walked_into_fork(ctx: MoveContext):
     return "fork", f"This walks into a fork: {reply_san} attacks {attacked}. {_you_lose(ctx)}"
 
 
-def discovered_attack(ctx: MoveContext):
+def discovered_attack(ctx: MoveContext) -> RuleResult:
     """The opponent's reply moves a piece out of the way of one of their long-range
     pieces, which then attacks something valuable of mine. A reply that simply takes a
     piece is a capture, not a discovered attack (hanging_piece explains it)."""
@@ -519,7 +522,7 @@ def discovered_attack(ctx: MoveContext):
     )
 
 
-def hanging_piece(ctx: MoveContext):
+def hanging_piece(ctx: MoveContext) -> RuleResult:
     if not ctx.reply_line:
         return None
     after = ctx.board_after()
@@ -590,13 +593,13 @@ def _why_loose(ctx: MoveContext, target_sq: chess.Square) -> str | None:
     return None
 
 
-def loses_material(ctx: MoveContext):
+def loses_material(ctx: MoveContext) -> RuleResult:
     if not _lost(ctx, ctx.min_loss):
         return None
     return "loses_material", f"This loses {describe_trade(ctx.loss)} by force: {ctx.loss_line()}.{_and_drop(ctx)}"
 
 
-def missed_win(ctx: MoveContext):
+def missed_win(ctx: MoveContext) -> RuleResult:
     if not _missed_ok(ctx):
         return None
     return _missed(ctx)
@@ -648,7 +651,7 @@ def _also_missed(ctx: MoveContext) -> str:
     )
 
 
-def missed_fork(ctx: MoveContext):
+def missed_fork(ctx: MoveContext) -> RuleResult:
     """One of my first moves in the best line forks the king and a piece, or two pieces, and the
     eval says material is at stake even when the short line doesn't show it being won."""
     if not ctx.best_line or ctx.before.mate is not None:
@@ -690,7 +693,7 @@ def _their(board: chess.Board, squares: list[chess.Square]) -> str:
     return " and ".join(names)
 
 
-def exposed_king(ctx: MoveContext):
+def exposed_king(ctx: MoveContext) -> RuleResult:
     """The opponent's best reply is a check that hurts (but no forced mate or material loss):
     my king has to move, or the checks go on. A check I simply block or take back (a trade
     with check, a queen trade offered with check) does nothing to my king."""
@@ -722,7 +725,7 @@ def _king_hunted(board: chess.Board, line: list[chess.Move], plies: int = SHOW_P
     return checks >= 2
 
 
-def missed_opportunity(ctx: MoveContext):
+def missed_opportunity(ctx: MoveContext) -> RuleResult:
     """I was clearly better and let most of the advantage slip without losing material."""
     if ctx.before.win_chance() < 0.3 or ctx.after.win_chance() < -0.2 or not ctx.best:
         return None
@@ -732,7 +735,7 @@ def missed_opportunity(ctx: MoveContext):
     )
 
 
-def positional(ctx: MoveContext):
+def positional(ctx: MoveContext) -> RuleResult:
     after = ctx.board_after()
     reply = san_line(after, ctx.reply_line)
     if ctx.before.win_chance() >= 0.3 and ctx.after.win_chance() <= -0.3:

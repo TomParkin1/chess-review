@@ -27,7 +27,10 @@ import sqlite3
 import threading
 import time
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
+from typing import Any, BinaryIO
 
 import chess
 
@@ -149,13 +152,13 @@ class FetchProgress:
 class _CountingReader(io.RawIOBase):
     """Wraps the HTTP response to count compressed bytes for the progress bar."""
 
-    def __init__(self, raw, progress: FetchProgress):
+    def __init__(self, raw: BinaryIO, progress: FetchProgress) -> None:
         self.raw, self.progress = raw, progress
 
     def readable(self) -> bool:
         return True
 
-    def readinto(self, buffer) -> int:
+    def readinto(self, buffer: Any) -> int:
         data = self.raw.read(len(buffer))
         buffer[: len(data)] = data
         self.progress.bytes_read += len(data)
@@ -171,7 +174,7 @@ class Sampler:
     cells: dict = field(default_factory=dict)  # (bucket, theme) -> [rows]
     seen: dict = field(default_factory=dict)  # (bucket, theme) -> count
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.rng = random.Random(self.seed)
 
     def offer(self, row: list[str]) -> None:
@@ -206,7 +209,10 @@ class Sampler:
 
 
 def fetch(
-    conn: sqlite3.Connection, progress: FetchProgress | None = None, url: str = URL, opener=urllib.request.urlopen
+    conn: sqlite3.Connection,
+    progress: FetchProgress | None = None,
+    url: str = URL,
+    opener: Callable[..., Any] = urllib.request.urlopen,
 ) -> int:
     """Download and sample the puzzle database, replacing the stored library (puzzles I have
     tried are kept, see below). Returns the number of puzzles in the new sample."""
@@ -351,7 +357,7 @@ def pick(
     return []
 
 
-def pick_endgames(conn: sqlite3.Connection, n: int, on, exclude: set[str] | None = None) -> list[str]:
+def pick_endgames(conn: sqlite3.Connection, n: int, on: date, exclude: set[str] | None = None) -> list[str]:
     """Up to `n` endgame puzzles near my puzzle rating, one type after
     another along ENDGAME_ROTATION (where the day starts in it moves daily); a type with nothing
     unseen falls back to any endgame type."""

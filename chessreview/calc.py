@@ -31,6 +31,7 @@ import re
 import sqlite3
 from collections.abc import Set as AbstractSet
 from dataclasses import asdict, dataclass
+from datetime import date
 
 import chess
 
@@ -196,14 +197,20 @@ def build(
     )
 
 
-def _best(start, line, final, nxt, subject, rng):
+def _best(
+    start: chess.Board, line: list[str], final: chess.Board, nxt: str | None, subject: str | None, rng: random.Random
+) -> tuple[str, str, str] | None:
+    if nxt is None:
+        return None
     move = chess.Move.from_uci(nxt)
     if move not in final.legal_moves:
         return None
     return "", "After these moves, <side> is to move. What's the best move?", final.san(move)
 
 
-def _capture(start, line, final, nxt, subject, rng):
+def _capture(
+    start: chess.Board, line: list[str], final: chess.Board, nxt: str | None, subject: str | None, rng: random.Random
+) -> tuple[str, str, str] | None:
     if final.is_check():
         return None
     me = final.turn
@@ -222,6 +229,7 @@ def _capture(start, line, final, nxt, subject, rng):
         pool = [s for s, wins in candidates.items() if wins == want] or list(candidates)
         sq = rng.choice(sorted(pool))
     piece = final.piece_at(sq)
+    assert piece is not None  # candidates are occupied squares
     name = f"{'white' if piece.color == chess.WHITE else 'black'} {PIECE_NAMES[piece.piece_type]}"
     return (
         chess.square_name(sq),
@@ -230,7 +238,9 @@ def _capture(start, line, final, nxt, subject, rng):
     )
 
 
-def _where(start, line, final, nxt, subject, rng):
+def _where(
+    start: chess.Board, line: list[str], final: chess.Board, nxt: str | None, subject: str | None, rng: random.Random
+) -> tuple[str, str, str] | None:
     # Follow each piece from its square in the start position.
     # start square -> where it is now (None: taken)
     at: dict[chess.Square, chess.Square | None] = {sq: sq for sq in chess.SquareSet(start.occupied)}
@@ -257,10 +267,10 @@ def _where(start, line, final, nxt, subject, rng):
             moved[origin] = moved.get(origin, 0) + 1
         board.push(move)
 
-    def tracked(o):
+    def tracked(o: chess.Square) -> bool:
         """It takes following the line: another piece like it (N, B, R) moved too."""
         p = start.piece_at(o)
-        if p.piece_type not in (chess.KNIGHT, chess.BISHOP, chess.ROOK) or at[o] is None:
+        if p is None or p.piece_type not in (chess.KNIGHT, chess.BISHOP, chess.ROOK) or at[o] is None:
             return False
         return any(x != o and start.piece_at(x) == p for x in moved)
 
@@ -333,7 +343,9 @@ def _game_sources(conn: sqlite3.Connection, rng: random.Random) -> list[str]:
     return [f"game:{r['game_id']}:{r['ply']}" for r in rows if (r["game_id"], r["ply"]) not in planned]
 
 
-def due_question(conn: sqlite3.Connection, exclude: AbstractSet[str] = frozenset(), on=None) -> Question | None:
+def due_question(
+    conn: sqlite3.Connection, exclude: AbstractSet[str] = frozenset(), on: date | None = None
+) -> Question | None:
     """The most overdue calc card whose question can still be built (its puzzle may be gone)."""
     on = on or srs.today()
     for r in conn.execute(

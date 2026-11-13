@@ -5,8 +5,9 @@ Every setting has a default here, so the file is optional and only needs the val
 
 import os
 import tomllib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
+from typing import Any
 
 CONFIG_NAME = "config.toml"
 CONFIG_ENV = "CHESSREVIEW_CONFIG"  # path of the config file to use
@@ -175,9 +176,9 @@ def load_config(path: Path | str | None = None) -> Config:
             raise ConfigError(f"{file}: {name} must be a [{name}] section, not a single value")
         return value
 
-    def section(cls, name: str):
+    def section(cls: type, name: str) -> Any:
         values = table(name)
-        unknown_keys = set(values) - set(cls.__dataclass_fields__)
+        unknown_keys = set(values) - {f.name for f in fields(cls)}
         if unknown_keys:
             raise ConfigError(f"{file}: unknown setting {sorted(unknown_keys)[0]!r} in [{name}]")
         return cls(**values)
