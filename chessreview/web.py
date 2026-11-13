@@ -12,6 +12,7 @@ import threading
 from collections import Counter
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import chess
 from flask import Flask, Response, g, jsonify, render_template, request
@@ -132,7 +133,7 @@ def create_app(cfg: Config | None = None) -> Flask:
     app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB of PGN is plenty
     app.config["TEMPLATES_AUTO_RELOAD"] = True  # edited pages show up without a server restart
 
-    state = {"job": AnalysisJob(cfg), "library": library.FetchProgress(), "library_thread": None}
+    state: dict[str, Any] = {"job": AnalysisJob(cfg), "library": library.FetchProgress(), "library_thread": None}
     import_lock = threading.Lock()  # one upload, chess.com sync, restore or Delete all at a time
     job_lock = threading.Lock()  # checking and starting the analysis job is one step
     live = LiveEngine(cfg)
@@ -407,7 +408,8 @@ def create_app(cfg: Config | None = None) -> Flask:
         c = conn()
         refresh(c, cfg)
         args = request.args
-        where, params = ["m.is_mine = 1"], []
+        where: list[str] = ["m.is_mine = 1"]
+        params: list[Any] = []
         if args.get("judgement") == "miss":  # mistakes/blunders that let the opponent's error go
             where.append("m.mark = 'miss'")
         else:
@@ -755,7 +757,7 @@ def create_app(cfg: Config | None = None) -> Flask:
             return jsonify(error=str(exc)), 400
         me = chess.WHITE if task.color == "white" else chess.BLACK
         rating = level.current_rating(c)
-        out = {"san": board.san(move), "uci": move.uci()}
+        out: dict[str, Any] = {"san": board.san(move), "uci": move.uci()}
         before = tablebase.probe(c, board)  # the position I moved in (E3: blame a move only if known)
         board.push(move)
         st = convert.state(task, board, None, streak, rating)
@@ -765,6 +767,7 @@ def create_app(cfg: Config | None = None) -> Flask:
             tb = tablebase.probe(c, board)
             best = tablebase.choose(tb, analysis.best) if tb else None
             reply = chess.Move.from_uci(best.uci) if best else analysis.best
+            assert reply is not None  # the game isn't over, so there is a move
             out |= {
                 "reply_uci": reply.uci(),
                 "reply_san": board.san(reply),
@@ -799,7 +802,8 @@ def create_app(cfg: Config | None = None) -> Flask:
         tb = tablebase.probe(c, board)
         if tb and tb.best:  # perfect play (E3); in a draw, the engine's drawing move
             move = tablebase.choose(tb, live.analyse(board).best if tb.best.wdl == 0 else None)
-            return jsonify(uci=move.uci, san=move.san, source="tablebase")
+            if move is not None:
+                return jsonify(uci=move.uci, san=move.san, source="tablebase")
         best = live.analyse(board).best
         return jsonify(uci=best.uci() if best else None, san=board.san(best) if best else None, source="stockfish")
 
@@ -1105,7 +1109,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         """Settings -> Back up now."""
         path = backup.make(conn(), "manual", _backups_folder())
         backup.rotate(_backups_folder(), cfg.backup)
-        return jsonify(backup=path.name)
+        return jsonify(backup=path.name if path else None)  # None: an in-memory database
 
     @app.post("/api/backups/restore")
     def backups_restore():
@@ -1180,9 +1184,7 @@ def create_app(cfg: Config | None = None) -> Flask:
         data = _body()
         ply = data.get("ply")
         try:
-            return jsonify(
-                session.record_self_review(conn(), int(data.get("game_id")), None if ply is None else int(ply))
-            )
+            return jsonify(session.record_self_review(conn(), int(data["game_id"]), None if ply is None else int(ply)))
         except LookupError, TypeError, ValueError:
             return jsonify(error="no turning point for this game"), 404
 

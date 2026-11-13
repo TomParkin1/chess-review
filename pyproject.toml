@@ -65,8 +65,3 @@ packages = ["chessreview"]
 check_untyped_defs = true
 warn_unused_ignores = true
 warn_redundant_casts = true
-
-# Baseline: modules with type errors when mypy was introduced. Each is removed from this list as it is fixed.
-[[tool.mypy.overrides]]
-module = ["chessreview.web"]
-ignore_errors = true
