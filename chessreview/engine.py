@@ -79,21 +79,22 @@ USUAL_PLACES = ("/opt/homebrew/bin/stockfish", "/usr/local/bin/stockfish", "/usr
 
 INSTALL_HINT = (
     "Install Stockfish (macOS: `brew install stockfish`; Debian/Ubuntu: `sudo apt install stockfish`; "
-    "Windows: download it from https://stockfishchess.org/download/), then put it on your PATH, set "
-    "STOCKFISH_PATH, set [engine] path in config.toml or pass --stockfish PATH."
+    "Windows: download it from https://stockfishchess.org/download/ and set STOCKFISH_PATH to the .exe, "
+    "or rename it stockfish.exe and put it on your PATH). Or point the app at it with --stockfish PATH, "
+    "STOCKFISH_PATH or [engine] path in config.toml."
 )
 
 
 def find_stockfish(configured: str = "") -> str:
     """The Stockfish executable to run.
 
-    A configured path (config, $STOCKFISH_PATH or --stockfish) must exist; a bare name is looked up on
-    PATH. Without one: `stockfish` on PATH, then USUAL_PLACES. Raises StockfishNotFound otherwise.
+    A configured path (--stockfish, else $STOCKFISH_PATH, else [engine] path) must exist; a bare name is
+    looked up on PATH. Without one: `stockfish` on PATH, then USUAL_PLACES. Raises StockfishNotFound otherwise.
     """
     if configured:
         found = shutil.which(configured)
         if found is None:
-            raise StockfishNotFound(f"Stockfish not found at {configured!r}. {INSTALL_HINT}")
+            raise StockfishNotFound(f"Stockfish not found (or not executable) at {configured!r}. {INSTALL_HINT}")
         return found
     found = shutil.which("stockfish") or next((p for p in USUAL_PLACES if shutil.which(p)), None)
     if found is None:

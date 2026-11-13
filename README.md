@@ -52,8 +52,9 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
 
-Stockfish is found on your PATH or in the usual install folders. If yours is elsewhere, set
-`STOCKFISH_PATH`, `[engine] path` in `config.toml`, or pass `--stockfish PATH`.
+Stockfish is found on your PATH or in the usual install folders. If yours is elsewhere, tell the app where
+it is; the first of these wins: `--stockfish PATH`, the `STOCKFISH_PATH` environment variable, `[engine] path`
+in `config.toml`.
 
 ## Try it with the sample games
 

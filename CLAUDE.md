@@ -7,7 +7,7 @@ and lets me review them across all games. chess.com username: `sampleplayer`
 
 ## Running
 - Python 3.15 venv in `.venv` (Homebrew Python, not Anaconda): use `.venv/bin/python`.
-- Stockfish: `/opt/homebrew/bin/stockfish` (configurable in `config.toml`).
+- Stockfish: found by `engine.find_stockfish()` (`--stockfish`, `$STOCKFISH_PATH`, `[engine] path`, PATH, usual folders).
 - CLI: `.venv/bin/python -m chessreview sync [--since all|3m|1m]`, `import <files|dirs>`, `summary`,
   `analyse [--limit N]`, `reclassify`, `mistakes [--limit N]`, `serve [--port 8000]`, `puzzles`, `reset [--yes]`,
   `backup [--list]`, `restore NAME|FILE [--yes]` (opens the DB without migrating first: the way back from a broken DB),

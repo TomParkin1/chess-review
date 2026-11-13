@@ -301,7 +301,7 @@ def main() -> None:
     parser.add_argument("--config", default=None,
                         help="config file (default: $CHESSREVIEW_CONFIG, else ./config.toml if present)")
     parser.add_argument("--stockfish", default=None, metavar="PATH",
-                        help="Stockfish executable (default: [engine] path, $STOCKFISH_PATH, PATH, usual folders)")
+                        help="Stockfish executable (default: $STOCKFISH_PATH, [engine] path, PATH, usual folders)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("sync", help="fetch new games from chess.com")

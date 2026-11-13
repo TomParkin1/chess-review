@@ -8,7 +8,7 @@ min_plies = 10            # skip games shorter than this (aborted / instant resi
 skip_variants = true      # skip Chess960 and other non-standard games
 
 [engine]
-path = ""                 # Stockfish executable; empty = $STOCKFISH_PATH, then your PATH, then common folders
+path = ""                 # Stockfish executable; empty = your PATH, then common folders ($STOCKFISH_PATH wins)
 time_per_position = 0.3   # seconds of engine time per position (at most)
 max_depth = 20            # ...or stop earlier once this depth is reached (0 = no cap)
 workers = 0               # Stockfish processes run in parallel; 0 = automatic (~2/3 of CPU cores)
