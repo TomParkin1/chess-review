@@ -9,4 +9,4 @@ max_depth = 20
 
 [database]
 # Every test opens its own temporary database; this path only guards the real one if a test forgets.
-path = "tests/data/unused-test.db"
+path = "data/unused-test.db"     # relative to this file: tests/data/

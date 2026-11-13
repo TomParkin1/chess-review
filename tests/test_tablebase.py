@@ -5,7 +5,6 @@ for the rook mate (essential endgame kr_k) the way the API does: categories from
 each move's category from the opponent's side after it.
 """
 import json
-import shutil
 import urllib.error
 from dataclasses import replace
 
@@ -228,10 +227,8 @@ def test_a_start_the_tablebase_calls_drawn_is_judged_by_the_eval():
 # ------------------------------------------------------------ the play API
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, stockfish):
     base = load_config()
-    if not shutil.which(base.engine.path):
-        pytest.skip("Stockfish not installed")
     app = create_app(replace(base, db_path=tmp_path / "web.db", review=replace(base.review, live_time=0.05)))
     app.testing = True
     yield app.test_client()

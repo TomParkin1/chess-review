@@ -1,4 +1,3 @@
-import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -14,10 +13,8 @@ SAMPLE = Path(__file__).parent / "data" / "sample.pgn"
 
 
 @pytest.fixture
-def cfg(tmp_path):
+def cfg(tmp_path, stockfish):
     base = load_config()
-    if not shutil.which(base.engine.path):
-        pytest.skip("Stockfish not installed")
     fast = replace(base.engine, time_per_position=0.05, workers=2, threads=1)
     return replace(base, engine=fast, db_path=tmp_path / "test.db")
 

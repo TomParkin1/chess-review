@@ -1,7 +1,7 @@
 """Command line interface.
 
     python -m chessreview sync [--since all|3m|1m]
-    python -m chessreview import FILE_OR_DIR [...]
+    python -m chessreview import FILE_OR_DIR [...] [--as NAME]
     python -m chessreview summary
     python -m chessreview analyse [--limit N]
     python -m chessreview reclassify
@@ -19,12 +19,13 @@ import sqlite3
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from . import backup, db
 from .classify import ensure_classified, refresh
-from .config import effective_workers, load_config
-from .engine import AnalysisJob, count_pending
+from .config import ConfigError, effective_workers, load_config
+from .engine import AnalysisJob, StockfishNotFound, count_pending, find_stockfish
 from .pgn_import import import_paths
 
 
@@ -46,8 +47,28 @@ def cmd_sync(conn: sqlite3.Connection, cfg, args) -> None:
         print("Run 'analyse' (or open the web app) to analyse them.")
 
 
+def _set_player(conn: sqlite3.Connection, name: str) -> None:
+    with conn:
+        if name:
+            db.set_meta(conn, db.USERNAME_KEY, name)
+        else:
+            conn.execute("DELETE FROM meta WHERE key = ?", (db.USERNAME_KEY,))
+
+
 def cmd_import(conn: sqlite3.Connection, cfg, args) -> None:
+    before = db.username(conn, cfg)
+    switching = bool(args.player) and args.player.lower() != before.lower()
+    if switching:
+        if before and conn.execute("SELECT 1 FROM games LIMIT 1").fetchone():
+            sys.exit(f"The player is already {before!r}; change it in Settings to import {args.player!r}'s games.")
+        _set_player(conn, args.player)
+    elif not before:
+        sys.exit("Whose games are these? Pass --as YOUR_NAME (as it appears in the PGN), "
+                 "or set your chess.com username in the web app.")
     stats = import_paths(conn, [Path(p) for p in args.paths], cfg)
+    if switching and not (stats.imported or stats.duplicates):
+        _set_player(conn, before)      # none of their games here (a typo?): keep the player as it was
+        print(f"No games of {args.player!r} found, so the player is unchanged.")
     print(f"Files read:   {stats.files}")
     print(f"Games seen:   {stats.games_seen}")
     print(f"Imported:     {stats.imported}")
@@ -277,7 +298,10 @@ def cmd_simulate(conn: sqlite3.Connection, cfg, args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="chessreview", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", default=None, help="path to config.toml")
+    parser.add_argument("--config", default=None,
+                        help="config file (default: $CHESSREVIEW_CONFIG, else ./config.toml if present)")
+    parser.add_argument("--stockfish", default=None, metavar="PATH",
+                        help="Stockfish executable (default: $STOCKFISH_PATH, [engine] path, PATH, usual folders)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("sync", help="fetch new games from chess.com")
@@ -287,6 +311,8 @@ def main() -> None:
 
     p = sub.add_parser("import", help="import PGN files or directories of PGN files")
     p.add_argument("paths", nargs="+")
+    p.add_argument("--as", dest="player", metavar="NAME",
+                   help="your name in these games (sets the player when none is set yet)")
     p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("summary", help="print a summary of imported games")
@@ -332,7 +358,17 @@ def main() -> None:
     p.set_defaults(func=cmd_simulate)
 
     args = parser.parse_args()
-    cfg = load_config(args.config)
+    try:
+        cfg = load_config(args.config)
+    except ConfigError as exc:
+        sys.exit(str(exc))
+    if args.stockfish:
+        cfg = replace(cfg, engine=replace(cfg.engine, path=args.stockfish))
+    if args.func in (cmd_analyse, cmd_serve):      # both need the engine: say so now, not mid-analysis
+        try:
+            cfg = replace(cfg, engine=replace(cfg.engine, path=find_stockfish(cfg.engine.path)))
+        except StockfishNotFound as exc:
+            sys.exit(str(exc))
     if args.func is cmd_restore:    # no schema work first: the database may be what is broken
         Path(cfg.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(cfg.db_path, timeout=30)

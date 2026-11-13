@@ -14,6 +14,7 @@ import pytest
 
 from chessreview import spar
 from chessreview.config import load_config
+from chessreview.engine import find_stockfish
 
 pytestmark = pytest.mark.skipif(not os.environ.get("CHESSREVIEW_CALIBRATION"), reason="slow: set CHESSREVIEW_CALIBRATION=1")
 GAMES = 40
@@ -34,7 +35,7 @@ def play(engine: chess.engine.SimpleEngine, board: chess.Board, st: spar.Strengt
 
 
 def game(elo: int, i: int) -> float:
-    path = load_config().engine.path
+    path = find_stockfish(load_config().engine.path)
     a, b = chess.engine.SimpleEngine.popen_uci(path), chess.engine.SimpleEngine.popen_uci(path)
     rng, me = random.Random(i), chess.WHITE if i % 2 == 0 else chess.BLACK
     board = chess.Board(OPENINGS[i // 2 % len(OPENINGS)])

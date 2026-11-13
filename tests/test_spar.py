@@ -1,5 +1,4 @@
 """E5: sparring against a rating-limited Stockfish from my positions (F9)."""
-import shutil
 from dataclasses import replace
 
 import chess
@@ -79,10 +78,8 @@ def test_outcomes():
 # ------------------------------------------------------------ the API
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, stockfish):
     base = load_config()
-    if not shutil.which(base.engine.path):
-        pytest.skip("Stockfish not installed")
     app = create_app(replace(base, db_path=tmp_path / "web.db", review=replace(base.review, live_time=0.05)))
     app.testing = True
     yield app.test_client(), app

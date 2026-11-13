@@ -1,12 +1,25 @@
-"""Load config.toml into simple dataclasses."""
+"""Load config.toml into simple dataclasses.
+
+Every setting has a default here, so the file is optional and only needs the values you change.
+"""
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+CONFIG_NAME = "config.toml"
+CONFIG_ENV = "CHESSREVIEW_CONFIG"      # path of the config file to use
+STOCKFISH_ENV = "STOCKFISH_PATH"       # overrides [engine] path
+
+
+# The [sections] of config.toml ("import" is ImportConfig, "database" only holds the path).
+SECTIONS = {"player", "import", "engine", "classification", "phases", "database", "review", "analysis",
+            "training", "coach", "backup"}
+
+
+class ConfigError(ValueError):
+    """The config file is missing, isn't valid TOML or has a setting the app doesn't know."""
 
 
 @dataclass(frozen=True)
@@ -22,7 +35,7 @@ class ImportConfig:
 
 @dataclass(frozen=True)
 class EngineConfig:
-    path: str = "/opt/homebrew/bin/stockfish"
+    path: str = ""              # Stockfish executable; empty = find it (engine.find_stockfish)
     time_per_position: float = 0.3
     max_depth: int = 0          # stop a position early at this depth (0 = no depth limit)
     workers: int = 0            # parallel Stockfish processes; 0 = automatic (about 2/3 of CPU cores)
@@ -112,26 +125,73 @@ class Config:
     backup: BackupConfig = BackupConfig()
 
 
-def load_config(path: Path | str | None = None) -> Config:
-    """Read the configuration: `path`, else $CHESSREVIEW_CONFIG, else config.toml in the project root."""
-    path = path or os.environ.get("CHESSREVIEW_CONFIG") or DEFAULT_CONFIG_PATH
-    with open(path, "rb") as f:
-        raw = tomllib.load(f)
+def find_config(path: Path | str | None = None) -> Path | None:
+    """The config file to read: `path`, else $CHESSREVIEW_CONFIG, else ./config.toml if there is one."""
+    if path:
+        return Path(path)
+    if os.environ.get(CONFIG_ENV):
+        return Path(os.environ[CONFIG_ENV])
+    local = Path.cwd() / CONFIG_NAME
+    return local if local.is_file() else None
 
-    db_path = Path(raw.get("database", {}).get("path", "data/chess.db"))
+
+def load_config(path: Path | str | None = None) -> Config:
+    """Read the configuration (see find_config); without a file every setting has its default.
+
+    A relative database path is relative to the config file's folder (the current folder without one).
+    $STOCKFISH_PATH, when set, replaces [engine] path.
+    """
+    file = find_config(path)
+    raw: dict = {}
+    base = Path.cwd()
+    if file is not None:
+        try:
+            with open(file, "rb") as f:
+                raw = tomllib.load(f)
+        except FileNotFoundError:
+            raise ConfigError(f"Config file not found: {file}") from None
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigError(f"{file} isn't valid TOML: {exc}") from None
+        base = file.resolve().parent
+
+    unknown = set(raw) - SECTIONS
+    if unknown:
+        raise ConfigError(f"{file}: unknown section [{sorted(unknown)[0]}] (known: {', '.join(sorted(SECTIONS))})")
+
+    def table(name: str) -> dict:
+        value = raw.get(name, {})
+        if not isinstance(value, dict):
+            raise ConfigError(f"{file}: {name} must be a [{name}] section, not a single value")
+        return value
+
+    def section(cls, name: str):
+        values = table(name)
+        unknown_keys = set(values) - set(cls.__dataclass_fields__)
+        if unknown_keys:
+            raise ConfigError(f"{file}: unknown setting {sorted(unknown_keys)[0]!r} in [{name}]")
+        return cls(**values)
+
+    db_value = table("database").get("path", "data/chess.db")
+    if not isinstance(db_value, str):
+        raise ConfigError(f"{file}: [database] path must be a string")
+    db_path = Path(db_value).expanduser()
     if not db_path.is_absolute():
-        db_path = PROJECT_ROOT / db_path
+        db_path = base / db_path
+
+    engine = section(EngineConfig, "engine")
+    if os.environ.get(STOCKFISH_ENV):
+        engine = replace(engine, path=os.environ[STOCKFISH_ENV])
 
     return Config(
-        player=PlayerConfig(**raw.get("player", {})),
-        imports=ImportConfig(**raw.get("import", {})),
-        engine=EngineConfig(**raw.get("engine", {})),
-        classification=ClassificationConfig(**raw.get("classification", {})),
-        phases=PhaseConfig(**raw.get("phases", {})),
+        player=section(PlayerConfig, "player"),
+        imports=section(ImportConfig, "import"),
+        engine=engine,
+        classification=section(ClassificationConfig, "classification"),
+        phases=section(PhaseConfig, "phases"),
         db_path=db_path,
-        review=ReviewConfig(**raw.get("review", {})),
-        analysis=AnalysisConfig(**raw.get("analysis", {})),
-        training=TrainingConfig(**raw.get("training", {})),
-        coach=CoachConfig(**raw.get("coach", {})),
-        backup=BackupConfig(**raw.get("backup", {})),
+        review=section(ReviewConfig, "review"),
+        analysis=section(AnalysisConfig, "analysis"),
+        training=section(TrainingConfig, "training"),
+        coach=section(CoachConfig, "coach"),
+        backup=section(BackupConfig, "backup"),
     )

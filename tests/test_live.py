@@ -1,4 +1,3 @@
-import shutil
 from dataclasses import replace
 
 import pytest
@@ -8,10 +7,8 @@ from chessreview.live import LiveEngine
 
 
 @pytest.fixture
-def live():
+def live(stockfish):
     base = load_config()
-    if not shutil.which(base.engine.path):
-        pytest.skip("Stockfish not installed")
     cfg = replace(base, review=replace(base.review, live_time=0.2),
                   analysis=replace(base.analysis, max_seconds=1, multipv=3))
     engine = LiveEngine(cfg)

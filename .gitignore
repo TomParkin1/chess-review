@@ -25,6 +25,7 @@ htmlcov/
 *.db-shm
 *.sqlite
 *.pgn
+!/samples/*.pgn
 !/tests/data/*.pgn
 *.csv.zst
 
