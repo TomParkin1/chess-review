@@ -49,7 +49,7 @@ You need **Python 3.14+** and **[Stockfish](https://stockfishchess.org/)** (see 
 ```sh
 git clone https://github.com/TomParkin1/chess-review.git
 cd chess-review
-python3 -m venv .venv
+python3 -m venv .venv           # needs python3 --version >= 3.14; otherwise name it, e.g. python3.14
 .venv/bin/pip install -e .
 
 # Try it on the five anonymised sample games: no chess.com account needed
