@@ -13,6 +13,11 @@ CONFIG_ENV = "CHESSREVIEW_CONFIG"      # path of the config file to use
 STOCKFISH_ENV = "STOCKFISH_PATH"       # overrides [engine] path
 
 
+# The [sections] of config.toml ("import" is ImportConfig, "database" only holds the path).
+SECTIONS = {"player", "import", "engine", "classification", "phases", "database", "review", "analysis",
+            "training", "coach", "backup"}
+
+
 class ConfigError(ValueError):
     """The config file is missing, isn't valid TOML or has a setting the app doesn't know."""
 
@@ -149,15 +154,29 @@ def load_config(path: Path | str | None = None) -> Config:
             raise ConfigError(f"{file} isn't valid TOML: {exc}") from None
         base = file.resolve().parent
 
-    db_path = Path(raw.get("database", {}).get("path", "data/chess.db"))
-    if not db_path.is_absolute():
-        db_path = base / db_path
+    unknown = set(raw) - SECTIONS
+    if unknown:
+        raise ConfigError(f"{file}: unknown section [{sorted(unknown)[0]}] (known: {', '.join(sorted(SECTIONS))})")
+
+    def table(name: str) -> dict:
+        value = raw.get(name, {})
+        if not isinstance(value, dict):
+            raise ConfigError(f"{file}: {name} must be a [{name}] section, not a single value")
+        return value
 
     def section(cls, name: str):
-        try:
-            return cls(**raw.get(name, {}))
-        except TypeError as exc:     # an unknown key
-            raise ConfigError(f"{file}: unknown setting in [{name}] ({exc})") from None
+        values = table(name)
+        unknown_keys = set(values) - set(cls.__dataclass_fields__)
+        if unknown_keys:
+            raise ConfigError(f"{file}: unknown setting {sorted(unknown_keys)[0]!r} in [{name}]")
+        return cls(**values)
+
+    db_value = table("database").get("path", "data/chess.db")
+    if not isinstance(db_value, str):
+        raise ConfigError(f"{file}: [database] path must be a string")
+    db_path = Path(db_value).expanduser()
+    if not db_path.is_absolute():
+        db_path = base / db_path
 
     engine = section(EngineConfig, "engine")
     if os.environ.get(STOCKFISH_ENV):

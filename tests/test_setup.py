@@ -43,7 +43,10 @@ def test_a_relative_database_path_is_relative_to_the_config_file(no_config):
 
 @pytest.mark.parametrize("text, message", [
     ("[engine\npath = 1", "isn't valid TOML"),
-    ("[engine]\nspeed = 3\n", r"unknown setting in \[engine\].*speed"),
+    ("[engine]\nspeed = 3\n", r"unknown setting 'speed' in \[engine\]"),
+    ("[enigne]\npath = 'x'\n", r"unknown section \[enigne\]"),
+    ("engine = 3\n", r"engine must be a \[engine\] section"),
+    ("[database]\npath = 3\n", r"\[database\] path must be a string"),
 ])
 def test_a_bad_config_file_names_the_problem(no_config, text, message):
     (no_config / "config.toml").write_text(text)
