@@ -31,8 +31,8 @@ dev = [
 [project.scripts]
 chessreview = "chessreview.__main__:main"
 
-[tool.setuptools]
-packages = ["chessreview"]
+[tool.setuptools.packages.find]
+include = ["chessreview*"]
 
 [tool.setuptools.package-data]
 chessreview = ["data/*", "templates/*", "static/*"]
