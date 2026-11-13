@@ -78,6 +78,10 @@ def cmd_import(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) 
     print(f"Duplicates:   {stats.duplicates}")
     for reason, n in sorted(stats.skipped.items()):
         print(f"Skipped:      {n} ({reason})")
+    for error in stats.errors:
+        print(f"Not read:     {error}", file=sys.stderr)
+    if stats.errors:
+        sys.exit(1)
 
 
 def _wdl_table(rows: list[sqlite3.Row], label: str) -> None:

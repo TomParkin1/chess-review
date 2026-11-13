@@ -135,3 +135,11 @@ def test_import_as_a_name_with_no_games_leaves_the_player_unset(no_config, monke
     assert "player is unchanged" in capsys.readouterr().out
     run(monkeypatch, "import", str(SAMPLES), "--as", "sample player")  # names match in any case
     assert "Imported:     5" in capsys.readouterr().out
+
+
+def test_import_reports_paths_it_cannot_read_and_exits_with_an_error(no_config, monkeypatch, capsys):
+    with pytest.raises(SystemExit) as exit_:
+        run(monkeypatch, "import", str(SAMPLES), str(no_config / "typo.pgn"), "--as", "Sample Player")
+    out, err = capsys.readouterr()
+    assert exit_.value.code == 1
+    assert "Imported:     5" in out and "typo.pgn: no such file or folder" in err
