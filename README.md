@@ -42,7 +42,8 @@ Everything runs on your own machine. Your games and progress live in a SQLite da
 ## Requirements
 
 - Python 3.14+ (the puzzle library uses the stdlib `compression.zstd`; developed on 3.15)
-- [Stockfish](https://stockfishchess.org/) (`brew install stockfish` on macOS)
+- [Stockfish](https://stockfishchess.org/): `brew install stockfish` (macOS), `sudo apt install stockfish`
+  (Debian/Ubuntu), or download it from stockfishchess.org (Windows)
 
 ## Setup
 
@@ -51,8 +52,19 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
 
-Check `config.toml`. If Stockfish isn't at `/opt/homebrew/bin/stockfish`, set `[engine] path`.
-The chess.com username under `[player]` is optional: the app asks for it on first run.
+Stockfish is found on your PATH or in the usual install folders. If yours is elsewhere, set
+`STOCKFISH_PATH`, `[engine] path` in `config.toml`, or pass `--stockfish PATH`.
+
+## Try it with the sample games
+
+```sh
+.venv/bin/chessreview import samples --as SamplePlayer   # five anonymised rapid games
+.venv/bin/chessreview analyse                             # about a minute
+.venv/bin/chessreview mistakes --limit 5
+.venv/bin/chessreview serve                               # then open http://localhost:8000
+```
+
+`--as` tells the app whose games these are, so no chess.com account is needed.
 
 ## Running
 
@@ -80,7 +92,8 @@ history to sync. (Port 5000 is taken by AirPlay Receiver on macOS, hence 8000.)
 
 ## Configuration
 
-`config.toml` holds every tunable setting: engine time and workers, classification thresholds, game
+The app reads `--config FILE`, else `$CHESSREVIEW_CONFIG`, else `config.toml` in the current folder; without
+one, every setting has its default (and the database goes in `./data/`). `config.toml` holds every tunable setting: engine time and workers, classification thresholds, game
 phases, training budgets, backup rotation and the database path. Changing the thresholds doesn't
 re-run the engine. Stored evaluations are re-classified automatically.
 
