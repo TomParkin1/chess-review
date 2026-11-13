@@ -30,6 +30,14 @@ jobs:
         run: ruff format --check .
       - name: Type-check (mypy)
         run: mypy
+      - name: Package (a wheel install has the whole app)
+        run: |
+          pip wheel --no-deps -w dist .
+          python -m venv "$RUNNER_TEMP/wheel-env"
+          "$RUNNER_TEMP/wheel-env/bin/pip" install dist/*.whl
+          cd "$RUNNER_TEMP"
+          wheel-env/bin/chessreview --help > /dev/null
+          wheel-env/bin/python -c "import chessreview.web, importlib.resources as r; assert r.files('chessreview').joinpath('templates/base.html').is_file()"
 
   test:
     # Linux and macOS run the engine tests against a real Stockfish; Windows runs everything else.
