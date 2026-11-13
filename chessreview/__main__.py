@@ -38,7 +38,14 @@ def cmd_sync(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) ->
         sys.exit("Set your chess.com username first (in the web app, or [player] username in config.toml).")
     last = db.get_meta(conn, chesscom.LAST_MONTH_KEY)
     print(f"Syncing chess.com games of {user} ({'since ' + last if last else 'first sync: ' + args.since})...")
-    result = chesscom.sync(conn, cfg, since=args.since, progress=lambda i, n, month: print(f"  {month} ({i + 1}/{n})"))
+    try:
+        result = chesscom.sync(
+            conn, cfg, since=args.since, progress=lambda i, n, month: print(f"  {month} ({i + 1}/{n})")
+        )
+    except LookupError:
+        sys.exit(f"chess.com has no player called {user!r}.")
+    except OSError as exc:  # offline, chess.com down, or a reply that isn't JSON (chesscom.Unavailable)
+        sys.exit(f"Couldn't reach chess.com ({exc}). Try again later.")
     s = result.stats
     print(f"Games seen: {s.games_seen}, new: {s.imported}, duplicates: {s.duplicates}")
     for reason, n in sorted(s.skipped.items()):
@@ -301,7 +308,15 @@ def cmd_puzzles(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace)
     from . import library
 
     progress = library.FetchProgress()
-    job = threading.Thread(target=library.fetch, args=(conn, progress), daemon=True)
+    failures: list[Exception] = []
+
+    def fetch() -> None:
+        try:
+            library.fetch(conn, progress)
+        except Exception as exc:  # reported below, in the main thread
+            failures.append(exc)
+
+    job = threading.Thread(target=fetch, daemon=True)
     print(f"Downloading {library.URL} (about 300 MB, streamed; only a sample is kept)...")
     job.start()
     while job.is_alive():
@@ -309,6 +324,8 @@ def cmd_puzzles(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace)
         if progress.bytes_total:
             pct = 100 * progress.bytes_read / progress.bytes_total
             print(f"\r{pct:5.1f}%  {progress.rows:,} puzzles read", end="", flush=True)
+    if failures:
+        sys.exit(f"\nCouldn't download the puzzle library ({failures[0]}). The library you had is unchanged.")
     print(f"\nKept {library.count(conn):,} puzzles. Your puzzle rating: {library.rating(conn)}.")
 
 

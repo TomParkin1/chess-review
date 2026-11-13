@@ -143,3 +143,28 @@ def test_import_reports_paths_it_cannot_read_and_exits_with_an_error(no_config, 
     out, err = capsys.readouterr()
     assert exit_.value.code == 1
     assert "Imported:     5" in out and "typo.pgn: no such file or folder" in err
+
+
+def test_sync_offline_says_so(no_config, monkeypatch):
+    import urllib.error
+
+    from chessreview import chesscom
+
+    def offline(request, timeout):
+        raise urllib.error.URLError("network is unreachable")
+
+    monkeypatch.setattr(chesscom.urllib.request, "urlopen", offline)
+    (no_config / "config.toml").write_text('[player]\nusername = "someone"\n')
+    with pytest.raises(SystemExit, match="Couldn't reach chess.com"):
+        run(monkeypatch, "sync")
+
+
+def test_a_failed_puzzle_download_says_so(no_config, monkeypatch):
+    from chessreview import library
+
+    def offline(conn, progress):
+        raise OSError("network is unreachable")
+
+    monkeypatch.setattr(library, "fetch", offline)
+    with pytest.raises(SystemExit, match="Couldn't download the puzzle library"):
+        run(monkeypatch, "puzzles")
