@@ -42,10 +42,10 @@ def cmd_sync(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) ->
         result = chesscom.sync(
             conn, cfg, since=args.since, progress=lambda i, n, month: print(f"  {month} ({i + 1}/{n})")
         )
-    except LookupError:
+    except chesscom.UserNotFound:
         sys.exit(f"chess.com has no player called {user!r}.")
     except OSError as exc:  # offline, chess.com down, or a reply that isn't JSON (chesscom.Unavailable)
-        sys.exit(f"Couldn't reach chess.com ({exc}). Try again later.")
+        sys.exit(f"Couldn't reach chess.com ({exc}). Months already fetched are kept; try again later.")
     s = result.stats
     print(f"Games seen: {s.games_seen}, new: {s.imported}, duplicates: {s.duplicates}")
     for reason, n in sorted(s.skipped.items()):

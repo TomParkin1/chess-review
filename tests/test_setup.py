@@ -168,3 +168,18 @@ def test_a_failed_puzzle_download_says_so(no_config, monkeypatch):
     monkeypatch.setattr(library, "fetch", offline)
     with pytest.raises(SystemExit, match="Couldn't download the puzzle library"):
         run(monkeypatch, "puzzles")
+
+
+def test_sync_for_an_unknown_player_says_so(no_config, monkeypatch):
+    import io
+    import urllib.error
+
+    from chessreview import chesscom
+
+    def not_found(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, io.BytesIO())
+
+    monkeypatch.setattr(chesscom.urllib.request, "urlopen", not_found)
+    (no_config / "config.toml").write_text('[player]\nusername = "nobody-here"\n')
+    with pytest.raises(SystemExit, match="no player called 'nobody-here'"):
+        run(monkeypatch, "sync")
