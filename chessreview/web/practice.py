@@ -12,8 +12,9 @@ from flask.typing import ResponseReturnValue
 
 from .. import coach, insights, level, srs
 from ..classify import Eval, refresh
+from ..engine import find_stockfish
 from ..threats import gain_of_move, threat_of
-from .common import REVIEW_RESULTS, config, conn, int_field, json_body, live_engine
+from .common import REVIEW_RESULTS, board_from_fen, config, conn, int_field, json_body, live_engine
 from .puzzles import STATUS_SQL, items_for, last_capture_square, query_mistakes, stored_analysis
 
 JUDGEMENT_ORDER = ["good", "inaccuracy", "mistake", "blunder"]
@@ -160,6 +161,8 @@ def judge_move() -> ResponseReturnValue:
     fen, uci = data.get("fen"), data.get("uci")
     if not (isinstance(fen, str) and isinstance(uci, str) and fen and uci):
         return jsonify(error="fen and uci are required"), 400
+    if not board_from_fen(fen).is_valid():  # Stockfish exits on impossible positions (no king, say)
+        return jsonify(error="not a legal position"), 400
     before = prev_capture = None
     c = conn()
     thresholds = level.current_thresholds(c, cfg)  # tries are judged at my level *now*
@@ -268,10 +271,9 @@ def analyse_stream() -> ResponseReturnValue:
     """Server-Sent Events with live multi-line analysis of `fen`."""
     live = live_engine()
     fen = request.args.get("fen", "")
-    try:
-        chess.Board(fen)
-    except ValueError:
-        return jsonify(error="invalid FEN"), 400
+    if not board_from_fen(fen).is_valid():
+        return jsonify(error="not a legal position"), 400
+    find_stockfish(config().engine.path)  # StockfishNotFound is a 503 now, not an empty stream later
 
     def events() -> Iterator[str]:
         for snapshot in live.stream(fen):
