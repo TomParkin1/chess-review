@@ -183,3 +183,11 @@ def test_sync_for_an_unknown_player_says_so(no_config, monkeypatch):
     (no_config / "config.toml").write_text('[player]\nusername = "nobody-here"\n')
     with pytest.raises(SystemExit, match="no player called 'nobody-here'"):
         run(monkeypatch, "sync")
+
+
+def test_the_suite_cannot_reach_the_network():
+    """conftest.no_network: a test that forgot to patch a fetch fails instead of calling chess.com."""
+    import urllib.request
+
+    with pytest.raises(OSError, match="network disabled in tests"):
+        urllib.request.urlopen("https://api.chess.com/pub/player/someone", timeout=5)

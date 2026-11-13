@@ -2,6 +2,7 @@
 
 import functools
 import os
+import socket
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -71,3 +72,16 @@ def no_tablebase_network(monkeypatch):
     tablebase.clear_cache()
     yield
     tablebase.clear_cache()
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """No test reaches the internet (chess.com, Lichess): one that needs a reply patches the fetch itself."""
+
+    def refuse(self, address):
+        if self.family == getattr(socket, "AF_UNIX", None):  # local sockets are fine (no AF_UNIX on Windows)
+            return original(self, address)
+        raise OSError(f"network disabled in tests (tried {address})")
+
+    original = socket.socket.connect
+    monkeypatch.setattr(socket.socket, "connect", refuse)
